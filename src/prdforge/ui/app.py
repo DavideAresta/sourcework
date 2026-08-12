@@ -508,11 +508,35 @@ def _slug(text: str) -> str:
     return "".join(c if c.isalnum() else "-" for c in text.lower()).strip("-")[:60] or "prd"
 
 
-def serve(port: int = PORT, host: str = "0.0.0.0", workspace: Path | None = None) -> None:  # noqa: S104
+DEFAULT_HOST = "127.0.0.1"
+"""Loopback, deliberately.
+
+This UI has no authentication, and two of its endpoints are worth more than the
+rest of the system put together: ``/api/settings`` rewrites ``.env`` - including
+provider keys and the Confluence token - and ``/api/runs`` hands back the full
+source text of everything ever ingested. On ``0.0.0.0`` that is offered to
+every machine on the network, with no password, to anyone who guesses the port.
+
+Binding wider is a real thing to want (a workstation under the desk, a
+container). It stays possible - ``--host``, or ``PRDFORGE_UI_HOST`` - but it is
+now something an operator chooses, having been told, rather than the default
+they inherit. Put it behind something that authenticates before you do.
+"""
+
+
+def serve(port: int = PORT, host: str = DEFAULT_HOST, workspace: Path | None = None) -> None:
     import uvicorn
 
     logging.basicConfig(
         level=settings().log_level,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        logging.getLogger(__name__).warning(
+            "The UI is bound to %s and has no authentication: anyone who can reach "
+            "port %d can read every ingested document and rewrite your API keys. "
+            "Put an authenticating proxy in front of it.",
+            host,
+            port,
+        )
     uvicorn.run(build_app(workspace), host=host, port=port, log_level=settings().log_level.lower())

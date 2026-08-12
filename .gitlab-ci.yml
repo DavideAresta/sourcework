@@ -1,0 +1,53 @@
+# Mirror of .github/workflows/ci.yml. Both exist because the project is
+# mirrored; whichever side a change lands on has to stay green.
+
+stages: [lint, test, licences]
+
+default:
+  image: python:3.12-slim
+  cache:
+    key:
+      files: [pyproject.toml]
+    paths: [.cache/pip]
+  before_script:
+    - pip install -q -e ".[ingest,dev]"
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+lint:
+  stage: lint
+  script:
+    - ruff check src tests
+
+test:
+  stage: test
+  parallel:
+    matrix:
+      - PY: ["3.11", "3.12", "3.13"]
+  image: python:$PY-slim
+  script:
+    # Stub mode comes from tests/conftest.py, so no API key, no network, no CLI.
+    - pytest -q
+    # Eight agents over real A2A JSON-RPC against a deterministic fake model:
+    # catches the wiring failures a unit test cannot see.
+    - python scripts/demo.py
+
+licences:
+  stage: licences
+  before_script:
+    - pip install -q -e ".[ingest]" pip-licenses
+  script:
+    # This project is MIT. A copyleft dependency arriving through a transitive
+    # bump would change what downstream users may do, and it should fail here
+    # rather than be discovered by a lawyer.
+    - pip-licenses --format=csv --with-system > licences.csv
+    - |
+      if grep -iE '(^|,)"?(GNU )?(A?GPL|SSPL)' licences.csv | grep -viE 'LGPL|MIT|BSD|Apache'; then
+        echo "A copyleft dependency entered the tree. See licences.csv."
+        exit 1
+      fi
+    - echo "No copyleft dependencies."
+  artifacts:
+    paths: [licences.csv]
+    expire_in: 30 days

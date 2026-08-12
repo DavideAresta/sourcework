@@ -5,6 +5,6 @@ protocol the CLI uses, and adds the things a browser needs and a protocol does
 not: persistence, live progress, file uploads and a place to change settings.
 """
 
-from prdforge.ui.app import PORT, build_app, serve
+from prdforge.ui.app import DEFAULT_HOST, PORT, build_app, serve
 
-__all__ = ["PORT", "build_app", "serve"]
+__all__ = ["DEFAULT_HOST", "PORT", "build_app", "serve"]

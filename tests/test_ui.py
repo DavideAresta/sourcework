@@ -176,6 +176,19 @@ def test_an_unset_switch_shows_the_default_it_actually_has(env_path: Path):
     assert fields["PRDFORGE_LLM__STUB"]["value"].lower() in ("false", "0", "")
 
 
+def test_the_ui_does_not_offer_itself_to_the_network_by_default():
+    """It has no authentication, `/api/settings` rewrites .env including provider
+    keys, and `/api/runs` returns the full text of every ingested document.
+    Binding wider has to be a decision someone makes, not one they inherit."""
+    import inspect
+
+    from prdforge.ui import DEFAULT_HOST
+    from prdforge.ui.app import serve
+
+    assert DEFAULT_HOST == "127.0.0.1"
+    assert inspect.signature(serve).parameters["host"].default == DEFAULT_HOST
+
+
 def test_unknown_keys_cannot_be_injected(env_path: Path):
     # Without the allow-list this endpoint writes arbitrary environment
     # variables into the file the whole system boots from.

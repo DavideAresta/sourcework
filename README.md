@@ -278,6 +278,90 @@ configured for it, or its own default.
 that can transport them. A text-only backend handed an image does not error, it
 answers about nothing.
 
+## Running it on your own hardware
+
+Every model can be local. The `litellm` backend speaks to any OpenAI-compatible
+server, so [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`
+is a configuration change, not a code change:
+
+```bash
+PRDFORGE_LLM__BACKEND=litellm
+PRDFORGE_LLM__API_BASE=http://127.0.0.1:8081/v1
+PRDFORGE_LLM__API_KEY=local
+PRDFORGE_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
+PRDFORGE_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
+PRDFORGE_LLM__TIMEOUT_S=1200                    # minutes per call, not seconds
+```
+
+Four things decide whether this works at all, and all four are the difference
+between a clean run and a mystifying one:
+
+**Enforce the schema, do not describe it.** `PRDFORGE_LLM__CONSTRAINED_JSON=1`
+(the default) sends the JSON Schema as `response_format`, so a server that
+grammar-constrains decoding — llama.cpp, vLLM, Ollama — makes malformed JSON
+*impossible* rather than unlikely. On a measured 15-call run this was the
+difference between zero retries and a small model spending its whole retry
+budget re-answering calls that had already been paid for.
+
+**Give it a real context window.** The analyst's prompt *and its answer* both
+grow with the evidence count. A server started at a 4k window silently truncates
+and returns something that parses fine and is wrong. Serve at 32k and lower the
+slice limits to match:
+
+```bash
+PRDFORGE_LLM__ANALYSIS_BATCH_CHARS=24000
+PRDFORGE_LLM__ANALYSIS_BATCH_ITEMS=30
+```
+
+**Stop hybrid models from thinking away their output budget.** A reasoning model
+at default effort will spend all 8k tokens in its scratchpad and return *empty
+content*, which the pipeline can only report as "the backend said nothing".
+`-rea off` on llama-server fixes it for most; harmony-format models (gpt-oss)
+ignore that flag and need `--chat-template-kwargs '{"reasoning_effort":"low"}'`
+instead.
+
+**Let the model fit.** `--fit` only adjusts arguments you did *not* set, so
+pinning `-ngl 99` on a model larger than your VRAM turns a slow run into an
+out-of-memory crash.
+
+### Several models, one endpoint
+
+`llama-server` serves one model per process, so per-role models need
+[llama-swap](https://github.com/mostlygeek/llama-swap) in front. The scripts
+handle the wiring:
+
+```bash
+export PRDFORGE_MODEL_DIRS=~/models:/srv/models   # where your GGUFs live
+scripts/llama-models.py list                      # what you have, and what fits
+scripts/llama-models.py scan                      # generate the serving config
+cp scripts/llama-swap.example.yaml scripts/llama-swap.yaml   # then edit its paths
+scripts/llama-swap.sh                             # serve them all on :8081
+```
+
+`scan` pairs vision projectors with their models, collapses split models to one
+entry, and asks for full GPU offload only where it demonstrably fits. Adding a
+model is dropping a file into a scanned directory and rescanning — llama-swap
+reloads by itself. To fetch one you do not have yet:
+
+```bash
+scripts/llama-models.py add unsloth/gemma-3-27b-it-GGUF:Q4_K_M
+```
+
+It downloads on first use (llama.cpp resumes and caches; set `HF_TOKEN` for a
+gated repo). Anything needing flags the scan cannot infer goes in
+`llama-swap.yaml`, which the generator then leaves alone.
+
+### A critic from another family
+
+`PRDFORGE_LLM__CRITIC_MODEL` exists so the adversarial pass can be a *different
+model* from the one that wrote the PRD. A critic trained alongside the writer
+finds the same phrasing natural and tends to confirm rather than challenge.
+Pointing it at another lineage is the cheapest way to make the review real —
+on the demo pack, a Qwen critic reviewing a Gemma-written PRD caught the writer
+turning a wireframe's sample data (an order number, product names, a `-15 min`
+countdown) into requirements. Left unset it follows the reasoning model, so
+nothing changes until you ask for it.
+
 ## Configuration
 
 All via env (`PRDFORGE_` prefix, `__` nesting) — see `.env.example`.
@@ -287,9 +371,10 @@ per backend because a model id from one backend is nonsense to another:
 
 ```bash
 # litellm — any LiteLLM provider: openai/…, azure/…, bedrock/…, vertex_ai/…, ollama/…
-PRDFORGE_LLM__REASONING_MODEL=anthropic/claude-opus-4-6      # analyst, writer, critic
+PRDFORGE_LLM__REASONING_MODEL=anthropic/claude-opus-4-6      # analyst, writer
 PRDFORGE_LLM__DEFAULT_MODEL=anthropic/claude-sonnet-4-5      # extraction
 PRDFORGE_LLM__VISION_MODEL=anthropic/claude-sonnet-4-5       # images
+PRDFORGE_LLM__CRITIC_MODEL=anthropic/claude-opus-4-6         # the adversarial review
 PRDFORGE_LLM__FAST_MODEL=anthropic/claude-haiku-4-5
 
 # per CLI backend
@@ -350,3 +435,20 @@ src/prdforge/
 ```
 
 See `ARCHITECTURE.md` for the design rationale and the message flow.
+
+## Security
+
+The UI has **no authentication** and its settings endpoint rewrites `.env`,
+provider keys included; the runs endpoint returns the full text of everything
+you have ingested. It binds `127.0.0.1` for that reason — bind wider only behind
+a proxy that authenticates. The agent mesh ships with a shared default secret
+and `ENFORCE=0`, which is fine on a laptop and wrong on a shared network. See
+[SECURITY.md](SECURITY.md).
+
+## Licence
+
+[MIT](LICENSE). Third-party components and the tools the local-model path drives
+are listed in [THIRD_PARTY.md](THIRD_PARTY.md); note that **model weights carry
+their own licences**, which this one does not cover.
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
