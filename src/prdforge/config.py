@@ -151,6 +151,24 @@ class LLMSettings(BaseModel):
     instead of dialling whatever MCP servers the developer happens to have.
     Unset means "use the developer's own", which always works."""
 
+    constrained_json: bool = True
+    """Ask the backend to *enforce* the JSON schema, not just describe it.
+
+    On an OpenAI-compatible server that grammar-constrains decoding (llama.cpp,
+    vLLM, Ollama) this makes malformed JSON impossible rather than unlikely,
+    which is what lets a small local model drive the pipeline: it never spends
+    :attr:`max_retries` re-answering a call it already paid for. Backends that
+    cannot enforce a schema ignore it, and the schema is in the prompt for them
+    regardless. Turn it off for a provider whose schema support is worse than
+    its prompt-following."""
+
+    litellm_retries: int = 2
+    """Retries LiteLLM makes inside a single call.
+
+    Lower it for a local server, where the usual failure is a timeout rather
+    than a blip: three attempts at a 20-minute ceiling is an hour spent
+    learning the same thing once."""
+
     max_retries: int = 3
     """Attempts to get schema-valid JSON out of a model that answered."""
 

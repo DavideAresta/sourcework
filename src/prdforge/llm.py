@@ -57,6 +57,18 @@ T = TypeVar("T", bound=BaseModel)
 
 _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
+_THINK_BLOCK = re.compile(
+    r"<(think|thinking|reasoning)>.*?</\1>|^.*?</(?:think|thinking|reasoning)>",
+    re.DOTALL | re.IGNORECASE,
+)
+"""A reasoning model's scratchpad, when the server leaves it in ``content``
+instead of splitting it into ``reasoning_content``.
+
+Stripped before the JSON hunt because that hunt is positional - first ``{`` to
+last ``}`` - and a model that reasons *about* the schema writes braces while it
+does so. The second alternative catches the common truncated case where the
+opening tag never arrives but the closing one does."""
+
 __all__ = ["LLM", "ImageInput", "LLMError", "register_stub"]
 
 
@@ -66,7 +78,7 @@ class LLMError(RuntimeError):
 
 def _extract_json(text: str) -> str:
     """Models like to wrap JSON in prose or fences. Dig it out."""
-    text = text.strip()
+    text = _THINK_BLOCK.sub("", text, count=1).strip()
     m = _JSON_BLOCK.search(text)
     if m:
         return m.group(1).strip()
@@ -122,7 +134,8 @@ class LLM:
         if self.cfg.active_backend == "stub":
             return _stub_structured(schema, system, user)
 
-        schema_json = json.dumps(schema.model_json_schema(), indent=2)
+        schema_dict = schema.model_json_schema()
+        schema_json = json.dumps(schema_dict, indent=2)
         sys_prompt = (
             f"{system}\n\n"
             "Respond with a single JSON object and nothing else. No prose, no "
@@ -130,13 +143,27 @@ class LLM:
             f"{schema_json}"
         )
 
+        # The prompt keeps the schema either way: a backend that cannot enforce
+        # one still has to be told what to write, and enforcement is not
+        # guidance - a grammar makes the *shape* inevitable, not the content
+        # correct.
+        enforced = schema_dict if self.cfg.constrained_json else None
+
         last_error: str | None = None
         for attempt in range(self.cfg.max_retries):
             prompt = user if last_error is None else (
                 f"{user}\n\nYour previous answer was rejected: {last_error}\n"
                 "Return corrected JSON only."
             )
-            raw = await self._call(sys_prompt, prompt, images or [], role or self.role, max_tokens)
+            raw = await self._call(
+                sys_prompt,
+                prompt,
+                images or [],
+                role or self.role,
+                max_tokens,
+                json_schema=enforced,
+                schema_name=schema.__name__,
+            )
             try:
                 return schema.model_validate_json(_extract_json(raw))
             except (ValidationError, json.JSONDecodeError, ValueError) as exc:
@@ -159,6 +186,9 @@ class LLM:
         images: list[ImageInput],
         role: str,
         max_tokens: int | None,
+        *,
+        json_schema: dict[str, Any] | None = None,
+        schema_name: str | None = None,
     ) -> str:
         chain = resolve_chain(self.cfg, needs_vision=bool(images))
         if not chain:
@@ -196,6 +226,8 @@ class LLM:
                 temperature=self.cfg.temperature,
                 timeout_s=self.cfg.timeout_for(backend_id),
                 effort=self.cfg.effort,
+                json_schema=json_schema,
+                schema_name=schema_name,
                 # None unless someone upstream asked to watch this run. Set, the
                 # backend narrates itself as it works; the agents in between
                 # never learn that the feature exists.

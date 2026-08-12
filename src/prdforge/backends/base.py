@@ -262,6 +262,21 @@ class BackendRequest:
     """Reasoning effort, in each backend's own vocabulary (``--effort`` for
     claude-code and copilot, ``--variant`` for opencode). None = model default."""
 
+    json_schema: dict[str, Any] | None = None
+    """JSON Schema the answer must satisfy, when the caller wants one.
+
+    Advisory: the schema is *already* in the system prompt for every backend, so
+    ignoring this field costs nothing and every CLI backend does. A backend that
+    can enforce it - grammar-constrained decoding on an OpenAI-compatible
+    server - turns "ask nicely and retry" into "cannot emit anything else",
+    which is the difference between a local 9B model being usable here and
+    burning all of :attr:`~prdforge.config.LLMSettings.max_retries` on JSON that
+    does not parse.
+    """
+
+    schema_name: str | None = None
+    """Name for :attr:`json_schema`, since the API shape requires one."""
+
     on_chunk: ON_CHUNK | None = None
     """When set, the backend streams the model's working as it arrives. Costs a
     little: claude-code needs a different output format for it, opencode needs

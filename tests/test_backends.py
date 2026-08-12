@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import base64
 import json
+from types import SimpleNamespace
 
+import pydantic
 import pytest
 
 from prdforge import usage as usage_module
@@ -714,3 +716,159 @@ async def test_a_huge_event_survives_the_streaming_reader(tmp_path):
     # ...and the non-streaming path, which was never affected, still agrees.
     plain = await process.run([sys.executable, str(emitter)])
     assert plain.stdout == result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Constrained decoding
+#
+# The schema is in the prompt for every backend. On an OpenAI-compatible server
+# it can also be *enforced*, and these tests pin the difference: what goes on
+# the wire, and what happens when the server will not take it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def litellm_api(monkeypatch):
+    """Replace ``litellm.acompletion``; record kwargs, replay a scripted answer."""
+    import litellm
+
+    calls: list[dict] = []
+    failures: list[Exception] = []
+
+    async def fake_acompletion(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(kwargs)
+        if failures:
+            raise failures.pop(0)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'),
+                                     finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
+        )
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    class Harness:
+        def __init__(self) -> None:
+            self.calls = calls
+
+        def fail_first(self, exc: Exception) -> None:
+            failures.append(exc)
+
+    return Harness()
+
+
+def _schema_request(**overrides):  # noqa: ANN003, ANN202
+    base_kwargs = {
+        "system": "s",
+        "user": "u",
+        "model": "openai/local",
+        "json_schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+        "schema_name": "Answer",
+    }
+    return BackendRequest(**{**base_kwargs, **overrides})
+
+
+async def test_a_schema_is_enforced_not_merely_described(litellm_api):
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    await LiteLLMBackend().generate(_schema_request())
+
+    sent = litellm_api.calls[0]["response_format"]
+    assert sent["type"] == "json_schema"
+    assert sent["json_schema"]["name"] == "Answer"
+    assert sent["json_schema"]["schema"]["properties"] == {"ok": {"type": "boolean"}}
+    # `strict` would make OpenAI reject every optional field the pipeline's
+    # models legitimately have, and llama.cpp/vLLM constrain without it.
+    assert "strict" not in sent["json_schema"]
+
+
+async def test_no_schema_means_no_response_format_at_all(litellm_api):
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    await LiteLLMBackend().generate(_schema_request(json_schema=None, schema_name=None))
+
+    assert "response_format" not in litellm_api.calls[0]
+
+
+async def test_a_server_that_cannot_compile_the_schema_still_answers(litellm_api):
+    """The prompt carries the schema too, so an unconstrained retry is a real
+    answer rather than a lost call."""
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    litellm_api.fail_first(ValueError("Invalid schema for response_format"))
+    result = await LiteLLMBackend().generate(_schema_request())
+
+    assert result.text == '{"ok": true}'
+    assert len(litellm_api.calls) == 2
+    assert "response_format" not in litellm_api.calls[1]
+
+
+async def test_an_unrelated_failure_does_not_get_a_second_chance(litellm_api):
+    """Retrying a quota error without the schema only spends the wait twice."""
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    litellm_api.fail_first(RuntimeError("rate limit exceeded"))
+    with pytest.raises(BackendQuotaError):
+        await LiteLLMBackend().generate(_schema_request())
+
+    assert len(litellm_api.calls) == 1
+
+
+async def test_litellm_internal_retries_are_configurable(litellm_api):
+    """Three attempts at a 20-minute local timeout is an hour of the same news."""
+    from prdforge.backends import build
+
+    cfg = LLMSettings(backend="litellm", default_model="openai/local", litellm_retries=0)
+    await build("litellm", cfg).generate(_schema_request())
+
+    assert litellm_api.calls[0]["num_retries"] == 0
+
+
+async def test_structured_hands_the_schema_to_the_backend(monkeypatch):
+    from prdforge import llm as llm_module
+
+    seen: list[BackendRequest] = []
+
+    class Recorder(base.LLMBackend):
+        id = "litellm"
+        supports_vision = True
+
+        async def generate(self, req):  # noqa: ANN001, ANN201
+            seen.append(req)
+            return base.BackendResult(text='{"value": 1}')
+
+    monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: Recorder())
+
+    class Answer(pydantic.BaseModel):
+        value: int
+
+    cfg = LLMSettings(backend="litellm", default_model="m")
+    assert (await llm_module.LLM(cfg=cfg).structured("s", "u", Answer)).value == 1
+
+    assert seen[0].schema_name == "Answer"
+    assert seen[0].json_schema["properties"] == {"value": {"title": "Value", "type": "integer"}}
+    # ...and the prompt still describes it, for backends that cannot enforce.
+    assert "JSON Schema" in seen[0].system
+
+    seen.clear()
+    off = LLMSettings(backend="litellm", default_model="m", constrained_json=False)
+    await llm_module.LLM(cfg=off).structured("s", "u", Answer)
+    assert seen[0].json_schema is None
+
+
+def test_a_reasoning_trace_never_reaches_the_json_parser():
+    """First-`{`-to-last-`}` is positional, and a model reasoning *about* a
+    schema writes braces while it does so."""
+    from prdforge.llm import _extract_json
+
+    trace = '<think>Maybe {"value": 99} fits?</think>\n{"value": 1}'
+    assert json.loads(_extract_json(trace)) == {"value": 1}
+
+    # The truncated case: the opening tag was never streamed, the closing one was.
+    cut = 'weighing {"value": 99}</think>{"value": 1}'
+    assert json.loads(_extract_json(cut)) == {"value": 1}
+
+    # A body that merely mentions the word is not a trace.
+    assert json.loads(_extract_json('{"value": 1, "note": "think about it"}')) == {
+        "value": 1, "note": "think about it"
+    }

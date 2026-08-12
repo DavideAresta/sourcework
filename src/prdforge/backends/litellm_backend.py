@@ -13,6 +13,7 @@ pointed at a gateway.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from prdforge.backends.base import (
@@ -30,13 +31,39 @@ from prdforge.backends.base import (
 logger = logging.getLogger(__name__)
 
 
+_SCHEMA_REFUSAL = re.compile(
+    r"response_format|json_schema|grammar|unsupported.*schema|invalid.*schema",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_schema_refusal(exc: Exception) -> bool:
+    """Did the server object to the schema, rather than to the request?
+
+    Narrow on purpose. Retrying a quota error or a timeout without the schema
+    only wastes the timeout a second time; retrying a schema the server could
+    not compile recovers the call.
+    """
+    return bool(_SCHEMA_REFUSAL.search(str(exc)))
+
+
 class LiteLLMBackend(LLMBackend):
     id = "litellm"
     supports_vision = True
 
-    def __init__(self, *, api_base: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        num_retries: int = 2,
+    ) -> None:
         self.api_base = api_base
         self.api_key = api_key
+        self.num_retries = num_retries
+        """LiteLLM's own retries, *inside* one call. Worth lowering for a local
+        server: there the usual failure is a timeout, and three attempts at a
+        20-minute ceiling is an hour spent discovering the same thing."""
 
     def available(self) -> bool:
         try:
@@ -82,20 +109,52 @@ class LiteLLMBackend(LLMBackend):
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,
             "timeout": request.timeout_s,
-            "num_retries": 2,
+            "num_retries": self.num_retries,
         }
         if self.api_base:
             kwargs["api_base"] = self.api_base
         if self.api_key:
             kwargs["api_key"] = self.api_key
 
+        # Constrained decoding, when the caller asked for a schema. `strict` is
+        # deliberately absent: llama.cpp, vLLM and Ollama build their grammar
+        # from the schema either way, while OpenAI's strict mode rejects the
+        # optional fields these Pydantic models legitimately have.
+        constrained = request.json_schema is not None
+        if constrained:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": request.schema_name or "response",
+                    "schema": request.json_schema,
+                },
+            }
+
         try:
             response = await litellm.acompletion(**kwargs)
         except Exception as exc:  # noqa: BLE001 - provider exceptions are unbounded
-            # A rate limit or an exhausted balance arrives as a provider
-            # exception here, and it is the one class of failure where another
-            # backend is the right answer rather than another retry.
-            raise classify(f"litellm call failed: {exc}", backend=self.id) from exc
+            # A server that cannot compile this particular schema rejects the
+            # request outright. The prompt still carries the schema in prose, so
+            # the unconstrained call is a real answer rather than a lost one -
+            # worth one retry before declaring the backend unable to help.
+            if constrained and _looks_like_schema_refusal(exc):
+                logger.warning(
+                    "%s rejected the response_format schema (%s) - retrying without it",
+                    request.model,
+                    str(exc)[:200],
+                )
+                kwargs.pop("response_format")
+                try:
+                    response = await litellm.acompletion(**kwargs)
+                except Exception as retry_exc:  # noqa: BLE001
+                    raise classify(
+                        f"litellm call failed: {retry_exc}", backend=self.id
+                    ) from retry_exc
+            else:
+                # A rate limit or an exhausted balance arrives as a provider
+                # exception here, and it is the one class of failure where another
+                # backend is the right answer rather than another retry.
+                raise classify(f"litellm call failed: {exc}", backend=self.id) from exc
 
         try:
             choice = response.choices[0]
