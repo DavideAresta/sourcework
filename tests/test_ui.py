@@ -158,6 +158,24 @@ def test_a_real_secret_change_is_written(env_path: Path):
     assert env_file.read(env_path)["ANTHROPIC_API_KEY"] == "sk-new"
 
 
+def test_an_unset_switch_shows_the_default_it_actually_has(env_path: Path):
+    """A checkbox has no "unset" position, and the form posts every control it
+    drew. Rendering an absent default-on setting unticked means opening the
+    settings page and pressing Save silently turns it off.
+    """
+    from prdforge.config import LLMSettings
+
+    fields = {f["key"]: f for f in env_file.describe(env_path)}
+
+    constrained = fields["PRDFORGE_LLM__CONSTRAINED_JSON"]
+    assert constrained["set"] is False, "the fixture must not set it, or this proves nothing"
+    assert LLMSettings().constrained_json is True, "guarding the premise, not the behaviour"
+    assert constrained["value"].lower() in ("true", "1"), "must render ticked"
+
+    # ...and a default-off switch still reads as off rather than as ticked.
+    assert fields["PRDFORGE_LLM__STUB"]["value"].lower() in ("false", "0", "")
+
+
 def test_unknown_keys_cannot_be_injected(env_path: Path):
     # Without the allow-list this endpoint writes arbitrary environment
     # variables into the file the whole system boots from.
