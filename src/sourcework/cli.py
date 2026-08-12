@@ -183,7 +183,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def cmd_app(args: argparse.Namespace) -> int:
     from sourcework import desktop
 
-    return desktop.run(port=args.port, open_browser=not args.no_browser, tray=not args.no_tray)
+    return desktop.run(port=args.port, open_browser=not args.no_browser)
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
@@ -279,7 +279,6 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("app", help="run as a desktop app (tray icon + browser)")
     p.add_argument("--port", type=int)
     p.add_argument("--no-browser", action="store_true", help="do not open a browser")
-    p.add_argument("--no-tray", action="store_true", help="no tray icon; wait for Ctrl-C")
     p.set_defaults(func=cmd_app)
 
     p = sub.add_parser("doctor", help="what is configured and what is reachable")

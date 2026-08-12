@@ -13,70 +13,54 @@ wrapper.
 
 ---
 
-## 1. The shell: why a tray app and not Electron
+## 1. The shell: no browser, and no tray either
 
-| | Ships | Buys you | Costs |
-|---|---|---|---|
-| **Tray launcher** (recommended) | ~300 MB Python, no UI runtime | Real app: double-click, icon, auto-start, clean quit | UI opens in the user's browser, not "in the app" |
-| Tauri window | + ~10 MB shell | A window with your name on it | A Rust toolchain and an IPC layer to maintain |
-| Electron | + ~150 MB Chromium | Nothing you do not already have | A second browser, a second update channel |
+| | Ships | Costs |
+|---|---|---|
+| **Launcher only** (implemented) | ~300 MB Python, no UI runtime at all | The interface is a browser tab, not a window with your name on it |
+| Tauri window | + ~10 MB shell | A Rust toolchain and an IPC layer to maintain |
+| Electron | + ~150 MB Chromium | A second browser, bundled to render HTML the first one already renders |
 
-Electron bundles a browser to render HTML the user's browser already renders.
-That trade makes sense when you need deep OS integration or an offline
-single-file experience; here it buys a title bar.
+Electron is the heaviest option and buys a title bar. The front end is plain ES
+modules with no build step, so there is nothing a renderer process would do that
+loopback does not.
 
-**Write the tray app in Python, as part of the same package.** `pystray` is
-cross-platform and needs Pillow, which is already a dependency (via
-`python-pptx`). That means one build artifact and one toolchain — the launcher
-is a new CLI entry point, `sourcework app`, and PyInstaller wraps it. A separate
-Electron or Tauri project would be a second repository's worth of build
-machinery for the same result.
+**A tray icon was in the first draft and was removed.** Its three jobs are
+covered without a GUI toolkit:
 
-If a window later proves necessary, Tauri points at `http://127.0.0.1:8080` and
-nothing in this document changes.
+| Tray job | What does it instead |
+|---|---|
+| "Is it running / let me back in" | The packaged app's own Dock or taskbar entry; and a second `sourcework app` re-opens the browser rather than starting a rival |
+| "My run finished while I was away" | A browser notification from the page - which names the document and says whether it worked, where an icon turning amber says only "something happened" |
+| "Quit" | A control in the interface, against an endpoint that exists only in app mode |
 
----
+The deciding argument was licensing. No permissive cross-platform tray library
+exists for Python: `pystray` is LGPL-3.0 and pulls LGPL `python-xlib` on Linux,
+and the permissive alternatives are per-platform (`rumps` for macOS,
+`infi.systray` for Windows) with nothing for Linux. Importing LGPL is fine;
+bundling it in a distributable binary is a relink obligation. For a project
+whose whole argument is that you can audit what it does, carrying that for a
+coloured dot was the wrong trade.
 
-## 2. What the tray app does
+## 2. What the launcher does
 
 ```
 sourcework app
-  ├─ acquire single-instance lock        (port 8080 already bound? focus, don't start twice)
-  ├─ resolve config dir                  (per-user, not cwd — see §4)
-  ├─ first run? → onboarding             (§3)
-  ├─ start the mesh (8 agents, threads)  ── existing serve_all
-  ├─ start the UI                        ── existing ui.serve
-  ├─ wait for /healthz, then open the browser
-  └─ tray icon + menu, until quit
+  ├─ already answering on 8080? → open the browser, exit            (no rival instance)
+  ├─ resolve config dir                                             (per-user, not cwd — §4)
+  ├─ start the mesh: 8 agents, threads, loopback only
+  ├─ start the UI, handing it a shutdown callback
+  ├─ wait for /healthz, print status, open the browser
+  └─ block until Quit or Ctrl-C
 ```
 
-**The menu is short on purpose:**
+The single-instance check asks `/healthz` for the service name rather than
+trying to bind: a second launch should raise what someone already has, and an
+unrelated process on 8080 must not be mistaken for us.
 
-```
-  ● SourceWork — ready
-  ─────────────────────────
-  Open SourceWork              ⏎   opens http://127.0.0.1:8080
-  Models: gemma-4-12b-it →         submenu, switches the active model
-  ─────────────────────────
-  Open workspace folder            where runs and uploads live
-  View log
-  ─────────────────────────
-  Restart engine
-  Quit SourceWork
-```
-
-**The icon carries state, and that matters here more than in most apps.** A run
-is minutes, not seconds, and the user will have tabbed away. Four states:
-idle, working (a run in flight), attention (a run finished or failed), error
-(no model reachable). "Attention" is what makes a long run tolerable — the
-alternative is the user re-checking a browser tab.
-
-**Quit must be honest.** A run in flight is a real question: cancel it, or wait?
-The store already marks interrupted runs as failed on next start
-(`reap_orphans`), so the worst case is recoverable — but the app should ask
-rather than discard minutes of GPU time silently.
-
----
+Status is printed once, flushed - a launcher's stdout is never a terminal, and
+buffered output means silence until exit. After that the interface carries its
+own state, which is where there is room to explain it.
 
 ## 3. Finding an inference server
 

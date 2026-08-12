@@ -33,15 +33,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The tray icon, kept out of the default install on purpose: pystray is LGPL-3.0
-# and everything else here is MIT/BSD/Apache. Importing it from an MIT project
-# is fine, but a *bundled* binary carries a relink obligation, and that should
-# be a choice someone makes when they package rather than one they inherit by
-# installing. `sourcework app` runs without it.
-app = [
-  "pystray>=0.19",
-  "pillow>=10.0",
-]
 ingest = [
   "pypdf>=4.2",
   "python-docx>=1.1",
