@@ -46,8 +46,18 @@ PERMISSIVE = re.compile(
 )
 
 
+UNREADABLE = {"", "UNKNOWN", "UNKNOWN LICENSE", "NONE", "OTHER/PROPRIETARY LICENSE"}
+
+
 def classify(licence: str) -> str:
-    """``blocked``, ``dual``, or ``ok``."""
+    """``blocked``, ``unverified``, ``dual``, or ``ok``.
+
+    "Unknown" is not "permissive". A package whose metadata states no licence is
+    precisely the one worth a human look, and passing it silently is how a gate
+    reports success for something nobody checked.
+    """
+    if licence.strip().upper() in UNREADABLE:
+        return "unverified"
     if not COPYLEFT.search(licence):
         return "ok"
     # A lesser licence matches COPYLEFT by name alone; only the *absence* of the
@@ -77,7 +87,7 @@ def main(argv: list[str]) -> int:
         print(f"{path} has no rows - pip-licenses did not produce a report.", file=sys.stderr)
         return 2
 
-    blocked, dual = [], []
+    blocked, dual, unverified = [], [], []
     for row in rows:
         licence = (row.get("License") or "").strip()
         name = f"{row.get('Name', '?')} {row.get('Version', '')}".strip()
@@ -86,19 +96,32 @@ def main(argv: list[str]) -> int:
             blocked.append((name, licence))
         elif verdict == "dual":
             dual.append((name, licence))
+        elif verdict == "unverified":
+            unverified.append((name, licence or "(no licence in metadata)"))
 
     for name, licence in dual:
         print(f"note: {name} is dual-licensed ({licence}) - taking the permissive option.")
 
-    if blocked:
-        print(f"\n{len(blocked)} copyleft dependenc(ies) in an MIT project:", file=sys.stderr)
-        for name, licence in blocked:
+    if unverified:
+        print(f"\n{len(unverified)} dependenc(ies) state no licence:", file=sys.stderr)
+        for name, licence in unverified:
             print(f"  {name:40} {licence}", file=sys.stderr)
         print(
-            "\nThis changes what downstream users may do. Replace the dependency, or "
-            "change this project's licence deliberately.",
+            "\nUnknown is not permissive. Check each by hand and add it to ALLOWLIST once "
+            "you have, or drop it.",
             file=sys.stderr,
         )
+
+    if blocked or unverified:
+        if blocked:
+            print(f"\n{len(blocked)} copyleft dependenc(ies) in an MIT project:", file=sys.stderr)
+            for name, licence in blocked:
+                print(f"  {name:40} {licence}", file=sys.stderr)
+            print(
+                "\nThis changes what downstream users may do. Replace the dependency, or "
+                "change this project's licence deliberately.",
+                file=sys.stderr,
+            )
         return 1
 
     print(f"{len(rows)} dependencies checked, no copyleft.")

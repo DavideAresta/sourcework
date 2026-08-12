@@ -1,6 +1,16 @@
 // Every call to the server, in one place.
 
+// Every write carries this header. It is not a secret and does not need to be:
+// its only job is to be something a cross-site form cannot set, which forces a
+// preflight the server does not answer. See the middleware in ui/app.py.
+const WRITE_HEADER = { 'X-PRDForge-UI': '1' };
+
 async function request(url, options = {}) {
+  const writes = ['POST', 'PUT', 'PATCH', 'DELETE'];
+  const method = (options.method || 'GET').toUpperCase();
+  if (writes.includes(method)) {
+    options = { ...options, headers: { ...(options.headers || {}), ...WRITE_HEADER } };
+  }
   const response = await fetch(url, options);
   if (!response.ok) {
     // FastAPI puts the useful part in `detail`; anything else is a raw body.

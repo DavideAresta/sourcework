@@ -332,7 +332,11 @@ class FakeManager:
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("prdforge.ui.app.RunManager", FakeManager)
-    with TestClient(build_app(tmp_path)) as test_client:
+    # The header every write carries, sent here for the same reason the browser
+    # sends it. That it is *required* is asserted in test_security.py; these
+    # tests are about what the endpoints do once a legitimate client reaches
+    # them, and repeating it on every call would only obscure that.
+    with TestClient(build_app(tmp_path), headers={"X-PRDForge-UI": "1"}) as test_client:
         yield test_client
 
 

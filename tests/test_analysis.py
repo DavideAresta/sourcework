@@ -211,8 +211,11 @@ class TestRefinement:
         # A refinement re-cites what the NEW material justifies and lets the
         # rest go. Without inheriting, every untouched requirement is demoted
         # to `derived` and the PRD starts calling sourced facts inferences.
+        # The statement has to match what the draft carries forward: inheritance
+        # is what "untouched" means, and a changed statement is a different
+        # claim (see test_a_rewritten_requirement_cannot_inherit_the_old_evidence).
         cited = Requirement(
-            id="REQ-001", title="Refund SLA", statement="Refund within 5 days.",
+            id="REQ-001", title="Refund SLA", statement="The system must Refund SLA.",
             source_refs=[SourceRef(evidence_id="ev-1", source_id="src-1", locator="p.4")],
         )
         prior = RequirementSet(requirements=[cited])

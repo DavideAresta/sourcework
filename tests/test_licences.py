@@ -83,3 +83,17 @@ def test_a_clean_report_passes_and_a_dirty_one_does_not(tmp_path: Path):
 
 def test_a_missing_report_does_not_pass(tmp_path: Path):
     assert check_licences.main(["x", str(tmp_path / "nope.csv")]) == 2
+
+
+@pytest.mark.parametrize("licence", ["UNKNOWN", "", "unknown license", "None"])
+def test_an_unstated_licence_is_not_a_pass(licence: str):
+    """Unknown is not permissive. A package stating no licence is exactly the
+    one worth a human look, and passing it silently makes the gate report
+    success for something nobody checked."""
+    assert check_licences.classify(licence) == "unverified"
+
+
+def test_a_report_full_of_unknowns_fails(tmp_path: Path):
+    report = tmp_path / "l.csv"
+    report.write_text("Name,Version,License\nmystery,1.0,UNKNOWN\n", encoding="utf-8")
+    assert check_licences.main(["x", str(report)]) == 1

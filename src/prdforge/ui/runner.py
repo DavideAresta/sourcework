@@ -22,6 +22,7 @@ from typing import Any
 
 from prdforge import stream
 from prdforge.a2a_common import AgentPool, RemoteAgentError
+from prdforge.config import settings
 from prdforge.models import PRDRequest
 from prdforge.ui.store import Run, RunStore, new_run_id, now_iso
 
@@ -35,10 +36,19 @@ SUBSCRIBER_BACKLOG = 256
 class RunManager:
     """Starts runs, keeps the live ones, fans their events out."""
 
-    def __init__(self, store: RunStore) -> None:
+    def __init__(self, store: RunStore, *, max_concurrent: int | None = None) -> None:
         self.store = store
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any] | None]]] = {}
+        # Runs wait their turn rather than all starting at once. A run is not
+        # CPU work the OS can fairly interleave - it is a queue of calls to one
+        # model server, and on a local one that means a single GPU holding a
+        # single model. Two concurrent runs wanting different models make it
+        # unload and reload between every call, so both finish later than if
+        # they had queued. Each in-flight run also holds the full text of every
+        # source it ingested.
+        limit = max_concurrent if max_concurrent is not None else settings().max_concurrent_runs
+        self._slots = asyncio.Semaphore(max(1, limit))
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -77,6 +87,13 @@ class RunManager:
     # -- execution ---------------------------------------------------------
 
     async def _execute(self, run_id: str, request: PRDRequest) -> None:
+        # Acquired before the row is read, so a queued run stays `queued` in the
+        # store and the UI can say so honestly instead of showing it as running
+        # while it waits.
+        async with self._slots:
+            await self._run_now(run_id, request)
+
+    async def _run_now(self, run_id: str, request: PRDRequest) -> None:
         run = await self.store.get(run_id)
         if run is None:  # deleted between start and schedule
             return

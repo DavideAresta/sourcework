@@ -573,6 +573,18 @@ def _render_evidence(evidence: list[Evidence], titles: dict[str, str]) -> str:
     return "\n\n".join(lines)
 
 
+def _same_claim(a: str, b: str) -> bool:
+    """Do two statements assert the same thing, allowing for reformatting?
+
+    Whitespace and case only. Deliberately not fuzzy: the question being asked
+    is "may this requirement keep citing evidence gathered for the previous
+    wording", and anything looser starts guessing that a rewrite was harmless.
+    A false negative costs a `derived` tag on a requirement somebody can re-cite;
+    a false positive puts a quote under a claim it does not support.
+    """
+    return " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
+
+
 def _materialise(
     draft: RequirementDraft,
     by_id: dict[str, Evidence],
@@ -593,6 +605,7 @@ def _materialise(
 
     known = {r.id for r in (prior.requirements if prior else [])}
     prior_refs = {r.id: r.source_refs for r in (prior.requirements if prior else [])}
+    prior_statements = {r.id: r.statement for r in (prior.requirements if prior else [])}
     taken: set[str] = set()
     next_free = max((_id_number(r) for r in known), default=0) + 1
 
@@ -635,9 +648,24 @@ def _materialise(
         # requirement to `derived`, and the PRD starts telling the reader that
         # facts it sourced last week were inferred. The prior version's
         # citations are still valid evidence, so inherit them.
+        #
+        # Only when the *statement* is unchanged. Inheriting by id alone cannot
+        # tell "untouched" from "rewritten and uncited", and the second case
+        # attaches evidence for the old claim to the new one: a requirement
+        # rewritten from "refund within 14 days" to "within 24 hours" would keep
+        # citing a quote that says 14, render as sourced rather than derived,
+        # and print the contradiction in the traceability matrix as though it
+        # were provenance. A claim nobody cited is `derived` - that is what the
+        # word is for.
         if not refs and prior_refs.get(req_id):
-            refs = list(prior_refs[req_id])
-            logger.debug("carried %d citation(s) forward onto %s", len(refs), req_id)
+            if _same_claim(item.statement, prior_statements.get(req_id, "")):
+                refs = list(prior_refs[req_id])
+                logger.debug("carried %d citation(s) forward onto %s", len(refs), req_id)
+            else:
+                logger.info(
+                    "%s was rewritten without citations - it becomes `derived` rather than "
+                    "inheriting evidence for the previous wording", req_id
+                )
 
         requirements.append(
             Requirement(
