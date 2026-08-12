@@ -158,6 +158,37 @@ def test_a_real_secret_change_is_written(env_path: Path):
     assert env_file.read(env_path)["ANTHROPIC_API_KEY"] == "sk-new"
 
 
+def test_a_local_endpoint_is_not_offered_hosted_models(tmp_path: Path):
+    """The profiles are hosted model ids. Pre-filling one into an empty cell on
+    a local install means Save writes a model the operator has no key for, and
+    the run fails on a value they never chose."""
+    path = tmp_path / ".env"
+    path.write_text(
+        "PRDFORGE_LLM__BACKEND=litellm\n"
+        "PRDFORGE_LLM__API_BASE=http://127.0.0.1:8081/v1\n",
+        encoding="utf-8",
+    )
+
+    fields = {f["key"]: f for f in env_file.describe(path)}
+    assert fields["PRDFORGE_LLM__REASONING_MODEL"]["suggested"] == ""
+    assert fields["PRDFORGE_LLM__CRITIC_MODEL"]["suggested"] == ""
+    # The CLI backends authenticate themselves; their suggestions still hold.
+    assert fields["PRDFORGE_LLM__CLAUDE_CODE_MODELS__REASONING"]["suggested"]
+
+    # ...and a profile button cannot write one either.
+    profiles = env_file.profiles_for(path)
+    assert not any(k.startswith("PRDFORGE_LLM__REASONING_MODEL")
+                   for p in profiles.values() for k in p["models"])
+    assert any("CLAUDE_CODE" in k for p in profiles.values() for k in p["models"])
+
+
+def test_a_hosted_install_still_gets_its_suggestions(env_path: Path):
+    """The fix must not cost the common case its presets."""
+    fields = {f["key"]: f for f in env_file.describe(env_path)}
+    assert fields["PRDFORGE_LLM__REASONING_MODEL"]["suggested"].startswith("anthropic/")
+    assert env_file.profiles_for(env_path) == env_file.PROFILES
+
+
 def test_an_unset_switch_shows_the_default_it_actually_has(env_path: Path):
     """A checkbox has no "unset" position, and the form posts every control it
     drew. Rendering an absent default-on setting unticked means opening the

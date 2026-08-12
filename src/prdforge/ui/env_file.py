@@ -287,6 +287,68 @@ def _display_value(field: Field, current: dict[str, str]) -> str:
     return current.get(field.key, "")
 
 
+def _points_at_a_private_endpoint(current: dict[str, str]) -> bool:
+    """Is ``litellm`` aimed at something other than a public provider?
+
+    ``api_base`` is the tell. Set, the endpoint is a local server or a gateway,
+    and it serves whatever it serves - which is never ``anthropic/claude-…``.
+    """
+    # Judged only by the file being described, and deliberately not by
+    # `os.environ` or `settings()`. Importing litellm calls `load_dotenv()`,
+    # which pours the *process's own* .env into the environment - so consulting
+    # it would make the suggestions for one file depend on whichever .env the
+    # server happened to boot from, and on whether a backend had been imported
+    # yet. A page that edits a file should answer for that file.
+    #
+    # The cost is a miss when API_BASE is set as a true environment variable and
+    # appears in no .env at all: that install still sees hosted suggestions. A
+    # stale suggestion is a far smaller problem than a page whose behaviour
+    # depends on an import side effect.
+    return bool(current.get("PRDFORGE_LLM__API_BASE"))
+
+
+def _suggestion(field: Field, current: dict[str, str]) -> str:
+    """The model id to pre-fill an empty cell with, if any.
+
+    The profiles are lists of hosted model ids, which is right for the common
+    case and actively wrong for a local install: pre-filling
+    ``anthropic/claude-opus-4-6`` into an empty cell means Save writes a model
+    the operator has no key for, and the run fails on a value they never chose.
+    A cell that stays empty and offers the endpoint's real models from the
+    picker is the honest alternative.
+
+    Only ``litellm`` is affected - the CLI backends authenticate themselves and
+    their suggestions are as valid as they ever were.
+    """
+    if field.backend == "litellm" and _points_at_a_private_endpoint(current):
+        return ""
+    return PROFILES[DEFAULT_PROFILE]["models"].get(field.key, "")
+
+
+def profiles_for(path: Path) -> dict[str, dict[str, Any]]:
+    """:data:`PROFILES`, minus what would not work on this install.
+
+    A profile is applied to every backend at once, on purpose - the failover
+    target is exactly the one nobody remembers to configure. But when
+    ``litellm`` points at a private endpoint, its three hosted ids are the one
+    part of that sweep that cannot work, and writing them is worse than leaving
+    those cells alone. The UI needs no special case: it already skips a cell a
+    profile has nothing to say about.
+    """
+    if not _points_at_a_private_endpoint(read(path)):
+        return PROFILES
+
+    litellm_keys = {f.key for f in FIELDS if f.backend == "litellm"}
+    return {
+        name: {
+            **profile,
+            "models": {k: v for k, v in profile["models"].items() if k not in litellm_keys},
+            "detail": profile["detail"] + " Leaves your local endpoint's models alone.",
+        }
+        for name, profile in PROFILES.items()
+    }
+
+
 def describe(path: Path) -> list[dict[str, Any]]:
     """The settings form: every allowed field, with its current value masked."""
     current = read(path)
@@ -299,7 +361,7 @@ def describe(path: Path) -> list[dict[str, Any]]:
             "options": list(f.options),
             "help": f.help,
             "placeholder": f.placeholder or _builtin_default(f.key),
-            "suggested": PROFILES[DEFAULT_PROFILE]["models"].get(f.key, ""),
+            "suggested": _suggestion(f, current),
             "restart": f.restart,
             "backend": f.backend,
             "role": f.role,

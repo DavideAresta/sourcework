@@ -422,7 +422,7 @@ def build_app(workspace: Path | None = None) -> FastAPI:
         return {
             "path": str(_env_path()),
             "fields": env_file.describe(_env_path()),
-            "profiles": env_file.PROFILES,
+            "profiles": env_file.profiles_for(_env_path()),
             "default_profile": env_file.DEFAULT_PROFILE,
         }
 
