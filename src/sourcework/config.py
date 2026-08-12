@@ -15,6 +15,8 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from sourcework import paths
+
 ROLES = ("default", "reasoning", "vision", "fast", "critic")
 
 BACKEND_IDS = ("litellm", "claude-code", "opencode-cli", "copilot-cli")
@@ -399,10 +401,14 @@ def effective_llm() -> LLMSettings:
 
 
 class Settings(BaseSettings):
+    # `env_file` is resolved rather than hardcoded: a packaged application is
+    # launched with a working directory of `/`, where a relative ".env" is
+    # neither found nor writable. `paths` returns the checkout's file when there
+    # is a checkout and the platform's per-user location otherwise.
     model_config = SettingsConfigDict(
         env_prefix="SOURCEWORK_",
         env_nested_delimiter="__",
-        env_file=".env",
+        env_file=str(paths.env_file()),
         extra="ignore",
     )
 
@@ -420,12 +426,12 @@ class Settings(BaseSettings):
     later than if they had queued. Raise it when the backend is a hosted API
     that parallelises on its own side."""
 
-    ui_workspace: str = "workspace"
+    ui_workspace: str = Field(default_factory=lambda: str(paths.workspace()))
     """Where the UI keeps run history and uploads. Must be a directory the
     ingestion agents can also read - in compose that is the mounted
-    ``./workspace``, which is why it defaults to the same place."""
+    ``./workspace``, which is why a checkout resolves to the same place."""
 
-    env_file: str = ".env"
+    env_file: str = Field(default_factory=lambda: str(paths.env_file()))
     """The file the settings page edits. Explicit because the UI writes to it,
     and writing to a path you inferred is how you overwrite the wrong one."""
 

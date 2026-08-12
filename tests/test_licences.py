@@ -40,13 +40,8 @@ def test_copyleft_is_blocked(licence: str):
     "Apache-2.0",
     "ISC",
     "Python Software Foundation License",
-    # Lesser licences are linkable from an MIT project and their names contain
-    # the very strings the blocklist looks for.
-    "LGPL-3.0",
-    "GNU Lesser General Public License v2 (LGPLv2)",
-    "GNU Library or Lesser General Public License (LGPL)",
 ])
-def test_permissive_and_lesser_pass(licence: str):
+def test_permissive_passes(licence: str):
     assert check_licences.classify(licence) == "ok", licence
 
 
@@ -97,3 +92,15 @@ def test_a_report_full_of_unknowns_fails(tmp_path: Path):
     report = tmp_path / "l.csv"
     report.write_text("Name,Version,License\nmystery,1.0,UNKNOWN\n", encoding="utf-8")
     assert check_licences.main(["x", str(report)]) == 1
+
+
+@pytest.mark.parametrize("licence", [
+    "LGPL-3.0", "LGPLv3", "GNU Lesser General Public License v3",
+    "GNU Lesser General Public License v3 (LGPLv3)",   # what pip-licenses prints
+    "GNU Library or Lesser General Public License (LGPL)",
+])
+def test_a_lesser_licence_passes_but_is_named(licence: str):
+    """pystray is LGPL and this project ships a desktop build. Linking is fine;
+    bundling carries a relink obligation, and a gate that stays silent about it
+    is how that obligation gets discovered by someone else."""
+    assert check_licences.classify(licence) == "lesser"
