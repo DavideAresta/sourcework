@@ -269,6 +269,24 @@ def _builtin_default(key: str) -> str:
     return "" if default is None or isinstance(default, (list, dict)) else str(default)
 
 
+def _display_value(field: Field, current: dict[str, str]) -> str:
+    """What the control should show for ``field``.
+
+    A checkbox has no "unset" position, so an absent boolean has to render as
+    something - and rendering it unticked is a lie whenever the code default is
+    true. The form posts every control it drew, so that lie is written back to
+    .env the first time anyone saves the page: opening settings and pressing
+    Save would silently turn the setting off. Text inputs do not have this
+    problem because empty means unset, and the default is already shown as the
+    placeholder.
+    """
+    if field.secret:
+        return MASK if current.get(field.key) else ""
+    if field.kind == "bool" and not current.get(field.key):
+        return _builtin_default(field.key)
+    return current.get(field.key, "")
+
+
 def describe(path: Path) -> list[dict[str, Any]]:
     """The settings form: every allowed field, with its current value masked."""
     current = read(path)
@@ -285,7 +303,7 @@ def describe(path: Path) -> list[dict[str, Any]]:
             "restart": f.restart,
             "backend": f.backend,
             "role": f.role,
-            "value": MASK if (f.secret and current.get(f.key)) else current.get(f.key, ""),
+            "value": _display_value(f, current),
             "set": bool(current.get(f.key)),
         }
         for f in FIELDS

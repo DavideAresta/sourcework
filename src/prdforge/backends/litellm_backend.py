@@ -72,6 +72,43 @@ class LiteLLMBackend(LLMBackend):
             return False
         return True
 
+    def list_models(self) -> list[str]:
+        """What the configured endpoint says it serves.
+
+        Only asked of an explicit ``api_base``: that is a local server or a
+        gateway, where the answer is a handful of ids nobody can guess and the
+        round trip is a millisecond away. Against a hosted provider the same
+        call returns hundreds of ids the account may not even be entitled to,
+        so there the picker stays free text.
+
+        Best-effort by contract - the model list is a convenience in the UI, and
+        a settings page must still render when the model server is down.
+        """
+        if not self.api_base:
+            return []
+
+        import httpx
+
+        url = self.api_base.rstrip("/") + "/models"
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            response = httpx.get(url, headers=headers, timeout=2.0)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:  # noqa: BLE001 - an unreachable server is not an error here
+            logger.debug("could not list models at %s: %s", url, exc)
+            return []
+
+        served = [
+            str(entry["id"])
+            for entry in (payload.get("data") or [])
+            if isinstance(entry, dict) and entry.get("id")
+        ]
+        # `openai/` is what routes LiteLLM at api_base instead of at OpenAI, so
+        # an id copied straight out of this list has to carry it - otherwise the
+        # picker hands you a value that fails the moment you save it.
+        return sorted(f"openai/{name}" for name in served)
+
     async def generate(self, request: BackendRequest) -> BackendResult:
         try:
             import litellm  # imported lazily: keeps agent start-up fast

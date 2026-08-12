@@ -14,7 +14,7 @@
 // `opencode/claude-opus-4-6` reasons well, and that an unset opencode model
 // fails outright — belongs in the app rather than in your memory.
 
-import { el, clear, toast } from './dom.js';
+import { el, clear, mount, toast } from './dom.js';
 import { api } from './api.js';
 import { attachModelPicker } from './combo.js';
 
@@ -115,6 +115,14 @@ function plainGrid(fields) {
 function modelSection(fields, profiles) {
   const backends = [...new Set(fields.map((f) => f.backend))];
 
+  // Only the roles the server actually sent. A browser holding a newer bundle
+  // than the process it is talking to - exactly what a restart-less deploy or a
+  // cached tab produces - would otherwise dereference a cell that does not
+  // exist, and one throw in here takes down every section below it: Models,
+  // Limits, Credentials and Confluence all vanish over one missing input.
+  const served = new Set(fields.map((f) => f.role));
+  const roles = ROLES.filter((role) => served.has(role));
+
   // Built once and re-parented rather than re-rendered, so switching the active
   // backend cannot silently discard something half-typed.
   const cells = new Map();
@@ -134,7 +142,9 @@ function modelSection(fields, profiles) {
     const active = activeBackend(backends);
 
     clear(featured);
-    featured.append(
+    // `mount`, not native append: the last child is absent for every backend
+    // but opencode, and `.append(null)` renders the literal text "null".
+    mount(featured,
       el('div', { class: 'row', style: 'gap:8px' },
         el('span', { class: 'mono', style: 'font-size:15px' }, active),
         el('span', { class: 'pill ok' }, 'active'),
@@ -142,7 +152,7 @@ function modelSection(fields, profiles) {
       el('div', { class: 'small muted', style: 'margin:2px 0 14px' },
         'Everything runs here unless a run chooses otherwise.'),
       el('div', { class: 'grid4' },
-        ...ROLES.map((role) => {
+        ...roles.map((role) => {
           const cell = cells.get(`${active} ${role}`);
           return el('div', {},
             el('label', { title: cell.field.key }, ROLE_LABEL[role] ?? role),
@@ -164,7 +174,7 @@ function modelSection(fields, profiles) {
         el('div', { class: 'other-backend' },
           el('div', { class: 'mono small', style: 'margin-bottom:6px' }, backend),
           el('div', { class: 'grid4' },
-            ...ROLES.map((role) => {
+            ...roles.map((role) => {
               const cell = cells.get(`${backend} ${role}`);
               return el('div', {},
                 el('label', { class: 'small', title: cell.field.key }, ROLE_LABEL[role] ?? role),

@@ -905,3 +905,55 @@ def test_an_unset_critic_reviews_at_the_reasoning_model_not_the_cheap_one():
         )
     })
     assert cli.model_for("critic") == "opus"
+
+
+def test_a_local_endpoint_offers_the_models_it_actually_serves(monkeypatch):
+    import httpx
+
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    seen: dict = {}
+
+    def fake_get(url, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        seen["url"] = url
+        seen["headers"] = kwargs.get("headers")
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"data": [{"id": "qwen3.5-9b"}, {"id": "gemma-4-12b"}]},
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    models = LiteLLMBackend(api_base="http://127.0.0.1:8081/v1", api_key="local").list_models()
+
+    assert seen["url"] == "http://127.0.0.1:8081/v1/models"
+    assert seen["headers"] == {"Authorization": "Bearer local"}
+    # Prefixed, because a bare id copied out of this picker routes at OpenAI
+    # rather than at api_base and fails the moment it is saved.
+    assert models == ["openai/gemma-4-12b", "openai/qwen3.5-9b"]
+
+
+def test_a_hosted_provider_is_never_asked_for_its_catalogue(monkeypatch):
+    """Hundreds of ids the account may not be entitled to, and a round trip to
+    someone else's server every time the settings page opens."""
+    import httpx
+
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    def explode(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise AssertionError("no network call without an explicit api_base")
+
+    monkeypatch.setattr(httpx, "get", explode)
+    assert LiteLLMBackend().list_models() == []
+
+
+def test_the_settings_page_still_renders_when_the_model_server_is_down(monkeypatch):
+    import httpx
+
+    from prdforge.backends.litellm_backend import LiteLLMBackend
+
+    def refuse(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "get", refuse)
+    assert LiteLLMBackend(api_base="http://127.0.0.1:8081/v1").list_models() == []
