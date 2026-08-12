@@ -506,6 +506,19 @@ patched. Markdown is rendered by a ~100-line parser covering exactly the
 constructs the writer emits, rather than vendoring 50KB for constructs the
 document never uses.
 
+There is exactly one vendored dependency, and it is worth saying why it did not
+get the same treatment. `js/vendor/autocomplete.js` (autocompleter 10.0.0, MIT,
+1KB gzipped, no dependencies of its own) replaced `<datalist>` for model ids.
+The datalist was the right first move — one attribute, no code — and the wrong
+final one: the browser renders it as an unstyleable system menu that reads as a
+different application sitting on top of the form. Hand-writing the replacement
+is where the markdown analogy breaks down, because a combobox is not markup, it
+is keyboard semantics: arrow keys with wrap-around, scroll-into-view,
+blur-before-click, Escape, IME composition. Each is a small bug that only
+appears on someone else's keyboard. Vendored rather than CDN-loaded so the UI
+still works with no internet, and committed verbatim with its licence header,
+because with no lockfile the file itself is the only record of what it is.
+
 ## 10. Deployment
 
 Eight containers on one compose network, addressing each other by service name

@@ -455,3 +455,59 @@ input.suggested {
 @media (max-width: 700px) {
   .profiles, .grid3 { grid-template-columns: 1fr; }
 }
+
+/* -- model picker ----------------------------------------------------------
+   The dropdown a `<datalist>` would not let us style. Deliberately the same
+   hairline-and-flat-surface vocabulary as the cards it opens over, so it reads
+   as part of the form rather than as the operating system's opinion of one.
+
+   `.combo` is positioned by the library (absolute, in document coordinates), so
+   width and offset come from it — everything here is presentation only. */
+
+.combo {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
+  overflow-y: auto;
+  max-height: 260px;
+  z-index: 60;
+  padding: 4px;
+}
+
+.combo > div {
+  padding: 6px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+/* `.selected` is the library's own class for the keyboard cursor, so arrow keys
+   and the mouse land on exactly the same highlight. */
+.combo > div.selected,
+.combo > div:hover {
+  background: var(--panel-2);
+}
+
+.combo > div.group {
+  font-family: var(--sans);
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.combo-item { display: flex; align-items: center; gap: 8px; }
+.combo-item b { color: var(--accent); font-weight: 600; }
+
+.combo-current {
+  margin-left: auto;
+  font-family: var(--sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 5px;
+}

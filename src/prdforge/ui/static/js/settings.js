@@ -16,6 +16,7 @@
 
 import { el, clear, toast } from './dom.js';
 import { api } from './api.js';
+import { attachModelPicker } from './combo.js';
 
 const form = document.getElementById('form');
 const backendsBox = document.getElementById('backends');
@@ -225,6 +226,8 @@ function profileRow(profiles, cells) {
 // a curated list goes stale and the backends move faster than we do — but
 // typing `opencode/claude-sonnet-4-5` from memory is how you get a typo that
 // only surfaces nine minutes into a run.
+let pickers = [];
+
 async function suggestModels() {
   let data;
   try {
@@ -232,16 +235,12 @@ async function suggestModels() {
   } catch {
     return;
   }
-  for (const stale of document.querySelectorAll('datalist[data-models]')) stale.remove();
+  for (const picker of pickers) picker.destroy();
+  pickers = [];
   for (const backend of data.backends ?? []) {
-    const models = backend.models ?? [];
-    if (!models.length) continue;
-    const id = `models-${backend.id}`;
-    const list = el('datalist', { id, dataset: { models: '' } },
-      ...models.map((m) => el('option', { value: m })));
-    document.body.append(list);
     for (const input of document.querySelectorAll(`input[data-backend="${backend.id}"]`)) {
-      input.setAttribute('list', id);
+      const picker = attachModelPicker(input, backend.models ?? []);
+      if (picker) pickers.push(picker);
     }
   }
 }

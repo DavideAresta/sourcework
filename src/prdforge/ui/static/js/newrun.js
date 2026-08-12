@@ -8,6 +8,7 @@
 
 import { el, clear, bytes, toast } from './dom.js';
 import { api } from './api.js';
+import { attachModelPicker } from './combo.js';
 
 const TEMPLATES = ['standard', 'lean', 'technical', 'discovery'];
 const ROLES = [
@@ -81,9 +82,9 @@ export function newRunView(onStarted) {
   const modelRow = el('div', { class: 'grid3' });
 
   for (const [role, label] of ROLES) {
-    const input = el('input', { type: 'text', placeholder: 'backend default', list: `models-${role}` });
+    const input = el('input', { type: 'text', placeholder: 'backend default' });
     modelInputs[role] = input;
-    modelRow.append(el('div', {}, el('label', {}, label), input, el('datalist', { id: `models-${role}` })));
+    modelRow.append(el('div', {}, el('label', {}, label), input));
   }
 
   const backendHint = el('div', { class: 'small muted' });
@@ -103,17 +104,17 @@ export function newRunView(onStarted) {
     backendHint.textContent = 'Could not read backend availability.';
   });
 
+  let pickers = [];
+
   function describeBackend() {
     const chosen = backend.value;
     const info = catalogue[chosen];
     // Offer that backend's models as suggestions; the field stays free text
     // because the CLIs accept ids that no listing knows about.
-    for (const [role] of ROLES) {
-      const list = document.getElementById(`models-${role}`);
-      if (!list) continue;
-      clear(list);
-      for (const model of (info?.models ?? [])) list.append(el('option', { value: model }));
-    }
+    for (const picker of pickers) picker.destroy();
+    pickers = ROLES
+      .map(([role]) => attachModelPicker(modelInputs[role], info?.models ?? []))
+      .filter(Boolean);
     backendHint.textContent = !chosen
       ? 'Uses whatever the mesh was started with.'
       : info?.vision === false

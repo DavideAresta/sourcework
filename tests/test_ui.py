@@ -812,3 +812,38 @@ def test_a_suggestion_never_masquerades_as_a_saved_value(env_path: Path):
     assert cell["value"] == ""
     assert cell["set"] is False
     assert cell["suggested"]
+
+
+def test_the_vendored_picker_is_present_and_attributed():
+    """The front end has no build step, so a dependency is a file in the tree.
+
+    That is a deliberate trade, and it comes with an obligation: the file says
+    where it came from, which version, and under what licence, because nothing
+    else in this repo records it.
+    """
+    from prdforge.ui.app import STATIC
+
+    vendored = STATIC / "js" / "vendor" / "autocomplete.js"
+    assert vendored.is_file()
+    header = vendored.read_text(encoding="utf-8")[:900]
+    assert "autocompleter 10.0.0" in header
+    assert "MIT" in header
+    assert "github.com/denis-taran/autocomplete" in header
+
+
+def test_no_datalist_is_used_in_the_front_end():
+    """`<datalist>` renders as an unstyleable system menu.
+
+    Matching on *use* rather than the word: the note in combo.js explaining why
+    it was replaced is the reason this rule exists, and a test that forbids
+    saying so would delete its own justification.
+    """
+    from prdforge.ui.app import STATIC
+
+    uses = ("el('datalist'", 'el("datalist"', "querySelector('datalist", "setAttribute('list'")
+    offenders = [
+        path.name
+        for path in (STATIC / "js").glob("*.js")
+        if any(use in path.read_text(encoding="utf-8") for use in uses)
+    ]
+    assert not offenders, f"datalist is back in {offenders}"
