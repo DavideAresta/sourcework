@@ -17,9 +17,11 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 ROLES = ("default", "reasoning", "vision", "fast", "critic")
 
-BACKEND_IDS = ("litellm", "claude-code", "opencode-cli", "copilot-cli")
+BACKEND_IDS = (
+    "litellm", "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli",
+)
 """Every way of reaching a model. ``litellm`` is an HTTPS call against a hosted
-API and needs credentials; the other three drive a coding CLI that carries its
+API and needs credentials; the other five drive a coding CLI that carries its
 own authentication."""
 
 
@@ -38,6 +40,8 @@ _MODEL_FIELDS = {
     "claude-code": "claude_code_models",
     "opencode-cli": "opencode_models",
     "copilot-cli": "copilot_models",
+    "codex-cli": "codex_models",
+    "agy-cli": "agy_models",
 }
 
 
@@ -99,6 +103,8 @@ class LLMSettings(BaseModel):
     claude_code_models: BackendModels = Field(default_factory=BackendModels)
     opencode_models: BackendModels = Field(default_factory=BackendModels)
     copilot_models: BackendModels = Field(default_factory=BackendModels)
+    codex_models: BackendModels = Field(default_factory=BackendModels)
+    agy_models: BackendModels = Field(default_factory=BackendModels)
 
     # LiteLLM role models. Kept as top-level fields rather than folded into
     # backend_models because they predate multi-backend support and are what
@@ -168,6 +174,12 @@ class LLMSettings(BaseModel):
     holding only the credentials gives generation calls a clean, fast session
     instead of dialling whatever MCP servers the developer happens to have.
     Unset means "use the developer's own", which always works."""
+
+    codex_home: str | None = None
+    """``CODEX_HOME`` for the codex-cli backend. Codex keeps credentials, config
+    and session history in one directory; pointing this at a copy holding only
+    the credentials gives generation calls a clean session. Unset means "use the
+    developer's own", which always works."""
 
     constrained_json: bool = True
     """Ask the backend to *enforce* the JSON schema, not just describe it.

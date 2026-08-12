@@ -8,8 +8,8 @@
 // page says "restart" rather than implying it took effect.
 //
 // The models section is shaped around one observation: you run one backend at a
-// time. Eleven of the twelve model controls are therefore about backends that
-// will not be used tonight, so the active one gets the card and the rest get a
+// time. Twenty of the twenty-four model controls are therefore about backends
+// that will not be used tonight, so the active one gets the card and the rest get a
 // disclosure. Profiles sit on top because the useful knowledge here — that
 // `opencode/claude-opus-4-6` reasons well, and that an unset opencode model
 // fails outright — belongs in the app rather than in your memory.
@@ -34,6 +34,18 @@ const ROLE_LABEL = {
   reasoning: 'Hard thinking',
   vision: 'Reading images',
   critic: 'Adversarial review',
+};
+
+// Backend-specific gotchas worth surfacing where the model is chosen.
+const HINTS = {
+  'opencode-cli': 'opencode needs an explicit model: with none it fails outright with '
+    + '"Unexpected server error".',
+  'agy-cli': 'agy ids usually carry their own tier (-high/-medium/-low), and then the '
+    + 'reasoning-effort setting is left alone. It cannot read images, so the vision '
+    + 'role falls through to another backend.',
+  'codex-cli': 'Codex tiers by reasoning effort rather than by model, so one id across '
+    + 'the roles is normal. An OPENAI_API_KEY in your environment overrides `codex '
+    + 'login`, billing the API instead of your subscription.',
 };
 
 const ROLE_HELP = {
@@ -160,10 +172,8 @@ function modelSection(fields, profiles) {
             el('div', { class: 'small muted', style: 'margin-top:3px' }, ROLE_HELP[role] ?? ''));
         }),
       ),
-      active === 'opencode-cli'
-        ? el('div', { class: 'small muted', style: 'margin-top:12px' },
-          'opencode needs an explicit model: with none it fails outright with '
-          + '"Unexpected server error".')
+      HINTS[active]
+        ? el('div', { class: 'small muted', style: 'margin-top:12px' }, HINTS[active])
         : null,
     );
 

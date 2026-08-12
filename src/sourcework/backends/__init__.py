@@ -70,6 +70,15 @@ def build(backend_id: str, cfg: LLMSettings) -> LLMBackend:
 
         return CopilotBackend(home=cfg.copilot_home)
 
+    if wanted == "codex-cli":
+        from sourcework.backends.codex import CodexBackend
+
+        return CodexBackend(home=cfg.codex_home)
+    if wanted == "agy-cli":
+        from sourcework.backends.agy import AgyBackend
+
+        return AgyBackend()
+
     raise BackendUnavailableError(
         f"unknown backend {backend_id!r}. Known backends: {', '.join(BACKEND_IDS)}"
     )
