@@ -452,6 +452,17 @@ a proxy that authenticates. The agent mesh ships with a shared default secret
 and `ENFORCE=0`, which is fine on a laptop and wrong on a shared network. See
 [SECURITY.md](SECURITY.md).
 
+## Design notes
+
+Decisions that shaped the project, kept because the reasoning outlives the
+decision:
+
+- [docs/desktop.md](docs/desktop.md) — running as a local desktop app: the tray
+  launcher, engine detection, and why not Electron.
+- [docs/multi-tenant.md](docs/multi-tenant.md) — what a hosted multi-tenant
+  service would take. Considered and not taken; kept because "why isn't this a
+  SaaS?" deserves an answer with a schema attached.
+
 ## Licence
 
 [MIT](LICENSE). Third-party components and the tools the local-model path drives
