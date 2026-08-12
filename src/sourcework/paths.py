@@ -95,8 +95,13 @@ def workspace(directory: Path | None = None) -> Path:
 
 
 def log_file() -> Path:
-    """Where a packaged app writes its log, so the tray menu can open it."""
-    return workspace().parent / "sourcework.log"
+    """Where the app writes its log.
+
+    Inside the workspace rather than beside it: in a checkout that keeps it
+    under the directory already ignored by git, instead of dropping an untracked
+    file in the repository root every time the app runs.
+    """
+    return workspace() / "sourcework.log"
 
 
 def ensure(path: Path) -> Path:

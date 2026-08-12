@@ -55,6 +55,12 @@ sourcework doctor            # what is configured, and what is actually reachabl
 No tray icon and no extra to install: a finished run raises a browser
 notification, and Quit is in the interface.
 
+On Linux, put it in the application launcher:
+
+```bash
+sourcework install-desktop-entry     # --remove to undo
+```
+
 ```bash
 make install                 # venv + editable install
 cp .env.example .env         # fill in model + Confluence credentials
