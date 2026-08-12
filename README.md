@@ -45,6 +45,15 @@ the requirement.
 
 ## Quick start
 
+Run it as a desktop app — the whole mesh plus the UI in one process, with a
+menu-bar icon:
+
+```bash
+pip install 'sourcework[app]'
+sourcework app               # tray icon, opens your browser
+sourcework doctor            # what is configured, and what is actually reachable
+```
+
 ```bash
 make install                 # venv + editable install
 cp .env.example .env         # fill in model + Confluence credentials

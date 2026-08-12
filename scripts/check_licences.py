@@ -35,7 +35,9 @@ COPYLEFT = re.compile(
 
 # The lesser licences are compatible with linking from an MIT project, and their
 # names contain the strings above.
-LESSER = re.compile(r"\bLGPL\b|GNU Lesser|GNU Library", re.IGNORECASE)
+# `[-v0-9.]*` for the same reason the copyleft pattern needs it: "LGPLv3" has
+# no word boundary after the final L.
+LESSER = re.compile(r"\bLGPL[-v0-9.]*|GNU Lesser|GNU Library", re.IGNORECASE)
 
 # "MIT OR GPL-2.0" lets the user take the MIT branch, so it is not a problem -
 # but it is a choice someone made, and it gets said out loud rather than passed
@@ -50,7 +52,7 @@ UNREADABLE = {"", "UNKNOWN", "UNKNOWN LICENSE", "NONE", "OTHER/PROPRIETARY LICEN
 
 
 def classify(licence: str) -> str:
-    """``blocked``, ``unverified``, ``dual``, or ``ok``.
+    """``blocked``, ``unverified``, ``dual``, ``lesser``, or ``ok``.
 
     "Unknown" is not "permissive". A package whose metadata states no licence is
     precisely the one worth a human look, and passing it silently is how a gate
@@ -58,11 +60,17 @@ def classify(licence: str) -> str:
     """
     if licence.strip().upper() in UNREADABLE:
         return "unverified"
-    if not COPYLEFT.search(licence):
-        return "ok"
-    # A lesser licence matches COPYLEFT by name alone; only the *absence* of the
-    # lesser marker makes it a real hit.
+    # Tested before the copyleft pattern, not after. "LGPL-3.0" does not match
+    # COPYLEFT at all - there is no word boundary inside "LGPL" - so checking it
+    # second reached the right verdict for the wrong reason, and left this branch
+    # unreachable for the very strings it was written for.
+    #
+    # Not a blocker: linkable from an MIT project. Said out loud anyway, because
+    # a *bundled* binary carries a relink obligation that importing a library
+    # does not, and a desktop installer is exactly that.
     if LESSER.search(licence) and not re.search(r"\bA?GPL-?[0-9]", licence, re.IGNORECASE):
+        return "lesser"
+    if not COPYLEFT.search(licence):
         return "ok"
     if PERMISSIVE.search(licence):
         return "dual"
@@ -87,7 +95,7 @@ def main(argv: list[str]) -> int:
         print(f"{path} has no rows - pip-licenses did not produce a report.", file=sys.stderr)
         return 2
 
-    blocked, dual, unverified = [], [], []
+    blocked, dual, unverified, lesser = [], [], [], []
     for row in rows:
         licence = (row.get("License") or "").strip()
         name = f"{row.get('Name', '?')} {row.get('Version', '')}".strip()
@@ -98,9 +106,14 @@ def main(argv: list[str]) -> int:
             dual.append((name, licence))
         elif verdict == "unverified":
             unverified.append((name, licence or "(no licence in metadata)"))
+        elif verdict == "lesser":
+            lesser.append((name, licence))
 
     for name, licence in dual:
         print(f"note: {name} is dual-licensed ({licence}) - taking the permissive option.")
+    for name, licence in lesser:
+        print(f"note: {name} is {licence}. Fine to import; if you bundle it in a "
+              "distributable binary, users must be able to replace it.")
 
     if unverified:
         print(f"\n{len(unverified)} dependenc(ies) state no licence:", file=sys.stderr)

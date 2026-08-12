@@ -142,6 +142,50 @@ def cmd_backends(args: argparse.Namespace) -> int:
     return asyncio.run(_backends(args))
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """What is configured, what is reachable, and what to do about it."""
+    from sourcework import engine, paths
+
+    print(f"config     {paths.env_file()}")
+    print(f"workspace  {paths.workspace()}")
+    print(f"checkout   {'yes' if paths.is_project_checkout() else 'no (per-user paths)'}\n")
+
+    found = engine.report(timeout=args.timeout)
+    print(f"backend    {found['backend']}")
+
+    active = found["engine"]
+    if active:
+        where = "configured" if active.configured else "found by probing"
+        print(f"engine     {active.summary()}  [{where}]")
+        for model in active.models[:8]:
+            print(f"             {model}")
+        if len(active.models) > 8:
+            print(f"             ... and {len(active.models) - 8} more")
+    elif found["hosted_credentials"]:
+        print("engine     none local; a hosted API key is present")
+    else:
+        print("engine     NONE REACHABLE")
+        print("\nNothing answered on:")
+        for url in found["probed"]:
+            print(f"  {url}")
+        print(
+            "\nStart one, or point SOURCEWORK_LLM__API_BASE at an OpenAI-compatible\n"
+            "server. scripts/llama-swap.sh starts one from models already on disk."
+        )
+        return 1
+
+    print("\nroles")
+    for role, model in found["roles"].items():
+        print(f"  {role:<10} {model or '(backend default)'}")
+    return 0
+
+
+def cmd_app(args: argparse.Namespace) -> int:
+    from sourcework import desktop
+
+    return desktop.run(port=args.port, open_browser=not args.no_browser, tray=not args.no_tray)
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     import os
 
@@ -231,6 +275,16 @@ def main(argv: list[str] | None = None) -> int:
         help="send one short prompt through each usable backend (spends real quota)",
     )
     p.set_defaults(func=cmd_backends)
+
+    p = sub.add_parser("app", help="run as a desktop app (tray icon + browser)")
+    p.add_argument("--port", type=int)
+    p.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    p.add_argument("--no-tray", action="store_true", help="no tray icon; wait for Ctrl-C")
+    p.set_defaults(func=cmd_app)
+
+    p = sub.add_parser("doctor", help="what is configured and what is reachable")
+    p.add_argument("--timeout", type=float, default=0.6, help="per-probe seconds")
+    p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("ui", help="serve the web UI")
     p.add_argument("--port", type=int, help=f"default {8080}")

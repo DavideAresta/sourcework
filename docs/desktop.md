@@ -193,6 +193,12 @@ tell* the user they are three versions behind is most of the value.
 
 ## 6. Order of work
 
+> **Steps 1–3 are implemented** on the `desktop` branch: per-user paths
+> (`sourcework/paths.py`), engine detection (`sourcework/engine.py`, surfaced as
+> `sourcework doctor`), and the launcher (`sourcework/desktop.py`, as
+> `sourcework app`). Steps 4–6 are not.
+
+
 1. **Per-user config and workspace paths.** Unblocks everything, testable today,
    no new dependencies beyond `platformdirs`.
 2. **Engine detection** as a library function with the probe order above, plus a
