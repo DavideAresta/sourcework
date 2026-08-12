@@ -4,6 +4,24 @@ version = "0.1.0"
 description = "Agentic PRD generation over the A2A protocol: documents, transcripts, images and Confluence in -> a traceable PRD out."
 requires-python = ">=3.11"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Davide Aresta" }]
+keywords = ["prd", "agents", "a2a", "llm", "requirements", "confluence", "local-models"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Documentation",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://gitlab.com/LudusFaber/prd-forge"
+Source = "https://gitlab.com/LudusFaber/prd-forge"
+Issues = "https://gitlab.com/LudusFaber/prd-forge/-/issues"
 
 dependencies = [
   "a2a-sdk[http-server]==1.1.2",

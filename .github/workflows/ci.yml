@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[ingest,dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Test
+        # PRDFORGE_LLM__STUB is set by tests/conftest.py, so the suite needs no
+        # API key, no network and no CLI - which is the point of stub mode.
+        run: pytest -q
+
+      - name: Smoke test the whole pipeline
+        # Eight agents over real A2A JSON-RPC against a deterministic fake model.
+        # Catches the wiring failures a unit test cannot see.
+        run: python scripts/demo.py
+
+  licences:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          pip install -e ".[ingest]"
+          pip install pip-licenses
+
+      - name: No copyleft dependencies
+        # This project is MIT. A GPL/AGPL/SSPL dependency arriving through a
+        # transitive bump would change what downstream users are allowed to do,
+        # and it should fail here rather than be discovered by a lawyer.
+        run: |
+          pip-licenses --format=csv --with-system > licences.csv
+          if grep -iE '(^|,)"?(GNU )?(A?GPL|SSPL)' licences.csv | grep -viE 'LGPL|MIT|BSD|Apache'; then
+            echo "::error::A copyleft dependency entered the tree. See licences.csv."
+            exit 1
+          fi
+          echo "No copyleft dependencies."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: licences
+          path: licences.csv

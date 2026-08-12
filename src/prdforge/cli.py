@@ -143,12 +143,15 @@ def cmd_backends(args: argparse.Namespace) -> int:
 
 
 def cmd_ui(args: argparse.Namespace) -> int:
-    from prdforge.ui import PORT, serve
+    import os
+
+    from prdforge.ui import DEFAULT_HOST, PORT, serve
 
     port = args.port or PORT
-    print(f"PRD Forge UI  http://localhost:{port}")
+    host = args.host or os.environ.get("PRDFORGE_UI_HOST") or DEFAULT_HOST
+    print(f"PRD Forge UI  http://{'localhost' if host == DEFAULT_HOST else host}:{port}")
     print("Needs the mesh running: prdforge-agent serve-all\n")
-    serve(port=port, workspace=Path(args.workspace) if args.workspace else None)
+    serve(port=port, host=host, workspace=Path(args.workspace) if args.workspace else None)
     return 0
 
 
@@ -231,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("ui", help="serve the web UI")
     p.add_argument("--port", type=int, help=f"default {8080}")
+    p.add_argument("--host", help="default 127.0.0.1. The UI has no authentication and "
+                                  "can rewrite your API keys - bind wider only behind a proxy "
+                                  "that authenticates. Also PRDFORGE_UI_HOST.")
     p.add_argument("--workspace", help="where run history and uploads live")
     p.set_defaults(func=cmd_ui)
 
