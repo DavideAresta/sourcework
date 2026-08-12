@@ -58,13 +58,11 @@ jobs:
         # This project is MIT. A GPL/AGPL/SSPL dependency arriving through a
         # transitive bump would change what downstream users are allowed to do,
         # and it should fail here rather than be discovered by a lawyer.
+        # The check lives in a tested script: the grep it replaced passed a
+        # package licensed "GNU General Public License v3".
         run: |
           pip-licenses --format=csv --with-system > licences.csv
-          if grep -iE '(^|,)"?(GNU )?(A?GPL|SSPL)' licences.csv | grep -viE 'LGPL|MIT|BSD|Apache'; then
-            echo "::error::A copyleft dependency entered the tree. See licences.csv."
-            exit 1
-          fi
-          echo "No copyleft dependencies."
+          python scripts/check_licences.py licences.csv
 
       - uses: actions/upload-artifact@v4
         with:
