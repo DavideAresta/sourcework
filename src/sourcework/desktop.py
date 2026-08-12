@@ -107,6 +107,29 @@ def current_status(port: int) -> Status:
     return Status("no-engine", "no model server found - open SourceWork to set one up")
 
 
+def _configure_logging() -> None:
+    """Log to a file as well as the console.
+
+    Launched from a desktop entry there is no console at all, so stderr goes
+    wherever the session manager decided - which is not a thing anyone can be
+    told to look at. The failure message names this file; something has to
+    actually write it.
+    """
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    try:
+        paths.ensure(paths.log_file().parent)
+        handlers.append(logging.FileHandler(paths.log_file(), encoding="utf-8"))
+    except OSError as exc:  # noqa: BLE001 - an unwritable log must not stop the app
+        print(f"(could not open {paths.log_file()}: {exc})", flush=True)
+
+    logging.basicConfig(
+        level=settings().log_level,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+
+
 def run(port: int | None = None, *, open_browser: bool = True) -> int:
     """Start everything and stay up. Returns a process exit code."""
     from sourcework.ui.app import PORT
@@ -121,7 +144,7 @@ def run(port: int | None = None, *, open_browser: bool = True) -> int:
         return 0
 
     paths.ensure(paths.workspace())
-    logging.basicConfig(level=settings().log_level, format="%(levelname)-7s %(name)s: %(message)s")
+    _configure_logging()
 
     stopping = threading.Event()
     _start_mesh()

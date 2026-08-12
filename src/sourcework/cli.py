@@ -186,6 +186,12 @@ def cmd_app(args: argparse.Namespace) -> int:
     return desktop.run(port=args.port, open_browser=not args.no_browser)
 
 
+def cmd_install_entry(args: argparse.Namespace) -> int:
+    from sourcework import launcher
+
+    return launcher.remove() if args.remove else launcher.install()
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     import os
 
@@ -280,6 +286,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int)
     p.add_argument("--no-browser", action="store_true", help="do not open a browser")
     p.set_defaults(func=cmd_app)
+
+    p = sub.add_parser("install-desktop-entry",
+                       help="add SourceWork to the application launcher (Linux)")
+    p.add_argument("--remove", action="store_true", help="take it out again")
+    p.set_defaults(func=cmd_install_entry)
 
     p = sub.add_parser("doctor", help="what is configured and what is reachable")
     p.add_argument("--timeout", type=float, default=0.6, help="per-probe seconds")

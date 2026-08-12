@@ -238,3 +238,76 @@ def test_quitting_is_a_write_so_a_cross_site_page_cannot_do_it(tmp_path: Path):
     client = TestClient(build_app(workspace=tmp_path, on_shutdown=lambda: None))
 
     assert client.post("/api/shutdown").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# The launcher entry
+# ---------------------------------------------------------------------------
+
+
+def test_the_desktop_entry_points_at_a_real_command(tmp_path: Path, monkeypatch):
+    """A menu-launched process has almost none of the shell's PATH, so the entry
+    has to carry an absolute path resolved against the running interpreter -
+    `which` at launch time is exactly what fails there."""
+    from sourcework import launcher
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(launcher.sys, "platform", "linux")
+    monkeypatch.setattr(launcher.shutil, "which", lambda _name: None)
+
+    assert launcher.install(quiet=True) == 0
+
+    entry = (tmp_path / "applications" / f"{launcher.APP_ID}.desktop").read_text()
+    exec_line = next(x for x in entry.splitlines() if x.startswith("Exec="))
+    command = Path(exec_line.removeprefix("Exec=").removesuffix(" app"))
+
+    assert command.is_absolute()
+    assert command.is_file(), f"{command} does not exist"
+    assert (tmp_path / "icons/hicolor/scalable/apps/sourcework.svg").is_file()
+
+
+def test_the_entry_declares_one_main_category(tmp_path: Path, monkeypatch):
+    """Two main categories put the app in the menu twice - the one thing
+    desktop-file-validate complains about here."""
+    from sourcework import launcher
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(launcher.sys, "platform", "linux")
+    launcher.install(quiet=True)
+
+    entry = (tmp_path / "applications" / f"{launcher.APP_ID}.desktop").read_text()
+    categories = next(x for x in entry.splitlines() if x.startswith("Categories="))
+    main = {"AudioVideo", "Audio", "Video", "Development", "Education", "Game",
+            "Graphics", "Network", "Office", "Science", "Settings", "System", "Utility"}
+    declared = set(categories.removeprefix("Categories=").strip(";").split(";"))
+
+    assert len(declared & main) == 1, f"{declared & main} are all main categories"
+
+
+def test_installing_and_removing_leaves_nothing_behind(tmp_path: Path, monkeypatch):
+    from sourcework import launcher
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(launcher.sys, "platform", "linux")
+
+    launcher.install(quiet=True)
+    assert launcher.remove(quiet=True) == 0
+    assert not (tmp_path / "applications" / f"{launcher.APP_ID}.desktop").exists()
+    assert not (tmp_path / "icons/hicolor/scalable/apps/sourcework.svg").exists()
+
+
+def test_it_refuses_rather_than_pretending_on_other_platforms(monkeypatch, capsys):
+    """macOS and Windows need a real bundle, which is a build step, not a file."""
+    from sourcework import launcher
+
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    assert launcher.install(quiet=True) == 2
+    assert "app bundle" in capsys.readouterr().err
+
+
+def test_the_log_the_failure_message_names_is_inside_the_workspace():
+    """`run()` tells the user to look at this path, so something must write it -
+    and in a checkout it must not land in the repository root."""
+    from sourcework import paths
+
+    assert paths.log_file().parent == paths.workspace()
