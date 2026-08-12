@@ -1,6 +1,6 @@
 # Third-party code and tools
 
-PRD Forge is MIT licensed (see [LICENSE](LICENSE)). This file records what else
+SourceWork is MIT licensed (see [LICENSE](LICENSE)). This file records what else
 is in the tree or expected on the machine, and under what terms.
 
 ## Bundled in this repository
@@ -9,7 +9,7 @@ One file, vendored verbatim with its copyright header intact:
 
 | File | Project | Version | Licence |
 |---|---|---|---|
-| `src/prdforge/ui/static/js/vendor/autocomplete.js` | [autocomplete](https://github.com/denis-taran/autocomplete) by Denis Taran | 10.0.0 | MIT, © 2016 Denis Taran |
+| `src/sourcework/ui/static/js/vendor/autocomplete.js` | [autocomplete](https://github.com/denis-taran/autocomplete) by Denis Taran | 10.0.0 | MIT, © 2016 Denis Taran |
 
 It is vendored rather than fetched from a CDN because the UI has to work on a
 machine with no internet, and rather than npm-installed because the front end
@@ -32,7 +32,7 @@ dependency. A copyleft dependency would change what this project can be.
 ## External tools, not distributed here
 
 The local-model path drives programs you install yourself. They are never
-bundled or redistributed, and PRD Forge only speaks HTTP to them:
+bundled or redistributed, and SourceWork only speaks HTTP to them:
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** — MIT. `llama-server`
   provides the OpenAI-compatible endpoint, grammar-constrained JSON, and the

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SourceWork</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">PRD <b>Forge</b></div>
+    <span id="mesh" class="pill">checking…</span>
+    <div class="spacer"></div>
+    <a href="/dashboard"><button class="ghost">Dashboard</button></a>
+    <a href="/settings"><button class="ghost">Settings</button></a>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <button id="new-run" class="primary" style="width:100%">+ New PRD</button>
+      <div class="side-title">History</div>
+      <div id="runs"></div>
+    </aside>
+    <main id="main"></main>
+  </div>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

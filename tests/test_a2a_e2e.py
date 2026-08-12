@@ -18,9 +18,9 @@ import httpx
 import pytest
 import uvicorn
 
-from prdforge.a2a_common import AgentPool, RemoteAgentError, build_app
-from prdforge.cli import AGENTS
-from prdforge.models import InputRef, Modality, PRDRequest, PRDResult
+from sourcework.a2a_common import AgentPool, RemoteAgentError, build_app
+from sourcework.cli import AGENTS
+from sourcework.models import InputRef, Modality, PRDRequest, PRDResult
 
 SAMPLES = None
 
@@ -207,9 +207,9 @@ def narrating_agent():
     """An agent whose only skill reports what the executor installed for it."""
     from pydantic import BaseModel
 
-    from prdforge import stream
-    from prdforge.a2a_common import SkillExecutor, build_card, skill
-    from prdforge.backends.base import StreamChunk
+    from sourcework import stream
+    from sourcework.a2a_common import SkillExecutor, build_card, skill
+    from sourcework.backends.base import StreamChunk
 
     class Echo(BaseModel):
         summary: str = ""
@@ -257,7 +257,7 @@ def narrating_agent():
 
 
 async def test_narration_travels_back_over_a2a(narrating_agent):
-    from prdforge import stream
+    from sourcework import stream
 
     heard: list[dict] = []
     plain: list[str] = []
@@ -279,7 +279,7 @@ async def test_narration_travels_back_over_a2a(narrating_agent):
 
 
 async def test_nothing_is_narrated_to_a_caller_that_did_not_ask(narrating_agent):
-    from prdforge import stream
+    from sourcework import stream
 
     heard: list[str] = []
 

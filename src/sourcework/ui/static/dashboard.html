@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard · SourceWork</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">PRD <b>Forge</b></div>
+    <div class="spacer"></div>
+    <a href="/"><button class="ghost">Runs</button></a>
+    <button id="refresh" class="ghost">Refresh</button>
+    <a href="/settings"><button class="ghost">Settings</button></a>
+  </header>
+
+  <main style="max-width:1000px;margin:0 auto;padding:22px 26px 60px">
+    <h1>PRD status</h1>
+    <p class="muted">
+      One row per document, newest finished version. <b>Ready</b> means the critic
+      raised nothing blocking, no blocking question is unanswered, and no recorded
+      conflict is unresolved.
+    </p>
+
+    <div id="totals" class="grid3" style="margin:18px 0 24px"></div>
+    <div id="board"></div>
+  </main>
+
+  <script type="module" src="/static/js/dashboard.js"></script>
+</body>
+</html>

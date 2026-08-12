@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from prdforge.confluence import storage
-from prdforge.ingest import documents, transcripts
+from sourcework.confluence import storage
+from sourcework.ingest import documents, transcripts
 
 VTT = b"""WEBVTT
 

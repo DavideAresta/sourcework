@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from prdforge.config import SecuritySettings
-from prdforge.ingest.fetch import FetchError, FetchRefused, _refuse_private_target
-from prdforge.models import (
+from sourcework.config import SecuritySettings
+from sourcework.ingest.fetch import FetchError, FetchRefused, _refuse_private_target
+from sourcework.models import (
     Evidence,
     Modality,
     Priority,
@@ -22,9 +22,9 @@ from prdforge.models import (
     RequirementSet,
     SourceRef,
 )
-from prdforge.ui.app import build_app
+from sourcework.ui.app import build_app
 
-WRITE = {"X-PRDForge-UI": "1"}
+WRITE = {"X-SourceWork-UI": "1"}
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ def test_a_refusal_is_a_fetch_error_so_one_source_fails_not_the_run():
 
 
 def test_the_escape_hatch_exists_for_internal_document_stores(monkeypatch):
-    from prdforge import config
+    from sourcework import config
 
     monkeypatch.setattr(config, "settings",
                         lambda: config.Settings(security=SecuritySettings(allow_private_fetch=True)))
@@ -103,7 +103,7 @@ def test_a_write_without_the_ui_header_is_refused(client: TestClient):
     starting runs on their machine."""
     response = client.post("/api/runs", data={"request": '{"title": "x", "notes": ["hi"]}'})
     assert response.status_code == 403
-    assert "X-PRDForge-UI" in response.json()["detail"]
+    assert "X-SourceWork-UI" in response.json()["detail"]
 
     assert client.put("/api/settings", json={}).status_code == 403
     assert client.delete("/api/runs/whatever").status_code == 403
@@ -142,9 +142,9 @@ async def test_runs_queue_instead_of_all_starting_at_once(tmp_path: Path):
     queued - and each holds the full text of everything it ingested."""
     import asyncio
 
-    from prdforge.models import PRDRequest
-    from prdforge.ui.runner import RunManager
-    from prdforge.ui.store import RunStore
+    from sourcework.models import PRDRequest
+    from sourcework.ui.runner import RunManager
+    from sourcework.ui.store import RunStore
 
     manager = RunManager(RunStore(tmp_path / "runs.db"), max_concurrent=2)
     running, peak = 0, 0
@@ -187,7 +187,11 @@ def _prior() -> tuple[RequirementSet, Evidence]:
 
 
 def _refine(statement: str) -> Requirement:
-    from prdforge.agents.requirements.agent import DraftRequirement, RequirementDraft, _materialise
+    from sourcework.agents.requirements.agent import (
+        DraftRequirement,
+        RequirementDraft,
+        _materialise,
+    )
 
     prior, evidence = _prior()
     draft = RequirementDraft(requirements=[DraftRequirement(
@@ -235,7 +239,7 @@ def test_an_upload_cannot_name_its_way_out_of_the_upload_directory(
     from starlette.datastructures import Headers
     from starlette.datastructures import UploadFile as StarletteUpload
 
-    from prdforge.ui.app import _store_upload
+    from sourcework.ui.app import _store_upload
 
     target = tmp_path / "uploads" / "run-1"
     upload = StarletteUpload(file=io.BytesIO(b"data"), filename=filename,

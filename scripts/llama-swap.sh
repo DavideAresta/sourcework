@@ -2,7 +2,7 @@
 # Serve every local model behind one endpoint, swapped on demand.
 #
 # Replaces llama-serve.sh when you want different models per role: point
-# PRDFORGE_LLM__API_BASE at http://127.0.0.1:8081/v1 and set each role to the
+# SOURCEWORK_LLM__API_BASE at http://127.0.0.1:8081/v1 and set each role to the
 # model id it should use. `openai/<id>` for ids listed in llama-swap.yaml.
 set -euo pipefail
 

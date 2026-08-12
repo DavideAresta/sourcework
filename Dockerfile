@@ -21,12 +21,12 @@ RUN pip install --no-cache-dir ".[ingest]"
 # image runs the litellm backend; to use a CLI backend in a container you also
 # have to get its credentials in, and that decision belongs to whoever is
 # deploying, not to this file.
-RUN useradd --create-home --uid 10001 prdforge && mkdir -p /workspace && chown prdforge /workspace
-USER prdforge
+RUN useradd --create-home --uid 10001 sourcework && mkdir -p /workspace && chown sourcework /workspace
+USER sourcework
 
 EXPOSE 8000-8007
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -fsS "http://localhost:${PORT:-8000}/healthz" || exit 1
 
-CMD ["prdforge-agent", "serve", "orchestrator"]
+CMD ["sourcework", "serve", "orchestrator"]

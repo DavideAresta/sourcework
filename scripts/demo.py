@@ -3,10 +3,10 @@
 
 Starts all eight agents in-process, drives the orchestrator over real A2A
 JSON-RPC, and writes the resulting PRD to ``out/``. Runs with
-``PRDFORGE_LLM__STUB=1`` so it needs no API key - the point is to prove the
+``SOURCEWORK_LLM__STUB=1`` so it needs no API key - the point is to prove the
 wiring, transports, routing, schema validation and rendering all work.
 
-    PRDFORGE_LLM__STUB=1 python scripts/demo.py
+    SOURCEWORK_LLM__STUB=1 python scripts/demo.py
 """
 
 from __future__ import annotations
@@ -19,17 +19,17 @@ import threading
 import time
 from pathlib import Path
 
-os.environ.setdefault("PRDFORGE_LLM__STUB", "1")
-os.environ.setdefault("PRDFORGE_LOG_LEVEL", "WARNING")
+os.environ.setdefault("SOURCEWORK_LLM__STUB", "1")
+os.environ.setdefault("SOURCEWORK_LOG_LEVEL", "WARNING")
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 import uvicorn  # noqa: E402
 
-from prdforge.a2a_common import AgentPool, build_app  # noqa: E402
-from prdforge.cli import AGENTS  # noqa: E402
-from prdforge.models import InputRef, PRDRequest, PRDResult  # noqa: E402
+from sourcework.a2a_common import AgentPool, build_app  # noqa: E402
+from sourcework.cli import AGENTS  # noqa: E402
+from sourcework.models import InputRef, PRDRequest, PRDResult  # noqa: E402
 
 SAMPLES = ROOT / "examples" / "sample_inputs"
 OUT = ROOT / "out"

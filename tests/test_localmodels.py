@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from prdforge.localmodels import LocalModel, discover, slugify, swap_config
+from sourcework.localmodels import LocalModel, discover, slugify, swap_config
 
 SERVER = "llama-server --port ${PORT}"
 

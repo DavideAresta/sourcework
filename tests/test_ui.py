@@ -15,13 +15,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from prdforge.config import LLMOverrides, LLMSettings, effective_llm, llm_overrides, settings
-from prdforge.llm import LLM
-from prdforge.models import PRDRequest
-from prdforge.ui import env_file
-from prdforge.ui.app import build_app
-from prdforge.ui.runner import RunManager
-from prdforge.ui.store import Run, RunStore, now_iso
+from sourcework.config import LLMOverrides, LLMSettings, effective_llm, llm_overrides, settings
+from sourcework.llm import LLM
+from sourcework.models import PRDRequest
+from sourcework.ui import env_file
+from sourcework.ui.app import build_app
+from sourcework.ui.runner import RunManager
+from sourcework.ui.store import Run, RunStore, now_iso
 
 # ---------------------------------------------------------------------------
 # Per-run overrides
@@ -49,7 +49,7 @@ def test_an_explicit_cfg_is_not_overridden():
 
 
 def test_choosing_a_backend_turns_stub_mode_off():
-    # A mesh booted with PRDFORGE_LLM__STUB=1 must not silently fake a run that
+    # A mesh booted with SOURCEWORK_LLM__STUB=1 must not silently fake a run that
     # explicitly asked for a real backend.
     stubbed = LLMSettings(stub=True)
     assert LLMOverrides(backend="claude-code").applied_to(stubbed).stub is False
@@ -86,7 +86,7 @@ def test_the_request_carries_overrides_so_the_pool_can_forward_them():
 
 
 async def test_the_pool_attaches_overrides_to_every_outbound_payload():
-    from prdforge.a2a_common import AgentPool
+    from sourcework.a2a_common import AgentPool
 
     pool = AgentPool(registry={}, llm=LLMOverrides(backend="claude-code"))
     attached = pool._with_llm({"title": "x"})
@@ -100,7 +100,7 @@ async def test_the_pool_attaches_overrides_to_every_outbound_payload():
 
 
 def test_the_executor_reads_overrides_without_consuming_them():
-    from prdforge.a2a_common.executor import _read_overrides
+    from sourcework.a2a_common.executor import _read_overrides
 
     payload = {"title": "x", "llm": {"backend": "claude-code"}}
     overrides = _read_overrides(payload)
@@ -111,7 +111,7 @@ def test_the_executor_reads_overrides_without_consuming_them():
 
 
 def test_a_malformed_override_is_ignored_rather_than_fatal():
-    from prdforge.a2a_common.executor import _read_overrides
+    from sourcework.a2a_common.executor import _read_overrides
 
     assert _read_overrides({"llm": {"failover_order": "not a list"}}) is None
     assert _read_overrides({}) is None
@@ -131,10 +131,10 @@ def env_path(tmp_path: Path) -> Path:
     path = tmp_path / ".env"
     path.write_text(
         "# a comment worth keeping\n"
-        "PRDFORGE_LLM__BACKEND=litellm\n"
+        "SOURCEWORK_LLM__BACKEND=litellm\n"
         "ANTHROPIC_API_KEY=sk-real-secret\n"
         "\n"
-        "PRDFORGE_CONFLUENCE__EMAIL=me@example.com\n",
+        "SOURCEWORK_CONFLUENCE__EMAIL=me@example.com\n",
         encoding="utf-8",
     )
     return path
@@ -144,7 +144,7 @@ def test_secrets_go_to_the_browser_masked(env_path: Path):
     fields = {f["key"]: f for f in env_file.describe(env_path)}
     assert fields["ANTHROPIC_API_KEY"]["value"] == env_file.MASK
     assert fields["ANTHROPIC_API_KEY"]["set"] is True
-    assert fields["PRDFORGE_CONFLUENCE__EMAIL"]["value"] == "me@example.com"
+    assert fields["SOURCEWORK_CONFLUENCE__EMAIL"]["value"] == "me@example.com"
 
 
 def test_saving_an_untouched_secret_keeps_it(env_path: Path):
@@ -164,20 +164,20 @@ def test_a_local_endpoint_is_not_offered_hosted_models(tmp_path: Path):
     the run fails on a value they never chose."""
     path = tmp_path / ".env"
     path.write_text(
-        "PRDFORGE_LLM__BACKEND=litellm\n"
-        "PRDFORGE_LLM__API_BASE=http://127.0.0.1:8081/v1\n",
+        "SOURCEWORK_LLM__BACKEND=litellm\n"
+        "SOURCEWORK_LLM__API_BASE=http://127.0.0.1:8081/v1\n",
         encoding="utf-8",
     )
 
     fields = {f["key"]: f for f in env_file.describe(path)}
-    assert fields["PRDFORGE_LLM__REASONING_MODEL"]["suggested"] == ""
-    assert fields["PRDFORGE_LLM__CRITIC_MODEL"]["suggested"] == ""
+    assert fields["SOURCEWORK_LLM__REASONING_MODEL"]["suggested"] == ""
+    assert fields["SOURCEWORK_LLM__CRITIC_MODEL"]["suggested"] == ""
     # The CLI backends authenticate themselves; their suggestions still hold.
-    assert fields["PRDFORGE_LLM__CLAUDE_CODE_MODELS__REASONING"]["suggested"]
+    assert fields["SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING"]["suggested"]
 
     # ...and a profile button cannot write one either.
     profiles = env_file.profiles_for(path)
-    assert not any(k.startswith("PRDFORGE_LLM__REASONING_MODEL")
+    assert not any(k.startswith("SOURCEWORK_LLM__REASONING_MODEL")
                    for p in profiles.values() for k in p["models"])
     assert any("CLAUDE_CODE" in k for p in profiles.values() for k in p["models"])
 
@@ -185,7 +185,7 @@ def test_a_local_endpoint_is_not_offered_hosted_models(tmp_path: Path):
 def test_a_hosted_install_still_gets_its_suggestions(env_path: Path):
     """The fix must not cost the common case its presets."""
     fields = {f["key"]: f for f in env_file.describe(env_path)}
-    assert fields["PRDFORGE_LLM__REASONING_MODEL"]["suggested"].startswith("anthropic/")
+    assert fields["SOURCEWORK_LLM__REASONING_MODEL"]["suggested"].startswith("anthropic/")
     assert env_file.profiles_for(env_path) == env_file.PROFILES
 
 
@@ -194,17 +194,17 @@ def test_an_unset_switch_shows_the_default_it_actually_has(env_path: Path):
     drew. Rendering an absent default-on setting unticked means opening the
     settings page and pressing Save silently turns it off.
     """
-    from prdforge.config import LLMSettings
+    from sourcework.config import LLMSettings
 
     fields = {f["key"]: f for f in env_file.describe(env_path)}
 
-    constrained = fields["PRDFORGE_LLM__CONSTRAINED_JSON"]
+    constrained = fields["SOURCEWORK_LLM__CONSTRAINED_JSON"]
     assert constrained["set"] is False, "the fixture must not set it, or this proves nothing"
     assert LLMSettings().constrained_json is True, "guarding the premise, not the behaviour"
     assert constrained["value"].lower() in ("true", "1"), "must render ticked"
 
     # ...and a default-off switch still reads as off rather than as ticked.
-    assert fields["PRDFORGE_LLM__STUB"]["value"].lower() in ("false", "0", "")
+    assert fields["SOURCEWORK_LLM__STUB"]["value"].lower() in ("false", "0", "")
 
 
 def test_the_ui_does_not_offer_itself_to_the_network_by_default():
@@ -213,8 +213,8 @@ def test_the_ui_does_not_offer_itself_to_the_network_by_default():
     Binding wider has to be a decision someone makes, not one they inherit."""
     import inspect
 
-    from prdforge.ui import DEFAULT_HOST
-    from prdforge.ui.app import serve
+    from sourcework.ui import DEFAULT_HOST
+    from sourcework.ui.app import serve
 
     assert DEFAULT_HOST == "127.0.0.1"
     assert inspect.signature(serve).parameters["host"].default == DEFAULT_HOST
@@ -228,16 +228,16 @@ def test_unknown_keys_cannot_be_injected(env_path: Path):
 
 
 def test_editing_preserves_comments_and_untouched_lines(env_path: Path):
-    env_file.write(env_path, {"PRDFORGE_LLM__BACKEND": "claude-code"})
+    env_file.write(env_path, {"SOURCEWORK_LLM__BACKEND": "claude-code"})
     text = env_path.read_text()
     assert "# a comment worth keeping" in text
-    assert "PRDFORGE_LLM__BACKEND=claude-code" in text
-    assert "PRDFORGE_CONFLUENCE__EMAIL=me@example.com" in text
+    assert "SOURCEWORK_LLM__BACKEND=claude-code" in text
+    assert "SOURCEWORK_CONFLUENCE__EMAIL=me@example.com" in text
 
 
 def test_a_new_key_is_appended(env_path: Path):
-    env_file.write(env_path, {"PRDFORGE_LLM__CLAUDE_CODE_MODELS__REASONING": "sonnet"})
-    assert "PRDFORGE_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet" in env_path.read_text()
+    env_file.write(env_path, {"SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING": "sonnet"})
+    assert "SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet" in env_path.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -331,12 +331,12 @@ class FakeManager:
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("prdforge.ui.app.RunManager", FakeManager)
+    monkeypatch.setattr("sourcework.ui.app.RunManager", FakeManager)
     # The header every write carries, sent here for the same reason the browser
     # sends it. That it is *required* is asserted in test_security.py; these
     # tests are about what the endpoints do once a legitimate client reaches
     # them, and repeating it on every call would only obscure that.
-    with TestClient(build_app(tmp_path), headers={"X-PRDForge-UI": "1"}) as test_client:
+    with TestClient(build_app(tmp_path), headers={"X-SourceWork-UI": "1"}) as test_client:
         yield test_client
 
 
@@ -366,13 +366,13 @@ def test_a_traversing_filename_cannot_escape_the_upload_directory(client: TestCl
     response = client.post(
         "/api/runs",
         data={"request": json.dumps({"title": "Nasty"})},
-        files=[("files", ("../../../etc/prdforge-pwned", b"x", "text/plain"))],
+        files=[("files", ("../../../etc/sourcework-pwned", b"x", "text/plain"))],
     )
     assert response.status_code == 200
     run_id = response.json()["id"]
     written = list((tmp_path / "uploads" / run_id).iterdir())
-    assert [p.name for p in written] == ["prdforge-pwned"]
-    assert not Path("/etc/prdforge-pwned").exists()
+    assert [p.name for p in written] == ["sourcework-pwned"]
+    assert not Path("/etc/sourcework-pwned").exists()
 
 
 def test_the_run_form_carries_model_overrides_through(client: TestClient):
@@ -421,7 +421,7 @@ def test_a_missing_run_is_a_404_everywhere(client: TestClient):
 def test_the_settings_endpoint_masks_and_allow_lists(client: TestClient):
     payload = client.get("/api/settings").json()
     keys = {f["key"] for f in payload["fields"]}
-    assert "PRDFORGE_LLM__BACKEND" in keys
+    assert "SOURCEWORK_LLM__BACKEND" in keys
     assert all(f["value"] != "sk-" for f in payload["fields"])
 
     result = client.put("/api/settings", json={"NOT_ALLOWED": "x"}).json()
@@ -489,9 +489,9 @@ def parent(client: TestClient, tmp_path: Path) -> str:
     # FakeManager writes a thin result; give it the shape a refinement reads.
     import asyncio
 
-    from prdforge.ui.store import RunStore
+    from sourcework.ui.store import RunStore
 
-    store = RunStore(tmp_path / "prdforge-ui.db")
+    store = RunStore(tmp_path / "sourcework-ui.db")
     try:
         run = asyncio.run(store.get(run_id))
         run.result = {
@@ -641,7 +641,7 @@ def test_the_dashboard_totals_add_up(client: TestClient, parent: str):
 
 
 def test_narration_is_told_apart_from_ordinary_progress():
-    from prdforge import stream
+    from sourcework import stream
 
     wire = stream.encode("reasoning", "weighing the options", agent="requirements")
     assert stream.decode(wire) == {
@@ -656,14 +656,14 @@ def test_narration_is_told_apart_from_ordinary_progress():
 
 
 async def test_the_pool_only_asks_for_narration_when_someone_is_watching():
-    from prdforge.a2a_common import AgentPool
+    from sourcework.a2a_common import AgentPool
 
     assert "stream" not in AgentPool(registry={})._with_llm({"title": "x"})
     assert AgentPool(registry={}, narrate=True)._with_llm({"title": "x"})["stream"] is True
 
 
 def test_the_executor_narrates_only_on_request():
-    from prdforge.a2a_common.executor import _wants_narration
+    from sourcework.a2a_common.executor import _wants_narration
 
     assert _wants_narration({"stream": True})
     assert not _wants_narration({"title": "x"})
@@ -671,8 +671,8 @@ def test_the_executor_narrates_only_on_request():
 
 
 async def test_the_narrator_coalesces_and_flushes_what_is_left():
-    from prdforge.backends.base import StreamChunk
-    from prdforge.stream import Narrator
+    from sourcework.backends.base import StreamChunk
+    from sourcework.stream import Narrator
 
     published: list[tuple[str, str]] = []
 
@@ -691,8 +691,8 @@ async def test_the_narrator_coalesces_and_flushes_what_is_left():
 
 
 async def test_a_runaway_model_cannot_grow_the_browser_without_bound():
-    from prdforge.backends.base import StreamChunk
-    from prdforge.stream import Narrator
+    from sourcework.backends.base import StreamChunk
+    from sourcework.stream import Narrator
 
     published: list[tuple[str, str]] = []
 
@@ -707,8 +707,8 @@ async def test_a_runaway_model_cannot_grow_the_browser_without_bound():
 
 
 async def test_a_failing_sink_never_reaches_the_pipe_reader():
-    from prdforge.backends.base import StreamChunk
-    from prdforge.stream import Narrator
+    from sourcework.backends.base import StreamChunk
+    from sourcework.stream import Narrator
 
     async def publish(kind: str, text: str) -> None:
         raise RuntimeError("subscriber exploded")
@@ -720,7 +720,7 @@ async def test_a_failing_sink_never_reaches_the_pipe_reader():
 
 
 async def test_narration_reaches_subscribers_without_being_stored(tmp_path: Path):
-    from prdforge.ui.runner import RunManager
+    from sourcework.ui.runner import RunManager
 
     store = RunStore(tmp_path / "runs.db")
     try:
@@ -753,8 +753,8 @@ async def test_narration_reaches_subscribers_without_being_stored(tmp_path: Path
 
 
 async def test_a_step_supersedes_rather_than_accumulates():
-    from prdforge.backends.base import StreamChunk
-    from prdforge.stream import Narrator
+    from sourcework.backends.base import StreamChunk
+    from sourcework.stream import Narrator
 
     published: list[tuple[str, str]] = []
 
@@ -772,15 +772,15 @@ async def test_a_step_supersedes_rather_than_accumulates():
 def test_narration_is_kept_out_of_the_log(caplog):
     import logging
 
-    from prdforge import stream
-    from prdforge.a2a_common.executor import Progress
+    from sourcework import stream
+    from sourcework.a2a_common.executor import Progress
 
     class Updater:
         async def update_status(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
             pass
 
     progress = Progress(Updater())
-    with caplog.at_level(logging.INFO, logger="prdforge.a2a_common.executor"):
+    with caplog.at_level(logging.INFO, logger="sourcework.a2a_common.executor"):
         asyncio.run(progress("Normalising requirements"))
         asyncio.run(progress(stream.encode("text", "the whole PRD, again", agent="writer")))
 
@@ -819,8 +819,8 @@ def test_every_field_belongs_to_a_named_group():
 def test_the_batching_knobs_are_reachable_from_the_ui():
     # They change whether a large run succeeds, so they cannot be env-only.
     keys = {f.key for f in env_file.FIELDS}
-    assert "PRDFORGE_LLM__ANALYSIS_BATCH_ITEMS" in keys
-    assert "PRDFORGE_LLM__ANALYSIS_BATCH_CHARS" in keys
+    assert "SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS" in keys
+    assert "SOURCEWORK_LLM__ANALYSIS_BATCH_CHARS" in keys
 
 
 def test_every_profile_covers_every_model_cell():
@@ -849,8 +849,8 @@ def test_the_profiles_encode_what_was_measured():
     # gpt-5.4 is the Copilot model that returns readable reasoning rather than
     # an encrypted blob. Both were established by running them.
     balanced = env_file.PROFILES["balanced"]["models"]
-    assert balanced["PRDFORGE_LLM__OPENCODE_MODELS__REASONING"] == "opencode/claude-opus-4-6"
-    assert balanced["PRDFORGE_LLM__COPILOT_MODELS__REASONING"] == "gpt-5.4"
+    assert balanced["SOURCEWORK_LLM__OPENCODE_MODELS__REASONING"] == "opencode/claude-opus-4-6"
+    assert balanced["SOURCEWORK_LLM__COPILOT_MODELS__REASONING"] == "gpt-5.4"
 
 
 def test_suggestions_are_confined_to_the_model_cells():
@@ -865,16 +865,16 @@ def test_a_limit_shows_the_default_it_would_otherwise_use(tmp_path: Path):
     fields = {f["key"]: f for f in env_file.describe(tmp_path / "missing.env")}
     # Placeholder, not value: shown so an empty box reads as "600s, because that
     # is the default" rather than as an unknown - without writing it anywhere.
-    assert fields["PRDFORGE_LLM__CLI_TIMEOUT_S"]["placeholder"] == "600.0"
-    assert fields["PRDFORGE_LLM__ANALYSIS_BATCH_ITEMS"]["placeholder"] == "70"
-    assert fields["PRDFORGE_LLM__CLI_TIMEOUT_S"]["value"] == ""
+    assert fields["SOURCEWORK_LLM__CLI_TIMEOUT_S"]["placeholder"] == "600.0"
+    assert fields["SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS"]["placeholder"] == "70"
+    assert fields["SOURCEWORK_LLM__CLI_TIMEOUT_S"]["value"] == ""
 
 
 def test_a_suggestion_never_masquerades_as_a_saved_value(env_path: Path):
     # The API must report what is actually in the file; pre-filling is the
     # browser's business, and `set` is what tells the two apart.
     fields = {f["key"]: f for f in env_file.describe(env_path)}
-    cell = fields["PRDFORGE_LLM__OPENCODE_MODELS__DEFAULT"]
+    cell = fields["SOURCEWORK_LLM__OPENCODE_MODELS__DEFAULT"]
     assert cell["value"] == ""
     assert cell["set"] is False
     assert cell["suggested"]
@@ -887,7 +887,7 @@ def test_the_vendored_picker_is_present_and_attributed():
     where it came from, which version, and under what licence, because nothing
     else in this repo records it.
     """
-    from prdforge.ui.app import STATIC
+    from sourcework.ui.app import STATIC
 
     vendored = STATIC / "js" / "vendor" / "autocomplete.js"
     assert vendored.is_file()
@@ -904,7 +904,7 @@ def test_no_datalist_is_used_in_the_front_end():
     it was replaced is the reason this rule exists, and a test that forbids
     saying so would delete its own justification.
     """
-    from prdforge.ui.app import STATIC
+    from sourcework.ui.app import STATIC
 
     uses = ("el('datalist'", 'el("datalist"', "querySelector('datalist", "setAttribute('list'")
     offenders = [

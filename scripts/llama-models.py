@@ -9,7 +9,7 @@
 `-config-dir scripts/llama-swap.d -watch-config` and a rescan takes effect
 without restarting anything.
 
-Where it looks is `PRDFORGE_MODEL_DIRS` (colon-separated), so adding a model is
+Where it looks is `SOURCEWORK_MODEL_DIRS` (colon-separated), so adding a model is
 dropping a file in a folder. `add` records a Hugging Face repo instead;
 llama-server fetches it on first use, resuming and caching as it goes.
 """
@@ -26,7 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from prdforge.localmodels import (  # noqa: E402
+from sourcework.localmodels import (  # noqa: E402
     DEFAULT_CTX,
     LocalModel,
     curated_ids,
@@ -104,7 +104,7 @@ def remote_models() -> list[LocalModel]:
 def cmd_list(args: argparse.Namespace) -> int:
     roots = [Path(p).expanduser() for p in args.dir] or model_dirs()
     if not roots:
-        print("No model directories. Set PRDFORGE_MODEL_DIRS or pass --dir.", file=sys.stderr)
+        print("No model directories. Set SOURCEWORK_MODEL_DIRS or pass --dir.", file=sys.stderr)
         return 2
 
     vram = args.vram or detect_vram_gb()
@@ -126,7 +126,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 def cmd_scan(args: argparse.Namespace) -> int:
     roots = [Path(p).expanduser() for p in args.dir] or model_dirs()
     if not roots:
-        print("No model directories. Set PRDFORGE_MODEL_DIRS or pass --dir.", file=sys.stderr)
+        print("No model directories. Set SOURCEWORK_MODEL_DIRS or pass --dir.", file=sys.stderr)
         return 2
 
     vram = args.vram or detect_vram_gb()
@@ -169,7 +169,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="llama-models.py", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dir", action="append", default=[],
-                        help="a directory to scan (repeatable). Default: PRDFORGE_MODEL_DIRS")
+                        help="a directory to scan (repeatable). Default: SOURCEWORK_MODEL_DIRS")
     parser.add_argument("--vram", type=float, help="GB of VRAM to assume. Default: detected")
     parser.add_argument("--ctx", type=int, default=DEFAULT_CTX)
     sub = parser.add_subparsers(dest="command")

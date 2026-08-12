@@ -1,11 +1,11 @@
 import os
 
-os.environ.setdefault("PRDFORGE_LLM__STUB", "1")
-os.environ.setdefault("PRDFORGE_LOG_LEVEL", "WARNING")
+os.environ.setdefault("SOURCEWORK_LLM__STUB", "1")
+os.environ.setdefault("SOURCEWORK_LOG_LEVEL", "WARNING")
 
 import pytest  # noqa: E402
 
-from prdforge.models import (  # noqa: E402
+from sourcework.models import (  # noqa: E402
     Evidence,
     Modality,
     PRDDocument,

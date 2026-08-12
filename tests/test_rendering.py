@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from xml.etree import ElementTree
 
-from prdforge.confluence.storage import render_prd
-from prdforge.models import PRDDocument, ReviewFinding, ReviewReport, Severity
-from prdforge.render import to_markdown
+from sourcework.confluence.storage import render_prd
+from sourcework.models import PRDDocument, ReviewFinding, ReviewReport, Severity
+from sourcework.render import to_markdown
 
 
 def test_storage_output_is_well_formed_xml(prd: PRDDocument):
