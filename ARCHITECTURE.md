@@ -319,6 +319,8 @@ contract (`sourcework/backends/`):
 | `claude-code` | `claude -p --output-format json` | the CLI's stored login |
 | `opencode-cli` | `opencode run --format json` | OpenCode's provider config |
 | `copilot-cli` | `copilot -p --output-format json` | `copilot login` |
+| `codex-cli` | `codex exec --json` | `codex login` |
+| `agy-cli` | `agy --print --output-format json` | its own sign-in |
 
 The CLI family exists for one reason: **the credential problem disappears.**
 These tools are already installed and already authenticated on a developer's

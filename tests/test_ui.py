@@ -802,7 +802,8 @@ def test_the_model_fields_carry_both_axes():
     assert all(f.backend and f.role for f in models)
 
     covered = {(f.backend, f.role) for f in models}
-    for backend in ("litellm", "claude-code", "opencode-cli", "copilot-cli"):
+    for backend in ("litellm", "claude-code", "opencode-cli", "copilot-cli",
+                    "codex-cli", "agy-cli"):
         for role in ("default", "reasoning", "vision"):
             assert (backend, role) in covered, f"no control for {backend}/{role}"
 

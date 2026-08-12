@@ -15,7 +15,8 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir ".[ingest]"
 
-# The CLI backends (claude-code, opencode-cli, copilot-cli) are deliberately NOT
+# The CLI backends (claude-code, opencode-cli, copilot-cli, codex-cli, agy-cli)
+# are deliberately NOT
 # installed here. They authenticate as a *person* - a stored login, a
 # subscription - which is a developer-machine idea, not a container one. The
 # image runs the litellm backend; to use a CLI backend in a container you also
