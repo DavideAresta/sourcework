@@ -872,3 +872,36 @@ def test_a_reasoning_trace_never_reaches_the_json_parser():
     assert json.loads(_extract_json('{"value": 1, "note": "think about it"}')) == {
         "value": 1, "note": "think about it"
     }
+
+
+def test_the_critic_can_be_a_different_family_from_the_writer():
+    """The point of the role: a critic trained alongside the writer finds the
+    same phrasing natural, so it confirms rather than challenges."""
+    cfg = LLMSettings(
+        backend="litellm",
+        default_model="openai/qwen3.5-9b",
+        reasoning_model="openai/qwen3.6-27b",
+        critic_model="openai/gemma-4-12b",
+    )
+    assert cfg.model_for("reasoning") == "openai/qwen3.6-27b"
+    assert cfg.model_for("critic") == "openai/gemma-4-12b"
+
+
+def test_an_unset_critic_reviews_at_the_reasoning_model_not_the_cheap_one():
+    """Reviewing a PRD is the same weight of work as writing one. Falling back
+    to `default` would make the review weaker than the thing it reviews."""
+    cfg = LLMSettings(
+        backend="litellm",
+        default_model="openai/small",
+        reasoning_model="openai/big",
+    )
+    assert cfg.model_for("critic") == "openai/big"
+
+    # Same rule for a CLI backend, where the models live in a sub-model.
+    cli = LLMSettings(backend="claude-code")
+    cli = cli.model_copy(update={
+        "claude_code_models": cli.claude_code_models.model_copy(
+            update={"default": "haiku", "reasoning": "opus"}
+        )
+    })
+    assert cli.model_for("critic") == "opus"

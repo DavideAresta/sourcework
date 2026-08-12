@@ -123,7 +123,9 @@ h3 { font-size: 14px; margin: 18px 0 8px; color: var(--ink-2); }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-@media (max-width: 700px) { .grid2, .grid3 { grid-template-columns: 1fr; } }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 1000px) { .grid4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 700px) { .grid2, .grid3, .grid4 { grid-template-columns: 1fr; } }
 
 label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 4px; }
 
@@ -445,6 +447,7 @@ input.suggested {
 }
 
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 
 .more { margin-top: 14px; }
 .more > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 4px 0; }
@@ -453,7 +456,7 @@ input.suggested {
 .other-backend { padding: 12px 0; border-top: 1px solid var(--line); }
 
 @media (max-width: 700px) {
-  .profiles, .grid3 { grid-template-columns: 1fr; }
+  .profiles, .grid3, .grid4 { grid-template-columns: 1fr; }
 }
 
 /* -- model picker ----------------------------------------------------------

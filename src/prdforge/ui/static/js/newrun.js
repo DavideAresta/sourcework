@@ -13,8 +13,9 @@ import { attachModelPicker } from './combo.js';
 const TEMPLATES = ['standard', 'lean', 'technical', 'discovery'];
 const ROLES = [
   ['default', 'Extraction'],
-  ['reasoning', 'Analyst / writer / critic'],
+  ['reasoning', 'Analyst / writer'],
   ['vision', 'Images'],
+  ['critic', 'Review'],
 ];
 
 export function newRunView(onStarted) {
