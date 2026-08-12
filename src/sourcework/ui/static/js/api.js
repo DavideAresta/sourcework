@@ -37,6 +37,8 @@ export const api = {
   publish: (id, body) => request(`/api/runs/${id}/publish`, { method: 'POST', ...json(body) }),
 
   mesh: () => request('/api/mesh'),
+  health: () => request('/healthz'),
+  shutdown: () => request('/api/shutdown', { method: 'POST' }),
   dashboard: () => request('/api/dashboard'),
   backends: () => request('/api/backends'),
 

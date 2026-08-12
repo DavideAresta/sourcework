@@ -196,3 +196,45 @@ def test_every_state_has_a_marker():
     markers = {desktop.Status(state, "x").marker for state in
                ("ready", "starting", "no-engine", "error")}
     assert len(markers) == 4, "four states must be four distinguishable markers"
+
+
+# ---------------------------------------------------------------------------
+# Quitting
+# ---------------------------------------------------------------------------
+
+
+def test_a_checkout_server_offers_no_way_to_shut_it_down(tmp_path: Path):
+    """Process lifetime belongs to whoever started it. An endpoint that ends a
+    dev server or a compose deployment is a denial of service wearing a button."""
+    from fastapi.testclient import TestClient
+
+    from sourcework.ui.app import build_app
+
+    client = TestClient(build_app(workspace=tmp_path))
+
+    assert client.get("/healthz").json()["shutdown"] is False
+    assert client.post("/api/shutdown", headers={"X-SourceWork-UI": "1"}).status_code == 404
+
+
+def test_the_desktop_app_can_be_quit_from_its_own_interface(tmp_path: Path):
+    from fastapi.testclient import TestClient
+
+    from sourcework.ui.app import build_app
+
+    stopped = []
+    client = TestClient(build_app(workspace=tmp_path, on_shutdown=lambda: stopped.append(True)))
+
+    assert client.get("/healthz").json()["shutdown"] is True
+    response = client.post("/api/shutdown", headers={"X-SourceWork-UI": "1"})
+    assert response.status_code == 200
+    assert response.json() == {"stopping": True}
+
+
+def test_quitting_is_a_write_so_a_cross_site_page_cannot_do_it(tmp_path: Path):
+    from fastapi.testclient import TestClient
+
+    from sourcework.ui.app import build_app
+
+    client = TestClient(build_app(workspace=tmp_path, on_shutdown=lambda: None))
+
+    assert client.post("/api/shutdown").status_code == 403

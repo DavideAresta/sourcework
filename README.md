@@ -45,14 +45,15 @@ the requirement.
 
 ## Quick start
 
-Run it as a desktop app — the whole mesh plus the UI in one process, with a
-menu-bar icon:
+Run it as a desktop app — the whole mesh plus the UI in one process:
 
 ```bash
-pip install 'sourcework[app]'
-sourcework app               # tray icon, opens your browser
+sourcework app               # starts everything, opens your browser
 sourcework doctor            # what is configured, and what is actually reachable
 ```
+
+No tray icon and no extra to install: a finished run raises a browser
+notification, and Quit is in the interface.
 
 ```bash
 make install                 # venv + editable install

@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -104,7 +104,14 @@ class RefineRun(BaseModel):
     llm: LLMOverrides | None = None
 
 
-def build_app(workspace: Path | None = None) -> FastAPI:
+def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | None = None) -> FastAPI:
+    """The web app. ``on_shutdown``, when given, exposes a way to stop it.
+
+    Only the desktop launcher passes one. A running-in-a-checkout server or a
+    compose deployment has no business offering "quit" over HTTP - there the
+    process lifetime belongs to whoever started it, and an endpoint that ends it
+    is a denial of service wearing a button.
+    """
     paths = UIPaths(workspace or Path(settings().ui_workspace))
     store = RunStore(paths.db)
     manager = RunManager(store)
@@ -163,8 +170,24 @@ def build_app(workspace: Path | None = None) -> FastAPI:
         return HTMLResponse((STATIC / "dashboard.html").read_text(encoding="utf-8"))
 
     @app.get("/healthz", tags=["ops"])
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok", "service": "sourcework-ui"}
+    async def healthz() -> dict[str, Any]:
+        # `shutdown` tells the front end whether to draw a Quit control. The UI
+        # is served from the same build in both modes, so it has to ask rather
+        # than assume.
+        return {"status": "ok", "service": "sourcework-ui", "shutdown": on_shutdown is not None}
+
+    if on_shutdown is not None:
+
+        @app.post("/api/shutdown", tags=["ops"])
+        async def shutdown() -> dict[str, bool]:
+            # Answer first, stop after: closing the socket before the reply
+            # leaves the browser showing a network error for a deliberate quit.
+            async def stop() -> None:
+                await asyncio.sleep(0.2)
+                on_shutdown()
+
+            asyncio.create_task(stop())  # noqa: RUF006 - deliberately unawaited
+            return {"stopping": True}
 
     # -- runs --------------------------------------------------------------
 

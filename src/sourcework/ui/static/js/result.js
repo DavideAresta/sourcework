@@ -7,6 +7,7 @@
 import { el, clear, mount, escape, ago, duration, toast } from './dom.js';
 import { api } from './api.js';
 import { renderMarkdown } from './markdown.js';
+import * as notify from './notify.js';
 import { refineTab } from './refine.js';
 import { narrationPanel } from './narration.js';
 
@@ -100,6 +101,10 @@ export function runView(runId, { onChanged }) {
       });
       stopTicking();
       narration.settle();
+      // Re-read before notifying: the stream resolves on a network drop too,
+      // and the run row is the source of truth about how it ended.
+      const finished = await api.getRun(runId).catch(() => null);
+      if (finished) notify.runFinished(finished);
       onChanged?.();
     }
   }

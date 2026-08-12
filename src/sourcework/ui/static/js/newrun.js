@@ -8,6 +8,7 @@
 
 import { el, clear, bytes, toast } from './dom.js';
 import { api } from './api.js';
+import * as notify from './notify.js';
 import { attachModelPicker } from './combo.js';
 
 const TEMPLATES = ['standard', 'lean', 'technical', 'discovery'];
@@ -134,6 +135,11 @@ export function newRunView(onStarted) {
       toast('Add at least one file, URI, note or CQL query.', 'err');
       return;
     }
+
+    // On the gesture that starts a run, never on page load: a prompt that
+    // appears before you have done anything is the one people block, and
+    // blocking is permanent.
+    notify.askOnGesture();
 
     const models = {};
     for (const [role] of ROLES) {

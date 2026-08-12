@@ -1,15 +1,17 @@
 """SourceWork as a desktop application.
 
-One process: the eight agents as threads, the web UI as a thread, and a tray
-icon on the main thread because macOS insists. The browser the user already has
-renders the UI, so there is no second browser to ship, no renderer process and
-no IPC layer - the front end is plain ES modules served over loopback, exactly
-as it is in development.
+One process: the eight agents as threads and the web UI as another. The browser
+the user already has renders the interface, so there is no second browser to
+ship, no renderer process and no IPC layer - the front end is plain ES modules
+served over loopback, exactly as it is in development.
 
-The tray is optional at runtime. Without ``pystray`` this still starts
-everything and opens a browser, and waits for Ctrl-C - which is the right
-behaviour for a developer and means the LGPL dependency can stay out of the
-default install.
+There is deliberately no tray icon. The three things one would do are covered
+without a GUI toolkit: the packaged app's own Dock or taskbar entry says it is
+running, a second launch re-opens the browser rather than starting a rival, and
+a finished run raises a *notification from the page* - which says which document
+and whether it worked, where an icon changing colour says only "something".
+That removes a platform-specific backend and an LGPL dependency from a project
+whose licence is otherwise wholly permissive.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ STARTUP_TIMEOUT_S = 30.0
 
 @dataclass
 class Status:
-    """What the tray shows, and why."""
+    """Whether this installation can actually do anything, and why not."""
 
     state: str
     """starting | ready | no-engine | error"""
@@ -75,12 +77,13 @@ def _start_mesh() -> None:
         threading.Thread(target=uvicorn.Server(config).run, daemon=True).start()
 
 
-def _start_ui(port: int) -> None:
+def _start_ui(port: int, on_shutdown=None) -> None:  # noqa: ANN001
     import uvicorn
 
     from sourcework.ui.app import build_app
 
-    config = uvicorn.Config(build_app(), host="127.0.0.1", port=port, log_level="warning")
+    app = build_app(on_shutdown=on_shutdown)
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     threading.Thread(target=uvicorn.Server(config).run, daemon=True).start()
 
 
@@ -104,27 +107,7 @@ def current_status(port: int) -> Status:
     return Status("no-engine", "no model server found - open SourceWork to set one up")
 
 
-def _icon_image(status: Status):  # noqa: ANN202 - PIL.Image, imported lazily
-    """A flat disc in a colour that means something across the four states.
-
-    Drawn rather than shipped as four PNGs: it has to be legible at 16px on
-    light and dark menu bars, and a solid shape is the one thing that always is.
-    """
-    from PIL import Image, ImageDraw
-
-    colour = {
-        "ready": (46, 160, 67),
-        "starting": (150, 150, 150),
-        "no-engine": (219, 154, 4),
-        "error": (218, 54, 51),
-    }.get(status.state, (150, 150, 150))
-
-    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    ImageDraw.Draw(image).ellipse((8, 8, 56, 56), fill=colour)
-    return image
-
-
-def run(port: int | None = None, *, open_browser: bool = True, tray: bool = True) -> int:
+def run(port: int | None = None, *, open_browser: bool = True) -> int:
     """Start everything and stay up. Returns a process exit code."""
     from sourcework.ui.app import PORT
 
@@ -140,8 +123,9 @@ def run(port: int | None = None, *, open_browser: bool = True, tray: bool = True
     paths.ensure(paths.workspace())
     logging.basicConfig(level=settings().log_level, format="%(levelname)-7s %(name)s: %(message)s")
 
+    stopping = threading.Event()
     _start_mesh()
-    _start_ui(port)
+    _start_ui(port, on_shutdown=stopping.set)
 
     if not _wait_until_ready(port):
         print(
@@ -157,64 +141,17 @@ def run(port: int | None = None, *, open_browser: bool = True, tray: bool = True
     if open_browser:
         webbrowser.open(url)
 
-    if tray:
-        icon = _build_tray(port, url)
-        if icon is not None:
-            icon.run()  # blocks on the main thread, which macOS requires
-            return 0
-        print("  (no tray: pip install 'sourcework[app]' for a menu-bar icon)", flush=True)
-
-    print("  Ctrl-C to stop.", flush=True)
+    print("  Quit from the app, or Ctrl-C here.", flush=True)
     try:
-        while True:
-            time.sleep(3600)
+        # Woken by the Quit control in the UI, or by Ctrl-C. Daemon threads die
+        # with the process either way; an interrupted run is marked failed on
+        # the next start by `reap_orphans`, so nothing is left claiming to run.
+        while not stopping.wait(timeout=1.0):
+            pass
+        print("Stopped.", flush=True)
     except KeyboardInterrupt:
-        print("\nStopped.")
+        print("\nStopped.", flush=True)
     return 0
-
-
-def _build_tray(port: int, url: str):  # noqa: ANN202 - pystray.Icon
-    """The menu, or None when pystray is not installed."""
-    try:
-        import pystray
-    except ImportError:
-        return None
-
-    def refresh(icon: object) -> None:
-        status = current_status(port)
-        icon.icon = _icon_image(status)  # type: ignore[attr-defined]
-        icon.title = f"SourceWork - {status.detail}"  # type: ignore[attr-defined]
-
-    def on_open(icon: object, _item: object) -> None:
-        webbrowser.open(url)
-
-    def on_workspace(icon: object, _item: object) -> None:
-        _reveal(paths.workspace())
-
-    def on_log(icon: object, _item: object) -> None:
-        _reveal(paths.log_file())
-
-    def on_recheck(icon: object, _item: object) -> None:
-        refresh(icon)
-
-    def on_quit(icon: object, _item: object) -> None:
-        # Daemon threads die with the process. An in-flight run is marked failed
-        # on the next start by `reap_orphans`, so nothing is left claiming to be
-        # running - but the work is lost, which is why this is the last item and
-        # not the first.
-        icon.stop()  # type: ignore[attr-defined]
-
-    status = current_status(port)
-    menu = pystray.Menu(
-        pystray.MenuItem("Open SourceWork", on_open, default=True),
-        pystray.MenuItem(lambda _: current_status(port).detail, on_recheck),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Open workspace folder", on_workspace),
-        pystray.MenuItem("View log", on_log),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Quit SourceWork", on_quit),
-    )
-    return pystray.Icon("sourcework", _icon_image(status), f"SourceWork - {status.detail}", menu)
 
 
 def _reveal(target) -> None:  # noqa: ANN001 - Path

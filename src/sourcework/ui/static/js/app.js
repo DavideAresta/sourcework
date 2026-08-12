@@ -56,6 +56,37 @@ async function refreshSidebar() {
   }
 }
 
+// The Quit control, drawn only when the server says it has somewhere to send it.
+// Running in a checkout or under compose there is no shutdown endpoint, and a
+// button that 404s is worse than no button.
+async function mountQuit() {
+  const header = document.querySelector('header.top');
+  if (!header || document.getElementById('quit')) return;
+  let health;
+  try {
+    health = await api.health();
+  } catch {
+    return;
+  }
+  if (!health.shutdown) return;
+
+  const button = el('button', {
+    id: 'quit',
+    class: 'ghost',
+    title: 'Stop SourceWork. Anything still running is lost.',
+    onClick: async () => {
+      if (!confirm('Quit SourceWork? A run in progress will be lost.')) return;
+      try {
+        await api.shutdown();
+      } catch { /* the socket closing *is* the success case */ }
+      document.body.innerHTML =
+        '<p style="padding:2rem;font:14px system-ui">SourceWork has stopped. '
+        + 'You can close this tab.</p>';
+    },
+  }, 'Quit');
+  header.append(button);
+}
+
 async function refreshMesh() {
   try {
     const mesh = await api.mesh();
@@ -105,6 +136,7 @@ document.getElementById('new-run').addEventListener('click', () => {
 
 render();
 refreshMesh();
+mountQuit();
 setInterval(refreshMesh, 30_000);
 // Cheap and good enough: a run started in another tab shows up within a minute.
 setInterval(refreshSidebar, 60_000);
