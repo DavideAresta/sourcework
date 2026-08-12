@@ -189,6 +189,8 @@ provider's, not ours:
 | `opencode-cli` | **yes** — real text, arriving before the answer | complete, when the call ends |
 | `copilot-cli` | **yes on OpenAI models** — token by token, via `--enable-reasoning-summaries`. An Anthropic model behind Copilot returns it encrypted instead | token by token |
 | `claude-code` | no — thinking blocks arrive with `thinking: ""` and the content only present as an encrypted signature. The panel shows a live token estimate instead | **token by token** |
+| `codex-cli` | yes — reasoning items as they complete. Costs **no extra flag**: `--json` is already how the answer is parsed | token by token |
+| `agy-cli` | yes — `text_delta` events under `--output-format stream-json` | token by token |
 | `litellm` | not streamed — the API path answers in one response | — |
 
 Reasoning only appears when the model actually does some: a trivial question
@@ -263,8 +265,10 @@ An agent calls `llm.structured(...)`. What sits behind that is configuration:
 | `claude-code` | `claude -p --output-format json` | the CLI's own login |
 | `opencode-cli` | `opencode run --format json` | OpenCode's provider config |
 | `copilot-cli` | `copilot -p --output-format json` | `copilot login` |
+| `codex-cli` | `codex exec --json` | `codex login` |
+| `agy-cli` | `agy --print --output-format json` | its own sign-in |
 
-The three CLI backends carry **their own** authentication, so if you are signed
+The five CLI backends carry **their own** authentication, so if you are signed
 into one of those tools the entire pipeline runs on that subscription with no
 key plumbed through SourceWork:
 
