@@ -1,4 +1,15 @@
-# Running PRD Forge as a multi-tenant service
+# Running SourceWork as a multi-tenant service
+
+> **Considered and not taken (August 2026).** SourceWork is a local application
+> instead — see [desktop.md](desktop.md). Nearly everything below is a list of
+> things to *undo* about the current design: Postgres for SQLite, object storage
+> for local disk, a job queue for in-process tasks, identity where there is none.
+> Running locally keeps all of those as correct choices, and it makes the
+> local-model work the product rather than dead weight, because the documents
+> never leave the machine.
+>
+> Kept because "why isn't this a SaaS?" deserves a real answer, and because the
+> schema and phasing here are still right if the decision ever reverses.
 
 A design plan, not a decision. It says what would have to change, in what
 order, and which choices are yours rather than the architecture's.
