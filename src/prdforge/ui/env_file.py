@@ -120,6 +120,16 @@ FIELDS: tuple[Field, ...] = (
     Field("PRDFORGE_LLM__ANALYSIS_BATCH_CHARS", "Analyst slice: characters", "Limits",
           "number",
           help="The same, measured on the prompt instead. 0 turns it off."),
+    Field("PRDFORGE_LLM__CONSTRAINED_JSON", "Enforce the JSON schema", "Limits", "bool",
+          help="Have the server constrain decoding to the schema rather than just "
+               "describing it in the prompt. On llama.cpp, vLLM or Ollama this makes "
+               "malformed JSON impossible instead of unlikely, which is what stops a "
+               "small local model spending its retries re-answering. Backends that "
+               "cannot enforce a schema ignore it."),
+    Field("PRDFORGE_LLM__LITELLM_RETRIES", "litellm retries per call", "Limits", "number",
+          help="Retries inside a single API call. Worth lowering for a local server, "
+               "where the usual failure is a timeout: 3 attempts at a 20-minute "
+               "ceiling is an hour spent learning the same thing once."),
 
     # -- credentials -------------------------------------------------------
     Field("ANTHROPIC_API_KEY", "Anthropic API key", "Credentials", "password",

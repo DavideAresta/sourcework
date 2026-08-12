@@ -54,7 +54,9 @@ def build(backend_id: str, cfg: LLMSettings) -> LLMBackend:
     if wanted == "litellm":
         from prdforge.backends.litellm_backend import LiteLLMBackend
 
-        return LiteLLMBackend(api_base=cfg.api_base, api_key=cfg.api_key)
+        return LiteLLMBackend(
+            api_base=cfg.api_base, api_key=cfg.api_key, num_retries=cfg.litellm_retries
+        )
     if wanted == "claude-code":
         from prdforge.backends.claude_code import ClaudeCodeBackend
 
