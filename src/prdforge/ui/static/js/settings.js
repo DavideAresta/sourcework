@@ -25,7 +25,7 @@ const saveButton = document.getElementById('save');
 
 const controls = new Map();
 
-const ROLES = ['default', 'reasoning', 'vision'];
+const ROLES = ['default', 'reasoning', 'vision', 'critic'];
 
 // Role ids are the code's vocabulary, not the reader's. "reasoning" is the role
 // the analyst runs on, and that is what the label should say.
@@ -33,12 +33,14 @@ const ROLE_LABEL = {
   default: 'Everyday work',
   reasoning: 'Hard thinking',
   vision: 'Reading images',
+  critic: 'Adversarial review',
 };
 
 const ROLE_HELP = {
   default: 'Ingestion, drafting, review',
   reasoning: 'The analyst — the call that decides whether the PRD is any good',
   vision: 'Screenshots, wireframes, diagrams',
+  critic: 'Best from another family - a critic that shares the writer\'s training shares its blind spots',
 };
 
 function control(field) {
@@ -139,7 +141,7 @@ function modelSection(fields, profiles) {
       ),
       el('div', { class: 'small muted', style: 'margin:2px 0 14px' },
         'Everything runs here unless a run chooses otherwise.'),
-      el('div', { class: 'grid3' },
+      el('div', { class: 'grid4' },
         ...ROLES.map((role) => {
           const cell = cells.get(`${active} ${role}`);
           return el('div', {},
@@ -161,7 +163,7 @@ function modelSection(fields, profiles) {
       rest.append(
         el('div', { class: 'other-backend' },
           el('div', { class: 'mono small', style: 'margin-bottom:6px' }, backend),
-          el('div', { class: 'grid3' },
+          el('div', { class: 'grid4' },
             ...ROLES.map((role) => {
               const cell = cells.get(`${backend} ${role}`);
               return el('div', {},

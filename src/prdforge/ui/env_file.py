@@ -77,6 +77,8 @@ FIELDS: tuple[Field, ...] = (
           backend="litellm", role="reasoning"),
     Field("PRDFORGE_LLM__VISION_MODEL", "vision", "Models",
           backend="litellm", role="vision"),
+    Field("PRDFORGE_LLM__CRITIC_MODEL", "critic", "Models",
+          backend="litellm", role="critic"),
 
     Field("PRDFORGE_LLM__CLAUDE_CODE_MODELS__DEFAULT", "default", "Models",
           backend="claude-code", role="default"),
@@ -84,6 +86,8 @@ FIELDS: tuple[Field, ...] = (
           backend="claude-code", role="reasoning"),
     Field("PRDFORGE_LLM__CLAUDE_CODE_MODELS__VISION", "vision", "Models",
           backend="claude-code", role="vision"),
+    Field("PRDFORGE_LLM__CLAUDE_CODE_MODELS__CRITIC", "critic", "Models",
+          backend="claude-code", role="critic"),
 
     Field("PRDFORGE_LLM__OPENCODE_MODELS__DEFAULT", "default", "Models",
           backend="opencode-cli", role="default"),
@@ -91,6 +95,8 @@ FIELDS: tuple[Field, ...] = (
           backend="opencode-cli", role="reasoning"),
     Field("PRDFORGE_LLM__OPENCODE_MODELS__VISION", "vision", "Models",
           backend="opencode-cli", role="vision"),
+    Field("PRDFORGE_LLM__OPENCODE_MODELS__CRITIC", "critic", "Models",
+          backend="opencode-cli", role="critic"),
 
     Field("PRDFORGE_LLM__COPILOT_MODELS__DEFAULT", "default", "Models",
           backend="copilot-cli", role="default"),
@@ -98,6 +104,8 @@ FIELDS: tuple[Field, ...] = (
           backend="copilot-cli", role="reasoning"),
     Field("PRDFORGE_LLM__COPILOT_MODELS__VISION", "vision", "Models",
           backend="copilot-cli", role="vision"),
+    Field("PRDFORGE_LLM__COPILOT_MODELS__CRITIC", "critic", "Models",
+          backend="copilot-cli", role="critic"),
 
     # -- limits --------------------------------------------------------------
     Field("PRDFORGE_LLM__EFFORT", "Reasoning effort", "Limits", "select",
@@ -160,18 +168,18 @@ FIELDS: tuple[Field, ...] = (
 BY_KEY = {f.key: f for f in FIELDS}
 
 
-def _models(litellm: tuple[str, str, str], claude: tuple[str, str, str],
-            opencode: tuple[str, str, str], copilot: tuple[str, str, str]) -> dict[str, str]:
-    """One profile, as (default, reasoning, vision) per backend."""
+_ROLE_SUFFIXES = ("DEFAULT", "REASONING", "VISION", "CRITIC")
+
+
+def _models(litellm: tuple[str, ...], claude: tuple[str, ...],
+            opencode: tuple[str, ...], copilot: tuple[str, ...]) -> dict[str, str]:
+    """One profile, as (default, reasoning, vision, critic) per backend."""
     keys = {
         "litellm": ("PRDFORGE_LLM__DEFAULT_MODEL", "PRDFORGE_LLM__REASONING_MODEL",
-                    "PRDFORGE_LLM__VISION_MODEL"),
-        "claude-code": tuple(f"PRDFORGE_LLM__CLAUDE_CODE_MODELS__{r}"
-                             for r in ("DEFAULT", "REASONING", "VISION")),
-        "opencode-cli": tuple(f"PRDFORGE_LLM__OPENCODE_MODELS__{r}"
-                              for r in ("DEFAULT", "REASONING", "VISION")),
-        "copilot-cli": tuple(f"PRDFORGE_LLM__COPILOT_MODELS__{r}"
-                             for r in ("DEFAULT", "REASONING", "VISION")),
+                    "PRDFORGE_LLM__VISION_MODEL", "PRDFORGE_LLM__CRITIC_MODEL"),
+        "claude-code": tuple(f"PRDFORGE_LLM__CLAUDE_CODE_MODELS__{r}" for r in _ROLE_SUFFIXES),
+        "opencode-cli": tuple(f"PRDFORGE_LLM__OPENCODE_MODELS__{r}" for r in _ROLE_SUFFIXES),
+        "copilot-cli": tuple(f"PRDFORGE_LLM__COPILOT_MODELS__{r}" for r in _ROLE_SUFFIXES),
     }
     chosen = {"litellm": litellm, "claude-code": claude,
               "opencode-cli": opencode, "copilot-cli": copilot}
@@ -183,10 +191,12 @@ PROFILES: dict[str, dict[str, Any]] = {
         "label": "Cheap",
         "detail": "The small model everywhere. Fine for a first pass over clean material.",
         "models": _models(
-            ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5"),
-            ("haiku", "sonnet", "haiku"),
-            ("opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5"),
-            ("auto", "auto", "auto"),
+            ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5",
+             "anthropic/claude-sonnet-4-5"),
+            ("haiku", "sonnet", "haiku", "sonnet"),
+            ("opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5",
+             "opencode/claude-haiku-4-5"),
+            ("auto", "auto", "auto", "auto"),
         ),
     },
     "balanced": {
@@ -194,12 +204,14 @@ PROFILES: dict[str, dict[str, Any]] = {
         "detail": "The big model only where it earns its keep - the analyst, which is the "
                   "call that decides whether the PRD is any good.",
         "models": _models(
-            ("anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4-5"),
-            ("sonnet", "opus", "sonnet"),
-            ("opencode/claude-haiku-4-5", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5"),
+            ("anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4-5",
+             "anthropic/claude-opus-4-6"),
+            ("sonnet", "opus", "sonnet", "opus"),
+            ("opencode/claude-haiku-4-5", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5",
+             "opencode/claude-opus-4-6"),
             # gpt-5.4 rather than auto: it is the Copilot model that returns
             # readable reasoning, which is what the run view shows you live.
-            ("auto", "gpt-5.4", "auto"),
+            ("auto", "gpt-5.4", "auto", "gpt-5.4"),
         ),
     },
     "best": {
@@ -207,10 +219,12 @@ PROFILES: dict[str, dict[str, Any]] = {
         "detail": "The big model everywhere. Slower and dearer; worth it on messy, "
                   "contradictory source material.",
         "models": _models(
-            ("anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6"),
-            ("opus", "opus", "opus"),
-            ("opencode/claude-opus-4-6", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5"),
-            ("gpt-5.4", "gpt-5.4", "gpt-5.4"),
+            ("anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6",
+             "anthropic/claude-opus-4-6"),
+            ("opus", "opus", "opus", "opus"),
+            ("opencode/claude-opus-4-6", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5",
+             "opencode/claude-opus-4-6"),
+            ("gpt-5.4", "gpt-5.4", "gpt-5.4", "gpt-5.4"),
         ),
     },
 }

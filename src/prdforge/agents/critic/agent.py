@@ -74,7 +74,7 @@ class CriticDraft(BaseModel):
 
 class CriticExecutor(SkillExecutor):
     def __init__(self) -> None:
-        self.llm = LLM(role="reasoning")
+        self.llm = LLM(role="critic")
         self.skills = {"review_prd": self.review_prd}
         self.default_skill = "review_prd"
         super().__init__()
@@ -102,7 +102,7 @@ class CriticExecutor(SkillExecutor):
         )
 
         await progress("Adversarial review")
-        draft = await self.llm.structured(system, user, CriticDraft, role="reasoning")
+        draft = await self.llm.structured(system, user, CriticDraft, role="critic")
         findings.extend(draft.findings)
 
         report = ReviewReport(

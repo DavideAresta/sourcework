@@ -15,7 +15,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-ROLES = ("default", "reasoning", "vision", "fast")
+ROLES = ("default", "reasoning", "vision", "fast", "critic")
 
 BACKEND_IDS = ("litellm", "claude-code", "opencode-cli", "copilot-cli")
 """Every way of reaching a model. ``litellm`` is an HTTPS call against a hosted
@@ -57,8 +57,15 @@ class BackendModels(BaseModel):
     reasoning: str | None = None
     vision: str | None = None
     fast: str | None = None
+    critic: str | None = None
 
     def for_role(self, role: str) -> str | None:
+        if role == "critic":
+            # A critic left unset follows `reasoning`, not `default`: reviewing
+            # a PRD is the same weight of work as writing one, and silently
+            # demoting it to the cheap model would make the review weaker than
+            # the thing it reviews.
+            return self.critic or self.reasoning or self.default
         return getattr(self, role, None) or self.default
 
 
@@ -100,6 +107,17 @@ class LLMSettings(BaseModel):
     reasoning_model: str = "anthropic/claude-opus-4-6"
     vision_model: str = "anthropic/claude-sonnet-4-5"
     fast_model: str = "anthropic/claude-haiku-4-5"
+
+    critic_model: str | None = None
+    """The adversarial pass, kept separate from :attr:`reasoning_model` so it
+    can be a *different family*.
+
+    A critic built on the same model as the writer shares its blind spots: it
+    was trained to find the same phrasing natural, so the sentence that reads
+    fine to the writer reads fine to the reviewer too. Pointing this at another
+    lineage is the cheapest way to make the review adversarial rather than
+    confirmatory. Unset means "use the reasoning model", which is the old
+    behaviour."""
 
     max_tokens: int = 8192
     temperature: float = 0.2
@@ -231,6 +249,7 @@ class LLMSettings(BaseModel):
                 "reasoning": self.reasoning_model,
                 "vision": self.vision_model,
                 "fast": self.fast_model,
+                "critic": self.critic_model or self.reasoning_model,
             }.get(role, self.default_model)
         return None
 
