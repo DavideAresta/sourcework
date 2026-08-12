@@ -7,6 +7,12 @@ __pycache__/
 out/
 workspace/
 
+# Local model serving. Both are specific to one machine: the generated config
+# holds absolute paths to that machine's GGUF files, and llama-swap.yaml is the
+# operator's own tuning. `scripts/llama-swap.example.yaml` is the tracked one.
+scripts/llama-swap.yaml
+scripts/llama-swap.d/
+
 # Databases and anything a run produced. The UI store holds full source text,
 # every evidence quote and complete PRDs - it is the most sensitive artifact in
 # the tree and must never be a commit away from a remote.

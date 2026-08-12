@@ -1,0 +1,42 @@
+# Hand-tuned models. Everything else is discovered.
+#
+# COPY THIS TO llama-swap.yaml AND EDIT THE TWO PATHS IN `macros`.
+# The copy is gitignored, because these paths belong to your machine.
+#
+# `scripts/llama-models.py scan` writes llama-swap.d/models.yaml from whatever
+# GGUFs are under PRDFORGE_MODEL_DIRS, and llama-swap loads both files. Ids
+# defined here are left out of the generated one, so tuning written down here
+# survives every rescan.
+#
+# Put a model here only when it needs something the scan cannot infer.
+#
+#   scripts/llama-swap.sh          serves both files, reloading on change
+#   scripts/llama-models.py list   what is on disk and whether it fits
+#
+# 16 GB of VRAM means one model resident at a time, so a role change costs a
+# reload - a few seconds, since the weights stay in the page cache. The pipeline
+# only crosses roles a handful of times per run.
+
+healthCheckTimeout: 300
+
+macros:
+  server: >
+    /usr/bin/env LD_LIBRARY_PATH=/opt/llama.cpp
+    /opt/llama.cpp/llama-server
+    --host 127.0.0.1 --port ${PORT} --jinja --metrics
+  models_dir: /srv/models
+
+models:
+  # The one model the scan gets wrong. `-rea off` does not apply to harmony:
+  # gpt-oss always reasons, and the knob is how *much*. At the default effort
+  # it spent an entire 8192-token budget thinking about the critic's prompt and
+  # returned empty content, which failed the run. `low` leaves the budget for
+  # the answer; `--reasoning-budget` caps it as a second line of defence.
+  gpt-oss-20b:
+    cmd: |
+      ${server}
+      -m ${models_dir}/gpt-oss-20b-GGUF/gpt-oss-20b-MXFP4.gguf
+      -c 32768 -ngl 99
+      --chat-template-kwargs '{"reasoning_effort":"low"}'
+      --reasoning-budget 2048
+    ttl: 900
