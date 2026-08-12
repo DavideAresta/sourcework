@@ -42,6 +42,10 @@ def build_app(
     )
 
     sec = settings().security
+    # Refuses to build the app if enforcement is on with the shipped key. Here
+    # rather than at the edge of the CLI, so every way of starting an agent -
+    # serve, serve-all, compose, an embedded test mesh - inherits the check.
+    sec.guard()
     if sec.enforce:
 
         @app.middleware("http")

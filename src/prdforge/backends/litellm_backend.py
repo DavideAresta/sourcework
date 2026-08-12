@@ -37,6 +37,25 @@ _SCHEMA_REFUSAL = re.compile(
 )
 
 
+_NO_VISION = re.compile(r"image input is not supported|mmproj|does not support image", re.IGNORECASE)
+
+
+def _blind_model_error(exc: Exception, model: str | None) -> str | None:
+    """Turn "image input is not supported" into an instruction.
+
+    A server that refuses images says so clearly, but it says it about a model
+    id, and the operator is looking at a role. Naming the setting is the
+    difference between a two-minute fix and reading backend logs.
+    """
+    if not _NO_VISION.search(str(exc)):
+        return None
+    return (
+        f"{model or 'the configured model'} cannot see images. Point "
+        f"PRDFORGE_LLM__VISION_MODEL at a multimodal model - for a local server that means "
+        f"one started with --mmproj. Original error: {str(exc)[:200]}"
+    )
+
+
 def _looks_like_schema_refusal(exc: Exception) -> bool:
     """Did the server object to the schema, rather than to the request?
 
@@ -188,6 +207,9 @@ class LiteLLMBackend(LLMBackend):
                         f"litellm call failed: {retry_exc}", backend=self.id
                     ) from retry_exc
             else:
+                blind = _blind_model_error(exc, request.model) if request.images else None
+                if blind:
+                    raise BackendError(blind, backend=self.id) from exc
                 # A rate limit or an exhausted balance arrives as a provider
                 # exception here, and it is the one class of failure where another
                 # backend is the right answer rather than another retry.

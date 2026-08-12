@@ -31,10 +31,17 @@ where it came from. Requirements cite evidence ids. Citations are validated in
 code — a model that invents an id loses it, and any requirement left uncited is
 forced to render as `derived`, meaning *inferred, not stated*.
 
-That single constraint is what makes the output auditable, gives you a real
-traceability matrix at the bottom of every PRD, and lets the critic agent
-mechanically detect unsupported claims rather than being asked to feel bad
-about them.
+That single constraint is what makes the output auditable and gives you a real
+traceability matrix at the bottom of every PRD.
+
+Be precise about what it guarantees, because the difference matters when you
+are the one signing off the document. Enforced in code: every citation resolves
+to evidence that really was extracted, an invented id is dropped, and a
+requirement left uncited renders as `derived`. **Not** enforced: that the cited
+evidence actually *supports* the claim. A model may cite a real id for a
+statement it does not justify, and no mechanical check will catch that - the
+traceability matrix exists so a human can, in one pass, with the quote next to
+the requirement.
 
 ## Quick start
 

@@ -7,7 +7,7 @@ get a change merged is to understand which ones.
 
 ```bash
 make install      # venv + editable install with the ingest and dev extras
-make test         # 216 tests, no API key and no network needed
+make test         # the suite: no API key and no network needed
 make lint         # ruff
 ```
 

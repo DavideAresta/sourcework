@@ -53,8 +53,12 @@ class LocalModel:
 
     hf_repo: str | None = None
     mmproj: Path | None = None
-    """Vision projector. Without it a multimodal model silently answers about
-    nothing when handed an image, which is worse than refusing."""
+    """Vision projector, required for the vision role.
+
+    llama.cpp refuses an image outright without one ("image input is not
+    supported - hint: you may need to provide the mmproj"), so the failure is
+    loud rather than an answer about nothing. Pairing it automatically is still
+    what makes a multimodal model usable at all."""
 
     size_bytes: int = 0
     extra_args: list[str] = field(default_factory=list)
@@ -181,6 +185,28 @@ def curated_ids(config: Path) -> set[str]:
     return ids
 
 
+HARMONY = re.compile(r"gpt-?oss", re.IGNORECASE)
+"""Models whose chat format ignores ``-rea off``.
+
+Named by id, which is a heuristic and will miss a model this list has not heard
+of. It is worth having anyway: the alternative is the failure it prevents, which
+is silent at the server and arrives as "the backend said nothing" a layer away.
+"""
+
+
+def _reasoning_args(model_id: str) -> list[str]:
+    """Stop a model from spending its whole output budget thinking.
+
+    Hybrid reasoning models answer an 8k-token budget with 8k tokens of
+    scratchpad and empty content, which the pipeline can only report as an empty
+    response. `-rea off` fixes it for most; harmony-format models ignore that
+    flag entirely and take a *budget* instead, so they are told separately.
+    """
+    if HARMONY.search(model_id):
+        return ['--chat-template-kwargs \'{"reasoning_effort":"low"}\'', "--reasoning-budget 2048"]
+    return ["-rea off"]
+
+
 def swap_config(
     models: list[LocalModel],
     *,
@@ -204,11 +230,7 @@ def swap_config(
 
     for model in models:
         fitted = model.fits(vram_gb)
-        # `-rea off` by default: a hybrid reasoning model spends the whole
-        # output budget in its scratchpad and returns empty content, which the
-        # pipeline can only report as "the backend said nothing". A model that
-        # should think is a curated entry, not a discovered one.
-        args = [f"-c {ctx}", "-rea off"]
+        args = [f"-c {ctx}", *_reasoning_args(model.id)]
         if fitted:
             # Only when it demonstrably fits: --fit cannot rescue an argument
             # that was set explicitly, so this is the line between "some layers

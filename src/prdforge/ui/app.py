@@ -24,7 +24,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -114,6 +120,34 @@ def build_app(workspace: Path | None = None) -> FastAPI:
 
     app = FastAPI(title="PRD Forge", lifespan=lifespan)
 
+    @app.middleware("http")
+    async def require_same_origin(request: Request, call_next):  # noqa: ANN001, ANN202
+        """Reject cross-site writes.
+
+        The UI has no login, so the browser has no cookie to protect - but it is
+        reachable at a known address on the operator's own machine, and that is
+        enough. A form on any page they visit can POST to localhost:8080
+        cross-origin without a preflight: it cannot read the reply, but the run
+        still happens, on attacker-chosen URIs, with attacker-chosen Confluence
+        publishing targets.
+
+        The fix is that a cross-origin form *cannot set a header*. Requiring one
+        forces a preflight, and this app sends no CORS headers, so the preflight
+        fails and the request never arrives. Reads are left alone: the same
+        origin policy already stops another site reading them.
+        """
+        writes = request.method in ("POST", "PUT", "PATCH", "DELETE")
+        if writes and request.headers.get("X-PRDForge-UI") != "1":
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "Missing the X-PRDForge-UI header. The browser UI sends it on "
+                              "every write; a cross-site form cannot. Add "
+                              "`-H 'X-PRDForge-UI: 1'` if you are calling the API directly."
+                },
+            )
+        return await call_next(request)
+
     # -- pages -------------------------------------------------------------
 
     @app.get("/", include_in_schema=False)
@@ -156,7 +190,7 @@ def build_app(workspace: Path | None = None) -> FastAPI:
             inputs.append(await _store_upload(upload, upload_dir))
         for uri in spec.uris:
             if uri.strip():
-                inputs.append(InputRef(uri=uri.strip()))
+                inputs.append(InputRef(uri=_vetted_uri(uri)))
         for note in spec.notes:
             if note.strip():
                 inputs.append(InputRef(uri="inline:note", title="Note", text=note.strip()))
@@ -337,7 +371,7 @@ def build_app(workspace: Path | None = None) -> FastAPI:
                 inputs.append(InputRef(uri="inline:note", title="Added requirement", text=note.strip()))
         for uri in spec.uris:
             if uri.strip():
-                inputs.append(InputRef(uri=uri.strip()))
+                inputs.append(InputRef(uri=_vetted_uri(uri)))
         for upload in [f for f in form.getlist("files") if isinstance(f, UploadFile)]:
             inputs.append(await _store_upload(upload, paths.uploads / child_id))
 
@@ -489,8 +523,13 @@ async def _store_upload(upload: UploadFile, target_dir: Path) -> InputRef:
         )
     target_dir.mkdir(parents=True, exist_ok=True)
     # Basename only: a filename is attacker-controlled and "../../etc/passwd"
-    # is a perfectly valid one as far as the browser is concerned.
-    name = Path(upload.filename or "upload").name or "upload"
+    # is a perfectly valid one as far as the browser is concerned. `.name`
+    # handles that; it does *not* handle a filename of exactly "..", which
+    # survives it intact and resolves to the parent directory - not a traversal
+    # (writing bytes to a directory just fails) but a 500 where a name would do.
+    name = Path(upload.filename or "upload").name.strip()
+    if name in ("", ".", ".."):
+        name = "upload"
     destination = target_dir / name
     destination.write_bytes(data)
     return InputRef(
@@ -502,6 +541,34 @@ async def _store_upload(upload: UploadFile, target_dir: Path) -> InputRef:
 
 def _env_path() -> Path:
     return Path(settings().env_file).expanduser().resolve()
+
+
+_REMOTE_SCHEMES = ("http://", "https://", "confluence://")
+
+
+def _vetted_uri(raw: str) -> str:
+    """A URI the HTTP API is willing to hand to ingestion.
+
+    ``fetch()`` resolves ``file:///…`` and bare absolute paths, which is right
+    for the CLI - an operator naming a file on their own machine - and wrong
+    here. This endpoint takes its input from an HTTP request, and a local path
+    arriving that way is an arbitrary-file-read primitive: ``.env`` with the
+    provider keys in it, ``~/.ssh/id_rsa``, anything the process can open, all
+    of it quoted back as evidence through ``/api/runs``.
+
+    Files reach a run through the upload field, which puts them somewhere this
+    process chose. Remote schemes are still allowed, and ``fetch()`` refuses the
+    private address ranges that would make those a way back in.
+    """
+    uri = raw.strip()
+    if uri.lower().startswith(_REMOTE_SCHEMES):
+        return uri
+    raise HTTPException(
+        400,
+        f"Refusing the local path {uri!r}. Attach the file instead - the URI field "
+        "reaches http(s) and confluence:// only, because a path sent over HTTP would "
+        "let anyone who can reach this port read any file this process can.",
+    )
 
 
 def _slug(text: str) -> str:

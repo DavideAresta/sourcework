@@ -287,10 +287,37 @@ class PeerSettings(BaseModel):
         return self.model_dump()
 
 
+DEFAULT_MESH_KEY = "dev-local-shared-secret"
+"""The shipped inter-agent secret. Published in a public repository, therefore
+known to everyone - which is fine while it is only ever used on a laptop, and
+is why :attr:`SecuritySettings.enforce` refuses to start with it."""
+
+
 class SecuritySettings(BaseModel):
-    api_key: str = "dev-local-shared-secret"
+    api_key: str = DEFAULT_MESH_KEY
     header: str = "X-PRDForge-Key"
     enforce: bool = False
+
+    allow_private_fetch: bool = False
+    """Let ingestion fetch loopback, link-local and private-range addresses.
+
+    Off, because the ability to make the server issue a request is the whole of
+    SSRF and nothing legitimate ingests a document from 169.254.169.254. On for
+    the deployment whose document store really is on an internal address."""
+
+    def guard(self) -> None:
+        """Refuse to enforce with the secret everybody already has.
+
+        Enforcement with the published default is worse than none: it looks
+        like authentication in a config review and stops nobody.
+        """
+        if self.enforce and self.api_key == DEFAULT_MESH_KEY:
+            raise RuntimeError(
+                "PRDFORGE_SECURITY__ENFORCE is on but the API key is still the shipped "
+                "default, which is published in this repository and therefore public. "
+                "Set PRDFORGE_SECURITY__API_KEY to something you generated:\n"
+                "    python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
 
 
 class LLMOverrides(BaseModel):
@@ -383,6 +410,15 @@ class Settings(BaseSettings):
     confluence: ConfluenceSettings = Field(default_factory=ConfluenceSettings)
     peers: PeerSettings = Field(default_factory=PeerSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
+
+    max_concurrent_runs: int = 2
+    """Runs executing at once; the rest queue.
+
+    A run is a queue of calls to one model server, not CPU work the OS can
+    interleave. Against a local server that is a single GPU holding a single
+    model, so two runs wanting different models make it thrash - both finish
+    later than if they had queued. Raise it when the backend is a hosted API
+    that parallelises on its own side."""
 
     ui_workspace: str = "workspace"
     """Where the UI keeps run history and uploads. Must be a directory the
