@@ -17,6 +17,8 @@ import pytest
 
 from sourcework import usage as usage_module
 from sourcework.backends import base, process, resolve_chain
+from sourcework.backends.agy import AgyBackend
+from sourcework.backends.agy import parse_output as agy_output
 from sourcework.backends.base import (
     BackendQuotaError,
     BackendRequest,
@@ -27,6 +29,8 @@ from sourcework.backends.base import (
     looks_like_quota,
 )
 from sourcework.backends.claude_code import ClaudeCodeBackend
+from sourcework.backends.codex import CodexBackend
+from sourcework.backends.codex import parse_events as codex_events
 from sourcework.backends.copilot import CopilotBackend
 from sourcework.backends.copilot import parse_events as copilot_events
 from sourcework.backends.opencode import OpenCodeBackend, parse_events
@@ -324,6 +328,332 @@ def test_copilot_converts_session_credits_at_the_published_rate():
     assert usage.cost == pytest.approx(0.016)
     # Never plain USD: the conversion is ours, not the provider's.
     assert usage.cost_unit == base.COST_USD_FROM_CREDITS
+
+
+# ---------------------------------------------------------------------------
+# codex-cli
+#
+# Event shapes here are copied from a real `codex exec --json` run against
+# codex-cli 0.147.0, not invented.
+# ---------------------------------------------------------------------------
+
+
+def _codex(*events):
+    return "\n".join(json.dumps(e) for e in events)
+
+
+CODEX_ANSWER = {"type": "item.completed",
+                "item": {"id": "item_0", "type": "agent_message", "text": "hello"}}
+CODEX_USAGE = {"type": "turn.completed",
+               "usage": {"input_tokens": 12852, "cached_input_tokens": 9984,
+                         "cache_write_input_tokens": 0, "output_tokens": 5,
+                         "reasoning_output_tokens": 0}}
+
+
+async def test_codex_always_skips_the_git_repo_check(cli):
+    """Without it every call fails "Not inside a trusted directory", because
+    the neutral cwd is a temp directory rather than a repository. A developer
+    testing the command by hand inside a checkout never sees it."""
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request())
+
+    argv = cli.argv
+    assert "--skip-git-repo-check" in argv
+    assert argv[argv.index("-C") + 1] == str(process.neutral_cwd())
+    assert cli.calls[-1]["cwd"] == str(process.neutral_cwd())
+
+
+async def test_codex_prompt_precedes_the_image_flags(cli):
+    """`-i` is variadic (`<FILE>...`), so a positional after it is read as
+    another image path - the same trap as opencode's `-f`."""
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(
+        request(images=[ImageInput(media_type="image/png", data_b64=PIXEL)])
+    )
+
+    argv = cli.argv
+    assert argv.index("-i") > argv.index("SYSTEM:\nSYS\n\nUSER:\nUSR")
+
+
+async def test_codex_keeps_the_image_tool_only_when_there_are_images(cli):
+    """The tool that reads the picture is the one a vision call cannot lose -
+    the same trade claude-code makes by granting Read."""
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request())
+    assert "view_image" in cli.argv, "disabled when nothing needs it"
+
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(
+        request(images=[ImageInput(media_type="image/png", data_b64=PIXEL)])
+    )
+    assert "view_image" not in cli.argv, "must stay enabled to read the image"
+    assert "shell_tool" in cli.argv, "...but the shell stays off either way"
+
+
+async def test_codex_runs_read_only_and_ignores_the_developers_setup(cli):
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request())
+
+    argv = cli.argv
+    assert argv[argv.index("--sandbox") + 1] == "read-only"
+    for flag in ("--ephemeral", "--ignore-user-config", "--ignore-rules"):
+        assert flag in argv
+
+
+async def test_codex_oversized_prompt_is_read_from_stdin_via_a_bare_dash(cli):
+    """A positional prompt alongside piped stdin is *appended* as a <stdin>
+    block rather than replaced, so the positional has to become `-`."""
+    cli.script(_codex(CODEX_ANSWER))
+    big = "x" * (process.MAX_ARGV_PROMPT_BYTES + 1)
+    await CodexBackend().generate(request(user=big))
+
+    assert "-" in cli.argv
+    assert cli.calls[-1]["stdin"].endswith(big)
+    assert big not in cli.argv
+
+
+@pytest.mark.parametrize(("asked", "sent"), [
+    ("low", "low"), ("medium", "high"), ("high", "high"),
+    ("xhigh", "xhigh"), ("max", "xhigh"),
+])
+async def test_codex_maps_the_effort_vocabulary_onto_the_three_it_takes(cli, asked, sent):
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request(effort=asked))
+    assert f"model_reasoning_effort={sent}" in cli.argv
+
+
+@pytest.mark.parametrize("junk", ["banana", "", "  "])
+async def test_codex_drops_an_effort_it_cannot_map(cli, junk):
+    """Effort travels as `-c model_reasoning_effort=…`, a config override,
+    where an unrecognised value is a hard startup error that kills the call -
+    unlike a flag value, which fails validation legibly."""
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request(effort=junk))
+    assert not any(a.startswith("model_reasoning_effort") for a in cli.argv)
+
+
+async def test_codex_honours_a_dedicated_home(cli):
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend(home="/tmp/codex-sourcework").generate(request())
+    assert cli.calls[-1]["env"]["CODEX_HOME"] == "/tmp/codex-sourcework"
+
+
+async def test_codex_never_asks_for_a_strict_output_schema(cli):
+    """--output-schema requires OpenAI strict mode (additionalProperties false,
+    every property required), which this project's Pydantic schemas do not
+    satisfy - the same reason the litellm backend omits `strict`."""
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(
+        request(json_schema={"type": "object", "properties": {"a": {"type": "string"}}})
+    )
+    assert "--output-schema" not in cli.argv
+
+
+def test_codex_sums_usage_across_turns_and_reports_no_cost():
+    text, usage, error = codex_events(_codex(CODEX_ANSWER, CODEX_USAGE, CODEX_USAGE))
+
+    assert text == "hello"
+    assert error is None
+    assert usage.input_tokens == 2 * 12852
+    assert usage.cache_read_tokens == 2 * 9984
+    # Codex reports tokens and no money; deriving dollars would invent the
+    # number the cost units exist to prevent.
+    assert usage.cost is None and usage.cost_unit is None
+
+
+def test_codex_prefers_a_standalone_json_final_message_over_narration():
+    narration = {"type": "item.completed",
+                 "item": {"id": "a", "type": "agent_message", "text": "Let me think..."}}
+    answer = {"type": "item.completed",
+              "item": {"id": "b", "type": "agent_message", "text": '{"value": 1}'}}
+    text, _, _ = codex_events(_codex(narration, answer))
+    assert text == '{"value": 1}'
+
+
+def test_codex_keeps_every_message_when_the_answer_is_prose():
+    first = {"type": "item.completed", "item": {"id": "a", "type": "agent_message", "text": "one"}}
+    second = {"type": "item.completed", "item": {"id": "b", "type": "agent_message", "text": "two"}}
+    text, _, _ = codex_events(_codex(first, second))
+    assert text == "one\ntwo", "joined, never concatenated mid-sentence"
+
+
+async def test_codex_streams_without_asking_for_anything_extra(cli):
+    """--json is unconditional because it is how the answer is parsed at all,
+    so watching a run costs no flag change - unique among the CLI backends."""
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request())
+    silent = list(cli.argv)
+
+    chunks, sink = _sink()
+    cli.script(_codex(CODEX_ANSWER))
+    await CodexBackend().generate(request(on_chunk=sink))
+
+    assert cli.argv == silent
+    assert [(c.kind, c.text) for c in chunks] == [("text", "hello")]
+
+
+async def test_codex_does_not_show_the_answer_twice(cli):
+    """A build emitting deltas *and* a completed event for the same item would
+    otherwise print the whole answer a second time."""
+    delta = {"type": "item.updated",
+             "item": {"id": "item_0", "type": "agent_message", "text": "hel"}}
+    chunks, sink = _sink()
+    cli.script(_codex(delta, CODEX_ANSWER))
+    await CodexBackend().generate(request(on_chunk=sink))
+
+    assert [c.text for c in chunks] == ["hel"]
+
+
+async def test_codex_empty_stream_is_an_empty_response_error(cli):
+    cli.script(_codex(CODEX_USAGE))
+    with pytest.raises(EmptyBackendResponseError):
+        await CodexBackend().generate(request())
+
+
+async def test_codex_reports_usage_billed_before_a_failure(cli):
+    cli.script(_codex(CODEX_USAGE), exit_code=1, stderr="usage limit reached")
+    with pytest.raises(BackendQuotaError) as caught:
+        await CodexBackend().generate(request())
+    assert caught.value.usage.input_tokens == 12852
+
+
+# ---------------------------------------------------------------------------
+# agy-cli
+#
+# Shapes copied from a real `agy --print --output-format json` run against
+# agy 1.1.12.
+# ---------------------------------------------------------------------------
+
+AGY_RESULT = {
+    "conversation_id": "abc", "status": "SUCCESS", "response": "hello\n",
+    "duration_seconds": 2.18, "num_turns": 1,
+    "usage": {"input_tokens": 17744, "output_tokens": 26, "thinking_tokens": 22,
+              "cache_read_tokens": 0, "total_tokens": 17770},
+}
+
+
+async def test_agy_never_lets_a_document_look_like_a_slash_command(cli):
+    """Print mode expands slash commands and skills from the prompt text, and
+    these prompts are documents - a transcript line starting "/" is content."""
+    cli.script(json.dumps(AGY_RESULT))
+    await AgyBackend().generate(request())
+    assert "--disable-slash-commands" in cli.argv
+    assert "--dangerously-skip-permissions" not in cli.argv
+
+
+async def test_agy_is_told_our_timeout_not_its_own(cli):
+    """agy's --print-timeout defaults to five minutes, which would cut a long
+    analyst call off before this project's timeout ever applied. The shortest
+    clock wins and it must not be theirs."""
+    cli.script(json.dumps(AGY_RESULT))
+    await AgyBackend().generate(request(timeout_s=600.0))
+    assert cli.argv[cli.argv.index("--print-timeout") + 1] == "600s"
+
+
+async def test_agy_sends_the_schema_it_can_actually_enforce(cli):
+    """The only CLI backend that honours request.json_schema rather than only
+    describing it in the prompt."""
+    schema = {"type": "object", "properties": {"a": {"type": "string"}}}
+    cli.script(json.dumps({**AGY_RESULT, "structured_output": {"a": "x"}}))
+    result = await AgyBackend().generate(request(json_schema=schema))
+
+    assert json.loads(cli.argv[cli.argv.index("--json-schema") + 1]) == schema
+    # The conforming value is the answer; `response` keeps the prose.
+    assert json.loads(result.text) == {"a": "x"}
+
+
+async def test_agy_asks_for_no_schema_when_none_was_given(cli):
+    cli.script(json.dumps(AGY_RESULT))
+    await AgyBackend().generate(request())
+    assert "--json-schema" not in cli.argv
+
+
+@pytest.mark.parametrize(("asked", "sent"), [
+    ("low", "low"), ("medium", "medium"), ("high", "high"),
+    ("xhigh", "high"), ("max", "high"),
+])
+async def test_agy_collapses_the_top_of_the_effort_vocabulary(cli, asked, sent):
+    cli.script(json.dumps(AGY_RESULT))
+    await AgyBackend().generate(request(model="claude-sonnet-4-6", effort=asked))
+    assert cli.argv[cli.argv.index("--effort") + 1] == sent
+
+
+async def test_agy_lets_a_tiered_model_id_win_over_the_effort_flag(cli):
+    """Most ids already encode a tier (gemini-3.6-flash-low). Sending both is a
+    contradiction the CLI would have to resolve for us."""
+    cli.script(json.dumps(AGY_RESULT))
+    await AgyBackend().generate(request(model="gemini-3.6-flash-low", effort="high"))
+    assert "--effort" not in cli.argv
+
+
+async def test_agy_oversized_prompt_goes_on_stdin_with_no_print_flag(cli):
+    """agy reads a piped stdin as the prompt, so passing --print as well would
+    send the whole thing twice."""
+    cli.script(json.dumps(AGY_RESULT))
+    big = "x" * (process.MAX_ARGV_PROMPT_BYTES + 1)
+    await AgyBackend().generate(request(user=big))
+
+    assert "--print" not in cli.argv
+    assert cli.calls[-1]["stdin"].endswith(big)
+    assert big not in cli.argv
+
+
+def test_agy_reads_tokens_and_reports_no_cost():
+    text, usage, error = agy_output(json.dumps(AGY_RESULT))
+
+    assert text == "hello\n"
+    assert error is None
+    assert usage.input_tokens == 17744
+    assert usage.reasoning_tokens == 22, "agy calls them thinking_tokens"
+    assert usage.cost is None and usage.cost_unit is None
+
+
+def test_agy_finds_the_result_inside_a_stream():
+    stream = "\n".join([
+        json.dumps({"event": "init"}),
+        json.dumps({"event": "step_update",
+                    "step_update": {"step_type": "agent_response", "state": "ACTIVE",
+                                    "text_delta": "hel"}}),
+        json.dumps({"event": "result", "result": AGY_RESULT}),
+    ])
+    text, usage, _ = agy_output(stream)
+    assert text == "hello\n"
+    assert usage.input_tokens == 17744
+
+
+def test_agy_a_non_success_status_is_an_error():
+    failed = {**AGY_RESULT, "status": "FAILED", "error": "quota exceeded"}
+    _, _, error = agy_output(json.dumps(failed))
+    assert "quota" in error
+
+
+async def test_agy_streams_deltas_only_when_someone_is_watching(cli):
+    cli.script(json.dumps(AGY_RESULT))
+    await AgyBackend().generate(request())
+    assert cli.argv[cli.argv.index("--output-format") + 1] == "json"
+
+    stream = "\n".join([
+        json.dumps({"event": "step_update",
+                    "step_update": {"step_type": "agent_response", "state": "ACTIVE",
+                                    "text_delta": "hel"}}),
+        json.dumps({"event": "result", "result": AGY_RESULT}),
+    ])
+    chunks, sink = _sink()
+    cli.script(stream)
+    await AgyBackend().generate(request(on_chunk=sink))
+
+    assert cli.argv[cli.argv.index("--output-format") + 1] == "stream-json"
+    assert [(c.kind, c.text) for c in chunks] == [("text", "hel")]
+
+
+async def test_agy_cannot_carry_images_and_says_so():
+    """Stated rather than fudged: resolve_chain drops it from an image call so
+    the vision role fails over, instead of it answering about nothing."""
+    assert AgyBackend().supports_vision is False
+
+    cfg = LLMSettings(backend="agy-cli", failover_order=["codex-cli"])
+    assert resolve_chain(cfg, needs_vision=True) == ["codex-cli"]
+    assert resolve_chain(cfg) == ["agy-cli", "codex-cli"]
 
 
 # ---------------------------------------------------------------------------

@@ -59,7 +59,8 @@ class Field:
 FIELDS: tuple[Field, ...] = (
     # -- routing -----------------------------------------------------------
     Field("SOURCEWORK_LLM__BACKEND", "Default backend", "Routing", "select",
-          ("litellm", "claude-code", "opencode-cli", "copilot-cli", "stub"),
+          ("litellm", "claude-code", "opencode-cli", "copilot-cli", "codex-cli",
+           "agy-cli", "stub"),
           help="What a run uses when it does not choose for itself."),
     Field("SOURCEWORK_LLM__FAILOVER_ORDER", "Failover order", "Routing",
           placeholder="claude-code,opencode-cli",
@@ -107,6 +108,24 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_LLM__COPILOT_MODELS__CRITIC", "critic", "Models",
           backend="copilot-cli", role="critic"),
 
+    Field("SOURCEWORK_LLM__CODEX_MODELS__DEFAULT", "default", "Models",
+          backend="codex-cli", role="default"),
+    Field("SOURCEWORK_LLM__CODEX_MODELS__REASONING", "reasoning", "Models",
+          backend="codex-cli", role="reasoning"),
+    Field("SOURCEWORK_LLM__CODEX_MODELS__VISION", "vision", "Models",
+          backend="codex-cli", role="vision"),
+    Field("SOURCEWORK_LLM__CODEX_MODELS__CRITIC", "critic", "Models",
+          backend="codex-cli", role="critic"),
+
+    Field("SOURCEWORK_LLM__AGY_MODELS__DEFAULT", "default", "Models",
+          backend="agy-cli", role="default"),
+    Field("SOURCEWORK_LLM__AGY_MODELS__REASONING", "reasoning", "Models",
+          backend="agy-cli", role="reasoning"),
+    Field("SOURCEWORK_LLM__AGY_MODELS__VISION", "vision", "Models",
+          backend="agy-cli", role="vision"),
+    Field("SOURCEWORK_LLM__AGY_MODELS__CRITIC", "critic", "Models",
+          backend="agy-cli", role="critic"),
+
     # -- limits --------------------------------------------------------------
     Field("SOURCEWORK_LLM__EFFORT", "Reasoning effort", "Limits", "select",
           ("", "low", "medium", "high", "xhigh", "max"),
@@ -146,6 +165,10 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_LLM__API_BASE", "LLM gateway base URL", "Credentials",
           placeholder="https://llm-gateway.internal/v1"),
     Field("SOURCEWORK_LLM__API_KEY", "LLM gateway key", "Credentials", "password"),
+    Field("SOURCEWORK_LLM__CODEX_HOME", "CODEX_HOME", "Credentials",
+          help="A dedicated Codex config dir, so runs get a clean session. Note that "
+               "an OPENAI_API_KEY in your environment makes Codex bill the API instead "
+               "of your subscription - it is preferred over the stored login."),
     Field("SOURCEWORK_LLM__COPILOT_HOME", "COPILOT_HOME", "Credentials",
           help="A dedicated Copilot config dir, so runs skip your MCP servers."),
 
@@ -172,7 +195,8 @@ _ROLE_SUFFIXES = ("DEFAULT", "REASONING", "VISION", "CRITIC")
 
 
 def _models(litellm: tuple[str, ...], claude: tuple[str, ...],
-            opencode: tuple[str, ...], copilot: tuple[str, ...]) -> dict[str, str]:
+            opencode: tuple[str, ...], copilot: tuple[str, ...],
+            codex: tuple[str, ...], agy: tuple[str, ...]) -> dict[str, str]:
     """One profile, as (default, reasoning, vision, critic) per backend."""
     keys = {
         "litellm": ("SOURCEWORK_LLM__DEFAULT_MODEL", "SOURCEWORK_LLM__REASONING_MODEL",
@@ -180,9 +204,12 @@ def _models(litellm: tuple[str, ...], claude: tuple[str, ...],
         "claude-code": tuple(f"SOURCEWORK_LLM__CLAUDE_CODE_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "opencode-cli": tuple(f"SOURCEWORK_LLM__OPENCODE_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "copilot-cli": tuple(f"SOURCEWORK_LLM__COPILOT_MODELS__{r}" for r in _ROLE_SUFFIXES),
+        "codex-cli": tuple(f"SOURCEWORK_LLM__CODEX_MODELS__{r}" for r in _ROLE_SUFFIXES),
+        "agy-cli": tuple(f"SOURCEWORK_LLM__AGY_MODELS__{r}" for r in _ROLE_SUFFIXES),
     }
     chosen = {"litellm": litellm, "claude-code": claude,
-              "opencode-cli": opencode, "copilot-cli": copilot}
+              "opencode-cli": opencode, "copilot-cli": copilot,
+              "codex-cli": codex, "agy-cli": agy}
     return {k: v for backend, ks in keys.items() for k, v in zip(ks, chosen[backend], strict=True)}
 
 
@@ -197,6 +224,12 @@ PROFILES: dict[str, dict[str, Any]] = {
             ("opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5",
              "opencode/claude-haiku-4-5"),
             ("auto", "auto", "auto", "auto"),
+            ("gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex"),
+            # agy fronts three model families, so the critic can be a different
+            # lineage from the writer without configuring a second backend.
+            ("gemini-3.6-flash-low", "gemini-3.6-flash-medium",
+             "gemini-3.6-flash-low",  # never read: agy carries no images
+             "gemini-3.6-flash-medium"),
         ),
     },
     "balanced": {
@@ -212,6 +245,9 @@ PROFILES: dict[str, dict[str, Any]] = {
             # gpt-5.4 rather than auto: it is the Copilot model that returns
             # readable reasoning, which is what the run view shows you live.
             ("auto", "gpt-5.4", "auto", "gpt-5.4"),
+            ("gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex"),
+            ("gemini-3.6-flash-medium", "gemini-3.1-pro-high",
+             "gemini-3.6-flash-medium", "claude-sonnet-4-6"),
         ),
     },
     "best": {
@@ -225,6 +261,9 @@ PROFILES: dict[str, dict[str, Any]] = {
             ("opencode/claude-opus-4-6", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5",
              "opencode/claude-opus-4-6"),
             ("gpt-5.4", "gpt-5.4", "gpt-5.4", "gpt-5.4"),
+            ("gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex"),
+            ("gemini-3.1-pro-high", "gemini-3.1-pro-high",
+             "gemini-3.1-pro-high", "claude-opus-4-6-thinking"),
         ),
     },
 }

@@ -79,7 +79,7 @@ export function newRunView(onStarted) {
   const effort = el('select', {},
     el('option', { value: '' }, 'model default'),
     ...['low', 'medium', 'high', 'xhigh', 'max'].map((e) => el('option', { value: e }, e)));
-  const failover = el('input', { type: 'text', placeholder: 'claude-code,opencode-cli' });
+  const failover = el('input', { type: 'text', placeholder: 'claude-code,codex-cli' });
   const modelInputs = {};
   const modelRow = el('div', { class: 'grid3' });
 
