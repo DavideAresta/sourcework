@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fail if a dependency's licence would undermine this project's own.
 
-PRD Forge is MIT. That promise is only as strong as its dependency tree: a
+SourceWork is MIT. That promise is only as strong as its dependency tree: a
 copyleft package arriving through a transitive version bump changes what
 downstream users are allowed to do, and it should break a build rather than
 surface in a lawyer's email years later.

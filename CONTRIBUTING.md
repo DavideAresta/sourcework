@@ -11,7 +11,7 @@ make test         # the suite: no API key and no network needed
 make lint         # ruff
 ```
 
-Everything runs against a deterministic fake model (`PRDFORGE_LLM__STUB=1`, set
+Everything runs against a deterministic fake model (`SOURCEWORK_LLM__STUB=1`, set
 by `tests/conftest.py`), so the suite is fast and offline. `python scripts/demo.py`
 drives all eight agents over real A2A JSON-RPC against that same fake, which is
 the cheapest way to catch a wiring mistake.
@@ -45,7 +45,7 @@ guarantee this project makes.
 
 - `make lint && make test` are green.
 - New configuration is in `.env.example` **and** in the settings page allow-list
-  (`src/prdforge/ui/env_file.py`) — a setting the UI cannot see is a setting
+  (`src/sourcework/ui/env_file.py`) — a setting the UI cannot see is a setting
   nobody will find.
 - No absolute paths from your machine. `scripts/llama-swap.yaml` and
   `scripts/llama-swap.d/` are gitignored for exactly this reason.

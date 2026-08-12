@@ -5,96 +5,96 @@ x-common: &common
   environment:
     # Inside the compose network agents address each other by service name, so
     # that is what their agent cards must advertise.
-    PRDFORGE_PUBLIC_HOST: ""
-    PRDFORGE_PEERS__ORCHESTRATOR: http://orchestrator:8000
-    PRDFORGE_PEERS__INGESTION: http://ingestion:8001
-    PRDFORGE_PEERS__VISION: http://vision:8002
-    PRDFORGE_PEERS__TRANSCRIPT: http://transcript:8003
-    PRDFORGE_PEERS__CONFLUENCE: http://confluence:8004
-    PRDFORGE_PEERS__REQUIREMENTS: http://requirements:8005
-    PRDFORGE_PEERS__WRITER: http://writer:8006
-    PRDFORGE_PEERS__CRITIC: http://critic:8007
+    SOURCEWORK_PUBLIC_HOST: ""
+    SOURCEWORK_PEERS__ORCHESTRATOR: http://orchestrator:8000
+    SOURCEWORK_PEERS__INGESTION: http://ingestion:8001
+    SOURCEWORK_PEERS__VISION: http://vision:8002
+    SOURCEWORK_PEERS__TRANSCRIPT: http://transcript:8003
+    SOURCEWORK_PEERS__CONFLUENCE: http://confluence:8004
+    SOURCEWORK_PEERS__REQUIREMENTS: http://requirements:8005
+    SOURCEWORK_PEERS__WRITER: http://writer:8006
+    SOURCEWORK_PEERS__CRITIC: http://critic:8007
   restart: unless-stopped
-  networks: [prdforge]
+  networks: [sourcework]
 
 services:
   orchestrator:
     <<: *common
-    container_name: prdforge-orchestrator
-    command: ["prdforge-agent", "serve", "orchestrator"]
+    container_name: sourcework-orchestrator
+    command: ["sourcework", "serve", "orchestrator"]
     environment:
-      PRDFORGE_PUBLIC_HOST: orchestrator
+      SOURCEWORK_PUBLIC_HOST: orchestrator
     ports: ["8000:8000"]
     depends_on: [ingestion, vision, transcript, confluence, requirements, writer, critic]
     volumes: ["./workspace:/workspace:ro"]
 
   ingestion:
     <<: *common
-    container_name: prdforge-ingestion
-    command: ["prdforge-agent", "serve", "ingestion"]
+    container_name: sourcework-ingestion
+    command: ["sourcework", "serve", "ingestion"]
     environment:
-      PRDFORGE_PUBLIC_HOST: ingestion
+      SOURCEWORK_PUBLIC_HOST: ingestion
     volumes: ["./workspace:/workspace:ro"]
 
   vision:
     <<: *common
-    container_name: prdforge-vision
-    command: ["prdforge-agent", "serve", "vision"]
+    container_name: sourcework-vision
+    command: ["sourcework", "serve", "vision"]
     environment:
-      PRDFORGE_PUBLIC_HOST: vision
+      SOURCEWORK_PUBLIC_HOST: vision
     volumes: ["./workspace:/workspace:ro"]
 
   transcript:
     <<: *common
-    container_name: prdforge-transcript
-    command: ["prdforge-agent", "serve", "transcript"]
+    container_name: sourcework-transcript
+    command: ["sourcework", "serve", "transcript"]
     environment:
-      PRDFORGE_PUBLIC_HOST: transcript
+      SOURCEWORK_PUBLIC_HOST: transcript
     volumes: ["./workspace:/workspace:ro"]
 
   confluence:
     <<: *common
-    container_name: prdforge-confluence
-    command: ["prdforge-agent", "serve", "confluence"]
+    container_name: sourcework-confluence
+    command: ["sourcework", "serve", "confluence"]
     environment:
-      PRDFORGE_PUBLIC_HOST: confluence
+      SOURCEWORK_PUBLIC_HOST: confluence
 
   requirements:
     <<: *common
-    container_name: prdforge-requirements
-    command: ["prdforge-agent", "serve", "requirements"]
+    container_name: sourcework-requirements
+    command: ["sourcework", "serve", "requirements"]
     environment:
-      PRDFORGE_PUBLIC_HOST: requirements
+      SOURCEWORK_PUBLIC_HOST: requirements
 
   writer:
     <<: *common
-    container_name: prdforge-writer
-    command: ["prdforge-agent", "serve", "writer"]
+    container_name: sourcework-writer
+    command: ["sourcework", "serve", "writer"]
     environment:
-      PRDFORGE_PUBLIC_HOST: writer
+      SOURCEWORK_PUBLIC_HOST: writer
 
   critic:
     <<: *common
-    container_name: prdforge-critic
-    command: ["prdforge-agent", "serve", "critic"]
+    container_name: sourcework-critic
+    command: ["sourcework", "serve", "critic"]
     environment:
-      PRDFORGE_PUBLIC_HOST: critic
+      SOURCEWORK_PUBLIC_HOST: critic
 
   # The browser front end. Not an agent - an A2A client, like the CLI - so the
   # mesh runs perfectly well without it.
   ui:
     <<: *common
-    container_name: prdforge-ui
-    command: ["prdforge-agent", "ui", "--port", "8080"]
+    container_name: sourcework-ui
+    command: ["sourcework", "ui", "--port", "8080"]
     ports: ["8080:8080"]
     depends_on: [orchestrator]
     environment:
-      PRDFORGE_UI_WORKSPACE: /workspace
+      SOURCEWORK_UI_WORKSPACE: /workspace
     # Read-WRITE, unlike the agents: this is the service that receives uploads
     # and keeps the run history. The agents then read those files back through
     # their own read-only mount, which is why both point at the same directory.
     volumes: ["./workspace:/workspace"]
 
 networks:
-  prdforge:
+  sourcework:
     driver: bridge

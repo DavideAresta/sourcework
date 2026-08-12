@@ -1,4 +1,4 @@
-# PRD Forge — architecture
+# SourceWork — architecture
 
 **Scope:** one job. Take heterogeneous requirement material — documents,
 meeting transcriptions, images, Confluence pages, loose notes — and turn it
@@ -46,7 +46,7 @@ Concretely, A2A buys:
 | Task lifecycle (`submitted → working → completed/failed`) | Ingesting a 200-page PDF takes minutes. The caller gets a task id and streamed status, not a hung HTTP request. |
 | SSE streaming of status updates | Progress from a nested agent (`"Analysing 157 evidence item(s)"`) propagates up to the end user through the orchestrator's own task stream — the pipeline passes each `pool.call` an `on_progress` relay, so a nine-minute analyst call reports what it is doing instead of going silent. |
 | Artifacts with typed parts | Every result crosses the wire as a JSON DataPart validated against a Pydantic schema on both sides. |
-| Security schemes on the card | Intra-mesh auth is declared, not documented. Set `PRDFORGE_SECURITY__ENFORCE=1` and every agent advertises an `apiKey` scheme and enforces it. |
+| Security schemes on the card | Intra-mesh auth is declared, not documented. Set `SOURCEWORK_SECURITY__ENFORCE=1` and every agent advertises an `apiKey` scheme and enforces it. |
 | Interop | Any A2A client drives the orchestrator. Equally, if a team already runs an A2A "Jira agent" or "design-system agent", it drops into the mesh by URL. |
 
 Transport is JSON-RPC over HTTP with SSE — the SDK's default binding, mounted
@@ -95,7 +95,7 @@ on FastAPI so each agent also gets `/docs` and an OpenAPI schema for free.
 ## 4. The data model is the architecture
 
 Everything crossing a boundary is one of a small set of Pydantic models
-(`prdforge/models.py`). The important ones:
+(`sourcework/models.py`). The important ones:
 
 ```
 SourceDocument ─┬─▶ Evidence ──▶ SourceRef ──▶ Requirement ──▶ RequirementSet ──▶ PRDDocument
@@ -194,7 +194,7 @@ size of the input, which makes it the first thing to fail on a real corpus.
 Measured on the demo pack plus a synthetic expansion: 223 evidence items → a
 129k-character prompt and a 33k-token answer, nearly ten minutes on a CLI
 backend, and it still stopped at the model's output ceiling. Reproduced on the
-bare CLI with no PRD Forge involved, so it is not a transport problem and no
+bare CLI with no SourceWork involved, so it is not a transport problem and no
 backend is exempt.
 
 So above a threshold the analyst maps over slices of the evidence and reduces
@@ -287,7 +287,7 @@ API details that are easy to get wrong, and are handled explicitly:
 
 ## 8. Model layer
 
-Every model call goes through `LLM` (`prdforge/llm.py`). Models are selected
+Every model call goes through `LLM` (`sourcework/llm.py`). Models are selected
 per **role**, not per agent:
 
 ```
@@ -301,7 +301,7 @@ fast      → cheap mechanical work
 extracts JSON from whatever the model wraps it in, and on a validation failure
 feeds the error back and retries. Agents never handle raw strings.
 
-**Stub mode** (`PRDFORGE_LLM__STUB=1`) replaces every call with a deterministic
+**Stub mode** (`SOURCEWORK_LLM__STUB=1`) replaces every call with a deterministic
 fake derived from the requested schema. The whole pipeline still runs — real
 HTTP, real A2A, real task lifecycle, real rendering — so CI verifies the wiring
 with no credentials. That is what the end-to-end test and `make demo` use.
@@ -311,7 +311,7 @@ with no credentials. That is what the end-to-end test and `make demo` use.
 `LLM` does not know how a model is reached. It hands a **backend** a system
 prompt, a user prompt and possibly some images, and gets back text plus
 whatever usage the provider was willing to report. Two families implement that
-contract (`prdforge/backends/`):
+contract (`sourcework/backends/`):
 
 | id | transport | auth |
 |---|---|---|
@@ -351,7 +351,7 @@ bulk of the implementation:
 
 ### 8.2 Failover
 
-`PRDFORGE_LLM__FAILOVER_ORDER` is an ordered list of backends to try when the
+`SOURCEWORK_LLM__FAILOVER_ORDER` is an ordered list of backends to try when the
 active one fails. A usage limit is the case it exists for: the prompt was fine,
 the account was not, and another backend answers it. Quota text is recognised
 across three vocabularies (`usage limit`, `insufficient balance`, `not enough
@@ -398,12 +398,12 @@ declares. Three small pieces make that work end to end:
 None of the seven specialist agents contains a line of code about this.
 
 An explicit backend also turns stub mode **off**. Otherwise a mesh started with
-`PRDFORGE_LLM__STUB=1` would return a convincing fake to someone who explicitly
+`SOURCEWORK_LLM__STUB=1` would return a convincing fake to someone who explicitly
 asked for a real model.
 
 ### 8.4 Usage
 
-Backends report what they can, into a per-process ledger (`prdforge/usage.py`).
+Backends report what they can, into a per-process ledger (`sourcework/usage.py`).
 Costs are summed **only within a unit**, because the four backends do not
 denominate them the same way: LiteLLM reports the provider's dollars, Claude
 Code reports what the tokens would have cost on the API (under a subscription,
@@ -446,7 +446,7 @@ requirement it settles cites it.
 
 ## 9. The web UI
 
-A ninth service (`prdforge/ui/`), and deliberately **not** mounted on the
+A ninth service (`sourcework/ui/`), and deliberately **not** mounted on the
 orchestrator: the orchestrator is an A2A agent — one protocol, one contract,
 drivable by anything that speaks it — and bolting a browser app onto it would
 make it two things. The UI is just another A2A client, like the CLI.
@@ -522,7 +522,7 @@ because with no lockfile the file itself is the only record of what it is.
 ## 10. Deployment
 
 Eight containers on one compose network, addressing each other by service name
-(`PRDFORGE_PUBLIC_HOST` is what an agent advertises in its own card, so it must
+(`SOURCEWORK_PUBLIC_HOST` is what an agent advertises in its own card, so it must
 match how peers reach it). Only the orchestrator publishes a port. Each agent
 has a `/healthz` probe.
 
@@ -558,4 +558,4 @@ willing to hold a connection open.
   across the mesh means putting usage on every A2A response payload.
 - **CLI flag sets are version-coupled.** `--tools`, `--strict-mcp-config`,
   `--available-tools` and `--variant` are current-version flags on tools that
-  move fast. `prdforge-agent backends --check` is the canary.
+  move fast. `sourcework backends --check` is the canary.

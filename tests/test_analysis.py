@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from prdforge.agents.critic.agent import coverage_stats, structural_findings
-from prdforge.agents.requirements.agent import (
+from sourcework.agents.critic.agent import coverage_stats, structural_findings
+from sourcework.agents.requirements.agent import (
     DraftConflict,
     DraftQuestion,
     DraftRequirement,
@@ -17,7 +17,7 @@ from prdforge.agents.requirements.agent import (
     _materialise,
     _render_prior,
 )
-from prdforge.models import (
+from sourcework.models import (
     Evidence,
     Modality,
     PRDDocument,
@@ -121,19 +121,19 @@ class TestStructuralFindings:
         assert details and "fast" in details[0]
 
     def test_dangling_requirement_reference_in_milestone(self, prd: PRDDocument):
-        from prdforge.models import Milestone
+        from sourcework.models import Milestone
 
         prd.milestones = [Milestone(name="M1", requirement_ids=["REQ-999"])]
         assert any("REQ-999" in f.detail for f in structural_findings(prd))
 
     def test_blocking_open_question_blocks(self, prd: PRDDocument):
-        from prdforge.models import OpenQuestion
+        from sourcework.models import OpenQuestion
 
         prd.requirements.open_questions = [OpenQuestion(question="Credit notes in v1?", blocking=True)]
         assert any(f.severity == Severity.BLOCKER for f in structural_findings(prd))
 
     def test_conflicts_block(self, prd: PRDDocument):
-        from prdforge.models import Conflict
+        from sourcework.models import Conflict
 
         prd.requirements.conflicts = [Conflict(requirement_ids=["REQ-001"], description="x")]
         assert any(f.severity == Severity.BLOCKER for f in structural_findings(prd))

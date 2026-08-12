@@ -15,9 +15,9 @@ from types import SimpleNamespace
 import pydantic
 import pytest
 
-from prdforge import usage as usage_module
-from prdforge.backends import base, process, resolve_chain
-from prdforge.backends.base import (
+from sourcework import usage as usage_module
+from sourcework.backends import base, process, resolve_chain
+from sourcework.backends.base import (
     BackendQuotaError,
     BackendRequest,
     EmptyBackendResponseError,
@@ -26,11 +26,11 @@ from prdforge.backends.base import (
     OutputTruncatedError,
     looks_like_quota,
 )
-from prdforge.backends.claude_code import ClaudeCodeBackend
-from prdforge.backends.copilot import CopilotBackend
-from prdforge.backends.copilot import parse_events as copilot_events
-from prdforge.backends.opencode import OpenCodeBackend, parse_events
-from prdforge.config import LLMSettings
+from sourcework.backends.claude_code import ClaudeCodeBackend
+from sourcework.backends.copilot import CopilotBackend
+from sourcework.backends.copilot import parse_events as copilot_events
+from sourcework.backends.opencode import OpenCodeBackend, parse_events
+from sourcework.config import LLMSettings
 
 PIXEL = base64.b64encode(bytes.fromhex("89504e470d0a1a0a")).decode()
 
@@ -195,7 +195,7 @@ async def test_opencode_message_precedes_the_file_flag(cli):
     argv = cli.argv
     # -f is a greedy array flag: a positional after it is eaten as a filename.
     assert argv.index("-f") > argv.index("SYSTEM:\nSYS\n\nUSER:\nUSR")
-    assert argv[argv.index("--agent") + 1] == "prdforge-answer"
+    assert argv[argv.index("--agent") + 1] == "sourcework-answer"
     assert argv[argv.index("--dir") + 1] == str(process.neutral_cwd())
 
 
@@ -283,8 +283,8 @@ async def test_copilot_disables_tools_but_not_when_attaching_images(cli):
 
 async def test_copilot_honours_a_dedicated_home(cli):
     cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
-    await CopilotBackend(home="/tmp/prdforge-copilot").generate(request())
-    assert cli.calls[-1]["env"]["COPILOT_HOME"] == "/tmp/prdforge-copilot"
+    await CopilotBackend(home="/tmp/sourcework-copilot").generate(request())
+    assert cli.calls[-1]["env"]["COPILOT_HOME"] == "/tmp/sourcework-copilot"
 
 
 async def test_copilot_refuses_a_prompt_it_cannot_physically_send(cli):
@@ -496,8 +496,8 @@ class _Flaky(base.LLMBackend):
 
 
 async def test_an_empty_response_is_retried_on_the_same_backend(monkeypatch):
-    from prdforge import llm as llm_module
-    from prdforge.config import LLMSettings
+    from sourcework import llm as llm_module
+    from sourcework.config import LLMSettings
 
     flaky = _Flaky(succeed_on=2)
     monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: flaky)
@@ -509,8 +509,8 @@ async def test_an_empty_response_is_retried_on_the_same_backend(monkeypatch):
 
 
 async def test_a_persistently_empty_backend_gives_actionable_advice(monkeypatch):
-    from prdforge import llm as llm_module
-    from prdforge.config import LLMSettings
+    from sourcework import llm as llm_module
+    from sourcework.config import LLMSettings
 
     flaky = _Flaky(succeed_on=99)
     monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: flaky)
@@ -522,8 +522,8 @@ async def test_a_persistently_empty_backend_gives_actionable_advice(monkeypatch)
 
 
 async def test_a_quota_error_is_not_retried_on_the_same_backend(monkeypatch):
-    from prdforge import llm as llm_module
-    from prdforge.config import LLMSettings
+    from sourcework import llm as llm_module
+    from sourcework.config import LLMSettings
 
     class Exhausted(base.LLMBackend):
         id = "litellm"
@@ -552,7 +552,7 @@ async def test_opencode_names_its_own_session(cli):
     cli.script(_oc(TEXT_EVENT))
     await OpenCodeBackend().generate(request())
     argv = cli.argv
-    assert argv[argv.index("--title") + 1] == "prdforge"
+    assert argv[argv.index("--title") + 1] == "sourcework"
 
 
 # ---------------------------------------------------------------------------
@@ -769,7 +769,7 @@ def _schema_request(**overrides):  # noqa: ANN003, ANN202
 
 
 async def test_a_schema_is_enforced_not_merely_described(litellm_api):
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     await LiteLLMBackend().generate(_schema_request())
 
@@ -783,7 +783,7 @@ async def test_a_schema_is_enforced_not_merely_described(litellm_api):
 
 
 async def test_no_schema_means_no_response_format_at_all(litellm_api):
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     await LiteLLMBackend().generate(_schema_request(json_schema=None, schema_name=None))
 
@@ -793,7 +793,7 @@ async def test_no_schema_means_no_response_format_at_all(litellm_api):
 async def test_a_server_that_cannot_compile_the_schema_still_answers(litellm_api):
     """The prompt carries the schema too, so an unconstrained retry is a real
     answer rather than a lost call."""
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     litellm_api.fail_first(ValueError("Invalid schema for response_format"))
     result = await LiteLLMBackend().generate(_schema_request())
@@ -805,7 +805,7 @@ async def test_a_server_that_cannot_compile_the_schema_still_answers(litellm_api
 
 async def test_an_unrelated_failure_does_not_get_a_second_chance(litellm_api):
     """Retrying a quota error without the schema only spends the wait twice."""
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     litellm_api.fail_first(RuntimeError("rate limit exceeded"))
     with pytest.raises(BackendQuotaError):
@@ -816,7 +816,7 @@ async def test_an_unrelated_failure_does_not_get_a_second_chance(litellm_api):
 
 async def test_litellm_internal_retries_are_configurable(litellm_api):
     """Three attempts at a 20-minute local timeout is an hour of the same news."""
-    from prdforge.backends import build
+    from sourcework.backends import build
 
     cfg = LLMSettings(backend="litellm", default_model="openai/local", litellm_retries=0)
     await build("litellm", cfg).generate(_schema_request())
@@ -825,7 +825,7 @@ async def test_litellm_internal_retries_are_configurable(litellm_api):
 
 
 async def test_structured_hands_the_schema_to_the_backend(monkeypatch):
-    from prdforge import llm as llm_module
+    from sourcework import llm as llm_module
 
     seen: list[BackendRequest] = []
 
@@ -859,7 +859,7 @@ async def test_structured_hands_the_schema_to_the_backend(monkeypatch):
 def test_a_reasoning_trace_never_reaches_the_json_parser():
     """First-`{`-to-last-`}` is positional, and a model reasoning *about* a
     schema writes braces while it does so."""
-    from prdforge.llm import _extract_json
+    from sourcework.llm import _extract_json
 
     trace = '<think>Maybe {"value": 99} fits?</think>\n{"value": 1}'
     assert json.loads(_extract_json(trace)) == {"value": 1}
@@ -910,7 +910,7 @@ def test_an_unset_critic_reviews_at_the_reasoning_model_not_the_cheap_one():
 def test_a_local_endpoint_offers_the_models_it_actually_serves(monkeypatch):
     import httpx
 
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     seen: dict = {}
 
@@ -938,7 +938,7 @@ def test_a_hosted_provider_is_never_asked_for_its_catalogue(monkeypatch):
     someone else's server every time the settings page opens."""
     import httpx
 
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     def explode(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
         raise AssertionError("no network call without an explicit api_base")
@@ -950,7 +950,7 @@ def test_a_hosted_provider_is_never_asked_for_its_catalogue(monkeypatch):
 def test_the_settings_page_still_renders_when_the_model_server_is_down(monkeypatch):
     import httpx
 
-    from prdforge.backends.litellm_backend import LiteLLMBackend
+    from sourcework.backends.litellm_backend import LiteLLMBackend
 
     def refuse(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
         raise httpx.ConnectError("connection refused")

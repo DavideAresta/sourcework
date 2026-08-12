@@ -21,16 +21,16 @@ fmt:
 	$(VENV)/bin/ruff check --fix src tests
 
 serve-all:
-	$(VENV)/bin/prdforge-agent serve-all
+	$(VENV)/bin/sourcework serve-all
 
 ui:
-	$(VENV)/bin/prdforge-agent ui
+	$(VENV)/bin/sourcework ui
 
 status:
-	$(VENV)/bin/prdforge-agent status
+	$(VENV)/bin/sourcework status
 
 demo:
-	PRDFORGE_LLM__STUB=1 $(PY) scripts/demo.py
+	SOURCEWORK_LLM__STUB=1 $(PY) scripts/demo.py
 
 up:
 	docker compose up -d --build

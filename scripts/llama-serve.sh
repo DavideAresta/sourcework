@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start llama.cpp's OpenAI-compatible server for PRD Forge.
+# Start llama.cpp's OpenAI-compatible server for SourceWork.
 #
 # One model per process, so all four roles in .env point at one alias. To serve
 # roles from different models, use scripts/llama-swap.sh instead.
@@ -33,7 +33,7 @@ if [ ! -f "$MODEL" ]; then
 fi
 
 ALIAS="${ALIAS:-$(basename "$MODEL" .gguf)}"
-PORT="${PORT:-8081}"   # 8080 is the PRD Forge UI
+PORT="${PORT:-8081}"   # 8080 is the SourceWork UI
 CTX="${CTX:-32768}"
 
 # Prebuilt llama.cpp ships its shared libraries beside the binary.
@@ -48,7 +48,7 @@ args=(
   --alias "$ALIAS"
   --jinja
   # No thinking. A hybrid reasoning model otherwise spends the entire output
-  # budget in its scratchpad and returns empty content - which PRD Forge
+  # budget in its scratchpad and returns empty content - which SourceWork
   # correctly reports as "the backend said nothing" and cannot recover from.
   -rea off
   --metrics

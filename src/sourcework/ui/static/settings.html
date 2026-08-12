@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings · SourceWork</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">PRD <b>Forge</b></div>
+    <div class="spacer"></div>
+    <a href="/dashboard"><button class="ghost">Dashboard</button></a>
+    <a href="/"><button class="ghost">← Back</button></a>
+  </header>
+
+  <main style="max-width:960px;margin:0 auto;padding:22px 26px 60px">
+    <h1>Settings</h1>
+    <p class="muted">
+      Saved defaults, written to <span class="mono" id="env-path">.env</span>.
+      A run can override the model settings for itself without touching any of this.
+    </p>
+
+    <div id="restart-note" class="card" style="display:none;border-left:3px solid var(--accent)">
+      <b>Restart the mesh to apply.</b>
+      <span class="muted">The agents read their configuration once, at start-up — nothing here reaches a process that is already running.</span>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Backends on this machine</h3>
+      <div id="backends"></div>
+    </div>
+
+    <div id="form"></div>
+
+    <div class="row">
+      <button id="save" class="primary">Save</button>
+      <span class="muted small">Secrets show as ••••••••; leave them alone to keep the stored value.</span>
+    </div>
+  </main>
+
+  <script type="module" src="/static/js/settings.js"></script>
+</body>
+</html>

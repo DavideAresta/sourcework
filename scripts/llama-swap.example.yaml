@@ -4,7 +4,7 @@
 # The copy is gitignored, because these paths belong to your machine.
 #
 # `scripts/llama-models.py scan` writes llama-swap.d/models.yaml from whatever
-# GGUFs are under PRDFORGE_MODEL_DIRS, and llama-swap loads both files. Ids
+# GGUFs are under SOURCEWORK_MODEL_DIRS, and llama-swap loads both files. Ids
 # defined here are left out of the generated one, so tuning written down here
 # survives every rescan.
 #

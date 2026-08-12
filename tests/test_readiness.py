@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prdforge import readiness
+from sourcework import readiness
 
 
 def _prd(*, questions=(), conflicts=(), requirements=()):

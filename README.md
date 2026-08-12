@@ -1,4 +1,4 @@
-# PRD Forge
+# SourceWork
 
 Eight cooperating agents that turn documents, meeting transcriptions, images
 and Confluence pages into a **traceable** Product Requirements Document — and
@@ -56,16 +56,16 @@ make test                    # unit + end-to-end over real A2A
 Run the mesh for real:
 
 ```bash
-prdforge-agent serve-all     # all eight agents, one process (dev)
-prdforge-agent ui            # the web UI, on http://localhost:8080
-prdforge-agent status        # which agents are up, and their skills
-prdforge-agent backends      # which LLM backends this machine can use
+sourcework serve-all     # all eight agents, one process (dev)
+sourcework ui            # the web UI, on http://localhost:8080
+sourcework status        # which agents are up, and their skills
+sourcework backends      # which LLM backends this machine can use
 ```
 
 Or from the command line:
 
 ```bash
-prdforge-agent generate "Invoice reconciliation" \
+sourcework generate "Invoice reconciliation" \
   -i ~/meetings/kickoff.vtt \
   -i ~/docs/rfp.pdf \
   -i ~/designs/checkout-flow.png \
@@ -99,8 +99,8 @@ Every agent serves `/.well-known/agent-card.json`, `/healthz`, and `/docs`
 ## Calling it over A2A
 
 ```python
-from prdforge.a2a_common import AgentPool
-from prdforge.models import InputRef, PRDRequest, PRDResult
+from sourcework.a2a_common import AgentPool
+from sourcework.models import InputRef, PRDRequest, PRDResult
 
 async with AgentPool() as pool:
     data = await pool.call("orchestrator", "generate_prd", PRDRequest(
@@ -134,7 +134,7 @@ curl -s localhost:8000/ -H 'Content-Type: application/json' -H 'A2A-Version: 1.0
 
 ## The web UI
 
-`prdforge-agent ui` serves a browser front end on :8080. It is an A2A client,
+`sourcework ui` serves a browser front end on :8080. It is an A2A client,
 not a ninth agent — the mesh runs fine without it.
 
 - **New run** — drag files in, add URIs, notes and CQL, watch progress stream
@@ -227,8 +227,8 @@ not the transport's, and the same corpus times out on the bare CLI.
 Two knobs, both in `.env`:
 
 ```
-PRDFORGE_LLM__ANALYSIS_BATCH_ITEMS=70    # evidence items per slice (0 = off)
-PRDFORGE_LLM__ANALYSIS_BATCH_CHARS=60000 # rendered characters per slice (0 = off)
+SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS=70    # evidence items per slice (0 = off)
+SOURCEWORK_LLM__ANALYSIS_BATCH_CHARS=60000 # rendered characters per slice (0 = off)
 ```
 
 Item count is the one that usually bites: 176 evidence items render to only 45k
@@ -250,17 +250,17 @@ An agent calls `llm.structured(...)`. What sits behind that is configuration:
 
 The three CLI backends carry **their own** authentication, so if you are signed
 into one of those tools the entire pipeline runs on that subscription with no
-key plumbed through PRD Forge:
+key plumbed through SourceWork:
 
 ```bash
-PRDFORGE_LLM__BACKEND=claude-code
-PRDFORGE_LLM__CLAUDE_CODE_MODELS__DEFAULT=haiku
-PRDFORGE_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
+SOURCEWORK_LLM__BACKEND=claude-code
+SOURCEWORK_LLM__CLAUDE_CODE_MODELS__DEFAULT=haiku
+SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
 ```
 
 ```bash
-prdforge-agent backends          # what is usable here
-prdforge-agent backends --check  # actually call each one (spends real quota)
+sourcework backends          # what is usable here
+sourcework backends --check  # actually call each one (spends real quota)
 ```
 
 They are driven as *generation* backends, not agents: no tools, no MCP servers,
@@ -274,7 +274,7 @@ because every call starts a process.
 nothing — the call moves on rather than failing:
 
 ```bash
-PRDFORGE_LLM__FAILOVER_ORDER=claude-code,opencode-cli,litellm
+SOURCEWORK_LLM__FAILOVER_ORDER=claude-code,opencode-cli,litellm
 ```
 
 The model does *not* travel with it. `opencode-go/glm-5` means something to
@@ -292,18 +292,18 @@ server, so [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`
 is a configuration change, not a code change:
 
 ```bash
-PRDFORGE_LLM__BACKEND=litellm
-PRDFORGE_LLM__API_BASE=http://127.0.0.1:8081/v1
-PRDFORGE_LLM__API_KEY=local
-PRDFORGE_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
-PRDFORGE_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
-PRDFORGE_LLM__TIMEOUT_S=1200                    # minutes per call, not seconds
+SOURCEWORK_LLM__BACKEND=litellm
+SOURCEWORK_LLM__API_BASE=http://127.0.0.1:8081/v1
+SOURCEWORK_LLM__API_KEY=local
+SOURCEWORK_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
+SOURCEWORK_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
+SOURCEWORK_LLM__TIMEOUT_S=1200                    # minutes per call, not seconds
 ```
 
 Four things decide whether this works at all, and all four are the difference
 between a clean run and a mystifying one:
 
-**Enforce the schema, do not describe it.** `PRDFORGE_LLM__CONSTRAINED_JSON=1`
+**Enforce the schema, do not describe it.** `SOURCEWORK_LLM__CONSTRAINED_JSON=1`
 (the default) sends the JSON Schema as `response_format`, so a server that
 grammar-constrains decoding — llama.cpp, vLLM, Ollama — makes malformed JSON
 *impossible* rather than unlikely. On a measured 15-call run this was the
@@ -316,8 +316,8 @@ and returns something that parses fine and is wrong. Serve at 32k and lower the
 slice limits to match:
 
 ```bash
-PRDFORGE_LLM__ANALYSIS_BATCH_CHARS=24000
-PRDFORGE_LLM__ANALYSIS_BATCH_ITEMS=30
+SOURCEWORK_LLM__ANALYSIS_BATCH_CHARS=24000
+SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS=30
 ```
 
 **Stop hybrid models from thinking away their output budget.** A reasoning model
@@ -338,7 +338,7 @@ out-of-memory crash.
 handle the wiring:
 
 ```bash
-export PRDFORGE_MODEL_DIRS=~/models:/srv/models   # where your GGUFs live
+export SOURCEWORK_MODEL_DIRS=~/models:/srv/models   # where your GGUFs live
 scripts/llama-models.py list                      # what you have, and what fits
 scripts/llama-models.py scan                      # generate the serving config
 cp scripts/llama-swap.example.yaml scripts/llama-swap.yaml   # then edit its paths
@@ -360,7 +360,7 @@ gated repo). Anything needing flags the scan cannot infer goes in
 
 ### A critic from another family
 
-`PRDFORGE_LLM__CRITIC_MODEL` exists so the adversarial pass can be a *different
+`SOURCEWORK_LLM__CRITIC_MODEL` exists so the adversarial pass can be a *different
 model* from the one that wrote the PRD. A critic trained alongside the writer
 finds the same phrasing natural and tends to confirm rather than challenge.
 Pointing it at another lineage is the cheapest way to make the review real —
@@ -371,27 +371,27 @@ nothing changes until you ask for it.
 
 ## Configuration
 
-All via env (`PRDFORGE_` prefix, `__` nesting) — see `.env.example`.
+All via env (`SOURCEWORK_` prefix, `__` nesting) — see `.env.example`.
 
 **Models** are routed per role so you spend where it matters, and configured
 per backend because a model id from one backend is nonsense to another:
 
 ```bash
 # litellm — any LiteLLM provider: openai/…, azure/…, bedrock/…, vertex_ai/…, ollama/…
-PRDFORGE_LLM__REASONING_MODEL=anthropic/claude-opus-4-6      # analyst, writer
-PRDFORGE_LLM__DEFAULT_MODEL=anthropic/claude-sonnet-4-5      # extraction
-PRDFORGE_LLM__VISION_MODEL=anthropic/claude-sonnet-4-5       # images
-PRDFORGE_LLM__CRITIC_MODEL=anthropic/claude-opus-4-6         # the adversarial review
-PRDFORGE_LLM__FAST_MODEL=anthropic/claude-haiku-4-5
+SOURCEWORK_LLM__REASONING_MODEL=anthropic/claude-opus-4-6      # analyst, writer
+SOURCEWORK_LLM__DEFAULT_MODEL=anthropic/claude-sonnet-4-5      # extraction
+SOURCEWORK_LLM__VISION_MODEL=anthropic/claude-sonnet-4-5       # images
+SOURCEWORK_LLM__CRITIC_MODEL=anthropic/claude-opus-4-6         # the adversarial review
+SOURCEWORK_LLM__FAST_MODEL=anthropic/claude-haiku-4-5
 
 # per CLI backend
-PRDFORGE_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
-PRDFORGE_LLM__OPENCODE_MODELS__DEFAULT=opencode/claude-haiku-4-5
-PRDFORGE_LLM__COPILOT_MODELS__DEFAULT=auto
+SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
+SOURCEWORK_LLM__OPENCODE_MODELS__DEFAULT=opencode/claude-haiku-4-5
+SOURCEWORK_LLM__COPILOT_MODELS__DEFAULT=auto
 ```
 
 Anything unset means "let that backend pick its own default". Point
-`PRDFORGE_LLM__API_BASE` at a gateway for the litellm path. No code changes.
+`SOURCEWORK_LLM__API_BASE` at a gateway for the litellm path. No code changes.
 
 **Usage** — every call records what the backend reported (tokens, cache hits,
 cost) into a per-process ledger. Costs are kept apart by unit: Claude Code
@@ -404,13 +404,13 @@ produces a number that means nothing.
 `https://api.atlassian.com/ex/confluence/<cloudId>/wiki`. Only the Confluence
 agent ever sees the credentials.
 
-**Inter-agent auth** — set `PRDFORGE_SECURITY__ENFORCE=1` and every agent
+**Inter-agent auth** — set `SOURCEWORK_SECURITY__ENFORCE=1` and every agent
 declares an `apiKey` security scheme on its card and rejects unauthenticated
 calls.
 
 ## Testing without credentials
 
-`PRDFORGE_LLM__STUB=1` replaces every model call with a deterministic fake
+`SOURCEWORK_LLM__STUB=1` replaces every model call with a deterministic fake
 derived from the requested schema. The whole pipeline still runs — real HTTP,
 real A2A, real task lifecycle, real rendering — so CI can verify the wiring
 without a key. That is what `make demo` and the end-to-end test use.
@@ -424,7 +424,7 @@ positional, an event stream folded the wrong way — so that is what is asserted
 ## Layout
 
 ```
-src/prdforge/
+src/sourcework/
   models.py            the shared vocabulary (Evidence, Requirement, PRDDocument, …)
   llm.py               structured output, failover across backends, stub mode
   stream.py            live model output: the sink, its wire format, its rate

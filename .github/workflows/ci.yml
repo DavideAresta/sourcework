@@ -32,7 +32,7 @@ jobs:
         run: ruff check src tests
 
       - name: Test
-        # PRDFORGE_LLM__STUB is set by tests/conftest.py, so the suite needs no
+        # SOURCEWORK_LLM__STUB is set by tests/conftest.py, so the suite needs no
         # API key, no network and no CLI - which is the point of stub mode.
         run: pytest -q
 
