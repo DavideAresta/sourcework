@@ -1,0 +1,716 @@
+"""Backend layer: command construction, output parsing, failover.
+
+Nothing here starts a process. Each CLI backend funnels through
+``process.run``, which is replaced with a stub that records the argv it was
+handed and replays canned output - so the tests assert on the exact invocation
+and the exact parse, which is where these integrations actually break.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+
+import pytest
+
+from prdforge import usage as usage_module
+from prdforge.backends import base, process, resolve_chain
+from prdforge.backends.base import (
+    BackendQuotaError,
+    BackendRequest,
+    EmptyBackendResponseError,
+    ImageInput,
+    LLMUsage,
+    OutputTruncatedError,
+    looks_like_quota,
+)
+from prdforge.backends.claude_code import ClaudeCodeBackend
+from prdforge.backends.copilot import CopilotBackend
+from prdforge.backends.copilot import parse_events as copilot_events
+from prdforge.backends.opencode import OpenCodeBackend, parse_events
+from prdforge.config import LLMSettings
+
+PIXEL = base64.b64encode(bytes.fromhex("89504e470d0a1a0a")).decode()
+
+
+@pytest.fixture
+def cli(monkeypatch):
+    """Replace the subprocess runner; record argv, replay a scripted result."""
+    calls: list[dict] = []
+    scripted: list[process.ProcessResult] = []
+
+    async def fake_run(argv, *, cwd=None, env=None, stdin_text=None, timeout_s=300.0,
+                       on_line=None):
+        calls.append(
+            {"argv": list(argv), "cwd": str(cwd) if cwd else None, "env": env or {},
+             "stdin": stdin_text, "timeout": timeout_s, "streamed": on_line is not None}
+        )
+        result = scripted.pop(0) if scripted else process.ProcessResult(0, "", "")
+        if on_line is not None:
+            # The real runner feeds each line to the sink as it arrives. Replaying
+            # the scripted stdout the same way is what lets a test assert on what
+            # a backend would have streamed.
+            for line in (result.stdout or "").splitlines():
+                on_line(line)
+        return result
+
+    monkeypatch.setattr(process, "run", fake_run)
+
+    class Harness:
+        def script(self, stdout="", *, exit_code=0, stderr="", timed_out=False):
+            scripted.append(process.ProcessResult(exit_code, stdout, stderr, timed_out))
+
+        @property
+        def calls(self):
+            return calls
+
+        @property
+        def argv(self):
+            return calls[-1]["argv"]
+
+    return Harness()
+
+
+def request(**kwargs) -> BackendRequest:
+    return BackendRequest(**{"system": "SYS", "user": "USR", **kwargs})
+
+
+# ---------------------------------------------------------------------------
+# claude-code
+# ---------------------------------------------------------------------------
+
+
+def _claude_json(result="hello", **extra):
+    return json.dumps({"is_error": False, "result": result, **extra})
+
+
+async def test_claude_code_plain_generation_disables_tools_and_mcp(cli):
+    cli.script(_claude_json())
+    out = await ClaudeCodeBackend().generate(request(model="haiku", effort="low"))
+
+    assert out.text == "hello"
+    argv = cli.argv
+    # No tools: the whole point of the plain-generation path.
+    assert argv[argv.index("--tools") + 1] == ""
+    assert "--strict-mcp-config" in argv
+    assert argv[argv.index("--system-prompt") + 1] == "SYS"
+    assert argv[argv.index("--model") + 1] == "haiku"
+    assert argv[argv.index("--effort") + 1] == "low"
+    assert argv[-1] == "USR", "the prompt must be the final positional argument"
+    # A coding CLI must never inherit the project checkout as its cwd.
+    assert cli.calls[-1]["cwd"] == str(process.neutral_cwd())
+
+
+async def test_claude_code_default_model_alias_is_not_passed_through(cli):
+    cli.script(_claude_json())
+    await ClaudeCodeBackend().generate(request(model="default"))
+    assert "--model" not in cli.argv
+
+
+async def test_claude_code_grants_read_only_for_images(cli):
+    cli.script(_claude_json())
+    await ClaudeCodeBackend().generate(request(images=[ImageInput(media_type="image/png", data_b64=PIXEL)]))
+
+    argv = cli.argv
+    assert argv[argv.index("--allowed-tools") + 1] == "Read"
+    assert "--tools" not in argv, "an empty tool list would revoke the Read grant"
+    # --allowed-tools is variadic: a flag has to follow it, never the prompt.
+    assert argv[argv.index("--allowed-tools") + 2].startswith("--")
+    assert "ATTACHED IMAGE FILES" in argv[-1]
+
+
+async def test_claude_code_oversized_prompt_goes_on_stdin(cli):
+    cli.script(_claude_json())
+    big = "x" * (process.MAX_ARGV_PROMPT_BYTES + 1)
+    await ClaudeCodeBackend().generate(request(user=big))
+
+    assert cli.calls[-1]["stdin"] == big
+    assert big not in cli.argv, "an oversized prompt on argv fails execve with E2BIG"
+
+
+async def test_claude_code_raises_output_cap_only_when_worth_raising(cli):
+    cli.script(_claude_json())
+    await ClaudeCodeBackend().generate(request(max_tokens=64_000))
+    assert cli.calls[-1]["env"]["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "64000"
+
+    cli.script(_claude_json())
+    await ClaudeCodeBackend().generate(request(max_tokens=8_000))
+    assert "CLAUDE_CODE_MAX_OUTPUT_TOKENS" not in cli.calls[-1]["env"]
+
+
+async def test_claude_code_reports_usage_as_api_equivalent_not_dollars(cli):
+    cli.script(
+        _claude_json(
+            usage={"input_tokens": 184, "output_tokens": 31, "cache_read_input_tokens": 12},
+            total_cost_usd=0.0023,
+            duration_ms=1500,
+        )
+    )
+    out = await ClaudeCodeBackend().generate(request())
+
+    assert out.usage.input_tokens == 184
+    assert out.usage.cache_read_tokens == 12
+    # Under a subscription the CLI's figure is not what anyone is billed, and
+    # summing it with a real dollar figure would be meaningless.
+    assert out.usage.cost_unit == base.COST_USD_API_EQUIVALENT
+
+
+async def test_claude_code_truncation_never_reaches_the_parser(cli):
+    cli.script(
+        json.dumps(
+            {"is_error": False, "result": '{"partial": ', "stop_reason": "max_tokens",
+             "usage": {"output_tokens": 8192}}
+        )
+    )
+    with pytest.raises(OutputTruncatedError, match="output limit"):
+        await ClaudeCodeBackend().generate(request())
+
+
+async def test_claude_code_usage_limit_is_a_quota_error(cli):
+    cli.script(json.dumps({"is_error": True, "result": "You've reached your usage limit."}))
+    with pytest.raises(BackendQuotaError):
+        await ClaudeCodeBackend().generate(request())
+
+
+# ---------------------------------------------------------------------------
+# opencode-cli
+# ---------------------------------------------------------------------------
+
+
+def _oc(*events):
+    return "\n".join(json.dumps(e) for e in events)
+
+
+TEXT_EVENT = {"type": "text", "part": {"text": "hello"}}
+
+
+async def test_opencode_message_precedes_the_file_flag(cli):
+    cli.script(_oc(TEXT_EVENT))
+    await OpenCodeBackend().generate(
+        request(images=[ImageInput(media_type="image/png", data_b64=PIXEL)])
+    )
+
+    argv = cli.argv
+    # -f is a greedy array flag: a positional after it is eaten as a filename.
+    assert argv.index("-f") > argv.index("SYSTEM:\nSYS\n\nUSER:\nUSR")
+    assert argv[argv.index("--agent") + 1] == "prdforge-answer"
+    assert argv[argv.index("--dir") + 1] == str(process.neutral_cwd())
+
+
+async def test_opencode_raises_the_output_ceiling(cli):
+    cli.script(_oc(TEXT_EVENT))
+    await OpenCodeBackend().generate(request())
+    env = cli.calls[-1]["env"]
+    assert int(env["OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX"]) >= 1_000_000
+    assert env["OPENCODE_DISABLE_AUTOUPDATE"] == "true"
+
+
+async def test_opencode_retries_once_on_provider_side_model_demotion(cli):
+    cli.script(_oc({"type": "error", "error": {"data": {"message": "model not supported"}}}), exit_code=1)
+    cli.script(_oc(TEXT_EVENT))
+
+    out = await OpenCodeBackend().generate(request(model="opencode/big", effort="high"))
+
+    assert out.text == "hello"
+    assert len(cli.calls) == 2
+    retry = cli.calls[1]["argv"]
+    assert "-m" not in retry and "--variant" not in retry
+    assert cli.calls[1]["stdin"] == cli.calls[0]["stdin"], "the retry must carry the message the same way"
+
+
+async def test_opencode_prefers_a_standalone_json_final_block_over_narration():
+    parsed = parse_events(
+        _oc(
+            {"type": "text", "part": {"text": "Let me think about this."}},
+            {"type": "text", "part": {"text": '{"answer": 42}'}},
+        )
+    )
+    # Concatenating would hand the JSON parser "...this.{"answer": 42}".
+    assert parsed.text == '{"answer": 42}'
+
+
+def test_opencode_keeps_every_part_when_the_answer_is_prose():
+    parsed = parse_events(
+        _oc({"type": "text", "part": {"text": "First half."}}, {"type": "text", "part": {"text": "Second half."}})
+    )
+    assert parsed.text == "First half.\nSecond half."
+
+
+def test_opencode_sums_usage_across_steps():
+    parsed = parse_events(
+        _oc(
+            {"type": "step_finish", "part": {"cost": 0.001, "tokens": {"input": 100, "output": 10, "cache": {"read": 5}}}},
+            {"type": "step_finish", "part": {"cost": 0.002, "tokens": {"input": 200, "output": 20, "cache": {"read": 7}}}},
+        )
+    )
+    assert parsed.usage.input_tokens == 300
+    assert parsed.usage.output_tokens == 30
+    assert parsed.usage.cache_read_tokens == 12
+    assert parsed.usage.cost == pytest.approx(0.003)
+    assert parsed.usage.cost_unit == base.COST_USD
+
+
+def test_opencode_survives_non_json_noise_between_events():
+    parsed = parse_events("warning: something\n" + _oc(TEXT_EVENT) + "\nnot json at all")
+    assert parsed.text == "hello"
+
+
+async def test_opencode_empty_stream_is_an_empty_response_error(cli):
+    cli.script("")
+    with pytest.raises(EmptyBackendResponseError):
+        await OpenCodeBackend().generate(request())
+
+
+# ---------------------------------------------------------------------------
+# copilot-cli
+# ---------------------------------------------------------------------------
+
+
+async def test_copilot_disables_tools_but_not_when_attaching_images(cli):
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    await CopilotBackend().generate(request())
+    assert "--available-tools=" in cli.argv
+
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    await CopilotBackend().generate(
+        request(images=[ImageInput(media_type="image/png", data_b64=PIXEL)])
+    )
+    assert "--available-tools=" not in cli.argv
+    assert "--attachment" in cli.argv
+
+
+async def test_copilot_honours_a_dedicated_home(cli):
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    await CopilotBackend(home="/tmp/prdforge-copilot").generate(request())
+    assert cli.calls[-1]["env"]["COPILOT_HOME"] == "/tmp/prdforge-copilot"
+
+
+async def test_copilot_refuses_a_prompt_it_cannot_physically_send(cli):
+    # -p takes the prompt inline and the CLI does not read stdin, so this is a
+    # real limit, not a policy - failing loudly lets the chain route around it.
+    with pytest.raises(base.BackendError, match="cannot send"):
+        await CopilotBackend().generate(request(user="x" * (process.MAX_ARGV_PROMPT_BYTES + 1)))
+    assert not cli.calls
+
+
+def test_copilot_complete_message_wins_over_deltas():
+    text, _ = copilot_events(
+        "\n".join(
+            json.dumps(e)
+            for e in (
+                {"type": "assistant.message_delta", "data": {"deltaContent": "he"}},
+                {"type": "assistant.message_delta", "data": {"deltaContent": "llo"}},
+                {"type": "assistant.message", "data": {"content": "hello"}},
+            )
+        )
+    )
+    assert text == "hello"
+
+
+def test_copilot_falls_back_to_deltas_when_the_stream_was_cut():
+    text, _ = copilot_events(
+        json.dumps({"type": "assistant.message_delta", "data": {"deltaContent": "par"}})
+    )
+    assert text == "par"
+
+
+def test_copilot_converts_session_credits_at_the_published_rate():
+    _, usage = copilot_events(
+        json.dumps({"type": "session.usage_checkpoint", "data": {"totalNanoAiu": 1_600_000_000}})
+    )
+    assert usage.credits == pytest.approx(1.6)
+    assert usage.cost == pytest.approx(0.016)
+    # Never plain USD: the conversion is ours, not the provider's.
+    assert usage.cost_unit == base.COST_USD_FROM_CREDITS
+
+
+# ---------------------------------------------------------------------------
+# Chain resolution
+# ---------------------------------------------------------------------------
+
+
+def test_chain_is_just_the_active_backend_without_failover():
+    assert resolve_chain(LLMSettings(backend="claude-code")) == ["claude-code"]
+
+
+def test_chain_appends_failover_targets_and_drops_duplicates():
+    cfg = LLMSettings(backend="claude-code", failover_order=["claude-code", "opencode-cli", "nonsense"])
+    assert resolve_chain(cfg) == ["claude-code", "opencode-cli"]
+
+
+def test_chain_survives_underscored_backend_ids_from_the_environment():
+    cfg = LLMSettings(backend="claude_code", failover_order=["opencode_cli"])
+    assert resolve_chain(cfg) == ["claude-code", "opencode-cli"]
+
+
+def test_failover_order_accepts_a_comma_separated_string():
+    # .env files cannot write JSON lists comfortably.
+    cfg = LLMSettings(failover_order="claude-code, opencode-cli")
+    assert cfg.failover_order == ["claude-code", "opencode-cli"]
+
+
+def test_a_model_id_never_travels_to_another_backend():
+    cfg = LLMSettings(backend="litellm", default_model="anthropic/claude-sonnet-4-5")
+    assert cfg.model_for("default") == "anthropic/claude-sonnet-4-5"
+    # An OpenRouter-style id means nothing to the claude CLI; None means
+    # "use your own default", which is the only safe answer.
+    assert cfg.model_for("default", "claude-code") is None
+
+
+def test_per_backend_models_fall_back_to_that_backend_default_role():
+    cfg = LLMSettings(backend="claude-code", claude_code_models={"default": "haiku", "reasoning": "opus"})
+    assert cfg.model_for("reasoning") == "opus"
+    assert cfg.model_for("vision") == "haiku"
+
+
+def test_cli_backends_get_the_longer_timeout():
+    cfg = LLMSettings(timeout_s=180, cli_timeout_s=600)
+    assert cfg.timeout_for("litellm") == 180
+    assert cfg.timeout_for("opencode-cli") == 600
+
+
+# ---------------------------------------------------------------------------
+# Quota classification
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "You've reached your usage limit. Your limit resets 11:30pm",
+        "quota exceeded for this model",
+        "insufficient balance",          # OpenCode's wording for an empty wallet
+        "not enough credits",
+        "429 Too Many Requests",
+    ],
+)
+def test_quota_signatures_are_recognised_across_backend_vocabularies(detail):
+    assert looks_like_quota(detail)
+    assert isinstance(base.classify(detail), BackendQuotaError)
+
+
+def test_an_ordinary_failure_is_not_mistaken_for_a_quota_hit():
+    assert not looks_like_quota("unexpected server error")
+    assert not isinstance(base.classify("unexpected server error"), BackendQuotaError)
+
+
+# ---------------------------------------------------------------------------
+# Usage ledger
+# ---------------------------------------------------------------------------
+
+
+def test_ledger_never_adds_costs_denominated_in_different_units():
+    with usage_module.track() as ledger:
+        usage_module.record("claude-code", LLMUsage(output_tokens=10, cost=0.05, cost_unit=base.COST_USD_API_EQUIVALENT))
+        usage_module.record("opencode-cli", LLMUsage(output_tokens=20, cost=0.01, cost_unit=base.COST_USD))
+
+    totals = ledger.as_dict()["backends"]
+    assert totals["claude-code"]["cost"] == {base.COST_USD_API_EQUIVALENT: 0.05}
+    assert totals["opencode-cli"]["cost"] == {base.COST_USD: 0.01}
+
+
+def test_recording_outside_a_tracked_block_is_a_no_op():
+    usage_module.record("claude-code", LLMUsage(output_tokens=1))  # must not raise
+    assert usage_module.current() is None
+
+
+def test_a_backend_that_reports_nothing_still_counts_as_a_call():
+    with usage_module.track() as ledger:
+        usage_module.record("copilot-cli", None)
+    assert ledger.calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Process helpers
+# ---------------------------------------------------------------------------
+
+
+def test_argv_limit_counts_bytes_not_characters():
+    # 40k CJK characters are ~120KB to execve; a length check would wave them by.
+    assert process.exceeds_argv_limit("漢" * 40_000)
+    assert not process.exceeds_argv_limit("a" * 40_000)
+
+
+def test_error_detail_digs_the_reason_out_of_json_on_stdout():
+    result = process.ProcessResult(
+        1, json.dumps({"type": "error", "error": {"message": "boom"}}), ""
+    )
+    # Trusting stderr alone reports "failed: " with the reason sitting in stdout.
+    assert "boom" in process.error_detail(result)
+
+
+def test_error_detail_prefers_stderr_when_there_is_one():
+    assert process.error_detail(process.ProcessResult(1, "{}", "real reason")) == "real reason"
+
+
+async def test_run_captures_output_and_exit_code():
+    result = await process.run(["sh", "-c", "echo out; echo err >&2; exit 3"], timeout_s=30)
+    assert result.exit_code == 3
+    assert result.stdout.strip() == "out"
+    assert result.stderr.strip() == "err"
+
+
+async def test_run_kills_a_hung_process_and_still_reports_what_it_said():
+    result = await process.run(["sh", "-c", "echo partial; sleep 30"], timeout_s=1.5)
+    assert result.timed_out
+    # The output produced before the kill is usually the only clue about the hang.
+    assert "partial" in result.stdout
+
+
+async def test_run_survives_a_child_that_ignores_stdin():
+    result = await process.run(["sh", "-c", "echo done"], stdin_text="x" * 200_000, timeout_s=30)
+    assert result.stdout.strip() == "done"
+
+
+def test_staged_media_writes_files_and_cleans_up_after():
+    image = ImageInput(media_type="image/jpeg", data_b64=PIXEL)
+    with process.staged_media([image]) as paths:
+        assert paths[0].suffix == ".jpg"
+        assert paths[0].read_bytes() == image.raw_bytes()
+        directory = paths[0].parent
+    assert not directory.exists()
+
+
+# ---------------------------------------------------------------------------
+# Empty-response resilience
+# ---------------------------------------------------------------------------
+
+
+class _Flaky(base.LLMBackend):
+    """Answers on the Nth attempt; returns nothing before that."""
+
+    id = "litellm"
+    supports_vision = True
+
+    def __init__(self, succeed_on: int) -> None:
+        self.succeed_on = succeed_on
+        self.calls = 0
+
+    async def generate(self, req):  # noqa: ANN001, ANN201
+        self.calls += 1
+        if self.calls < self.succeed_on:
+            raise EmptyBackendResponseError("no content", backend=self.id)
+        return base.BackendResult(text="answered")
+
+
+async def test_an_empty_response_is_retried_on_the_same_backend(monkeypatch):
+    from prdforge import llm as llm_module
+    from prdforge.config import LLMSettings
+
+    flaky = _Flaky(succeed_on=2)
+    monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: flaky)
+
+    cfg = LLMSettings(backend="litellm", default_model="m", empty_retries=1)
+    assert await llm_module.LLM(cfg=cfg).text("s", "u") == "answered"
+    # One empty answer must not cost the whole extraction.
+    assert flaky.calls == 2
+
+
+async def test_a_persistently_empty_backend_gives_actionable_advice(monkeypatch):
+    from prdforge import llm as llm_module
+    from prdforge.config import LLMSettings
+
+    flaky = _Flaky(succeed_on=99)
+    monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: flaky)
+
+    cfg = LLMSettings(backend="litellm", default_model="m", empty_retries=1)
+    with pytest.raises(llm_module.LLMError, match="reasoning effort"):
+        await llm_module.LLM(cfg=cfg).text("s", "u")
+    assert flaky.calls == 2  # bounded: 1 + empty_retries
+
+
+async def test_a_quota_error_is_not_retried_on_the_same_backend(monkeypatch):
+    from prdforge import llm as llm_module
+    from prdforge.config import LLMSettings
+
+    class Exhausted(base.LLMBackend):
+        id = "litellm"
+        supports_vision = True
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate(self, req):  # noqa: ANN001, ANN201
+            self.calls += 1
+            raise BackendQuotaError("usage limit", backend=self.id)
+
+    exhausted = Exhausted()
+    monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: exhausted)
+
+    cfg = LLMSettings(backend="litellm", default_model="m", empty_retries=2)
+    with pytest.raises(llm_module.LLMError):
+        await llm_module.LLM(cfg=cfg).text("s", "u")
+    # Repeating a quota error only burns wall clock.
+    assert exhausted.calls == 1
+
+
+async def test_opencode_names_its_own_session(cli):
+    # Without --title, OpenCode makes a second model call per invocation on its
+    # own "small" model just to invent a session title nobody reads.
+    cli.script(_oc(TEXT_EVENT))
+    await OpenCodeBackend().generate(request())
+    argv = cli.argv
+    assert argv[argv.index("--title") + 1] == "prdforge"
+
+
+# ---------------------------------------------------------------------------
+# Streaming
+#
+# The chunk sink is opt-in: without it every backend must invoke exactly as it
+# did before, because the flags that enable streaming are not free (an extra
+# output format for claude-code, --thinking for opencode).
+# ---------------------------------------------------------------------------
+
+
+def _sink() -> tuple[list, object]:
+    chunks: list = []
+    return chunks, chunks.append
+
+
+async def test_opencode_streams_reasoning_and_text(cli):
+    chunks, sink = _sink()
+    cli.script(_oc({"type": "reasoning", "part": {"text": "weighing options"}}, TEXT_EVENT))
+    await OpenCodeBackend().generate(request(on_chunk=sink))
+
+    assert "--thinking" in cli.argv
+    assert [(c.kind, c.text) for c in chunks] == [
+        ("reasoning", "weighing options"),
+        ("text", "hello"),
+    ]
+
+
+async def test_opencode_asks_for_thinking_only_when_someone_is_watching(cli):
+    cli.script(_oc(TEXT_EVENT))
+    await OpenCodeBackend().generate(request())
+    assert "--thinking" not in cli.argv
+
+
+async def test_claude_code_streams_deltas_and_still_parses_its_result(cli):
+    chunks, sink = _sink()
+    cli.script(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "system", "subtype": "init"},
+                {"type": "stream_event",
+                 "event": {"delta": {"type": "thinking_delta", "thinking": ""}}},
+                {"type": "stream_event",
+                 "event": {"delta": {"type": "text_delta", "text": "half "}}},
+                {"type": "stream_event",
+                 "event": {"delta": {"type": "text_delta", "text": "an answer"}}},
+                {"type": "result", "is_error": False, "result": "half an answer",
+                 "usage": {"input_tokens": 3, "output_tokens": 4}},
+            ]
+        )
+    )
+    result = await ClaudeCodeBackend().generate(request(on_chunk=sink))
+
+    argv = cli.argv
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
+    assert "--include-partial-messages" in argv
+    # The result event carries the same fields the plain json format returns, so
+    # switching format must not change what the caller gets back.
+    assert result.text == "half an answer"
+    assert result.usage.output_tokens == 4
+    assert [c.text for c in chunks if c.kind == "text"] == ["half ", "an answer"]
+
+
+async def test_claude_code_keeps_plain_json_when_nobody_is_streaming(cli):
+    cli.script(json.dumps({"type": "result", "is_error": False, "result": "done"}))
+    result = await ClaudeCodeBackend().generate(request())
+    argv = cli.argv
+    assert argv[argv.index("--output-format") + 1] == "json"
+    assert "--include-partial-messages" not in argv
+    assert result.text == "done"
+
+
+async def test_copilot_streams_reasoning_and_message_deltas(cli):
+    chunks, sink = _sink()
+    cli.script(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "assistant.reasoning_delta", "data": {"deltaContent": "weighing "}},
+                {"type": "assistant.reasoning_delta", "data": {"deltaContent": "options"}},
+                {"type": "assistant.message_delta", "data": {"deltaContent": "one "}},
+                {"type": "assistant.message_delta", "data": {"deltaContent": "two"}},
+                {"type": "assistant.message", "data": {"content": "one two"}},
+                # Repeats the whole summary that already streamed; ignored, or
+                # the panel shows the reasoning twice.
+                {"type": "assistant.reasoning", "data": {"content": "weighing options"}},
+            ]
+        )
+    )
+    result = await CopilotBackend().generate(request(on_chunk=sink))
+    assert result.text == "one two"
+    assert "--enable-reasoning-summaries" in cli.argv
+    assert [(c.kind, c.text) for c in chunks] == [
+        ("reasoning", "weighing "),
+        ("reasoning", "options"),
+        ("text", "one "),
+        ("text", "two"),
+    ]
+
+
+async def test_copilot_asks_for_reasoning_only_when_someone_is_watching(cli):
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    await CopilotBackend().generate(request())
+    assert "--enable-reasoning-summaries" not in cli.argv
+
+
+async def test_claude_code_reports_withheld_thinking_as_a_step(cli):
+    chunks, sink = _sink()
+    # Verified against the CLI at --effort high: thinking deltas do arrive, and
+    # every one carries an empty `thinking` with the content only present as an
+    # encrypted signature. The token estimate is the one honest thing to show.
+    cli.script(
+        "\n".join(
+            json.dumps(e)
+            for e in [
+                {"type": "stream_event", "event": {"delta": {
+                    "type": "thinking_delta", "thinking": "", "estimated_tokens": 50}}},
+                {"type": "stream_event", "event": {"delta": {
+                    "type": "thinking_delta", "thinking": "", "estimated_tokens": 100}}},
+                {"type": "result", "is_error": False, "result": "done"},
+            ]
+        )
+    )
+    await ClaudeCodeBackend().generate(request(on_chunk=sink))
+
+    # A step, not `reasoning` - putting a status line in a panel headed with the
+    # model's name reads as something the model said.
+    assert [c.kind for c in chunks] == ["step", "step"]
+    assert "~150 tokens" in chunks[-1].text
+
+
+async def test_a_huge_event_survives_the_streaming_reader(tmp_path):
+    """The regression that broke a real run.
+
+    These CLIs emit one JSON object per line, so a large answer is a single
+    very long line. ``StreamReader.readline`` raises above its 64 KB limit and
+    clears its buffer on the way out, which does not merely fail to deliver the
+    event - it destroys it, and the captured stdout comes back short. The
+    analyst hit this on a 223-evidence-item run.
+    """
+    import sys
+
+    emitter = tmp_path / "emit.py"
+    emitter.write_text(
+        "import json, sys\n"
+        "big = json.dumps({'type': 'text', 'part': {'text': 'x' * 200_000}})\n"
+        "sys.stdout.write(big + chr(10))\n"
+        "sys.stdout.write('{\"type\":\"step_finish\"}' + chr(10))\n",
+        encoding="utf-8",
+    )
+    expected = json.dumps({"type": "text", "part": {"text": "x" * 200_000}})
+
+    lines: list[str] = []
+    result = await process.run([sys.executable, str(emitter)], on_line=lines.append)
+
+    assert expected in result.stdout, "the captured output must not be truncated"
+    assert lines[0] == expected, "the sink must see the whole event, not a fragment"
+    assert len(lines) == 2
+
+    # ...and the non-streaming path, which was never affected, still agrees.
+    plain = await process.run([sys.executable, str(emitter)])
+    assert plain.stdout == result.stdout

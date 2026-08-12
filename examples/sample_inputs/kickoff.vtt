@@ -1,0 +1,49 @@
+WEBVTT
+
+00:00:04.000 --> 00:00:19.000
+<v Priya Raman>Right, the reason we're here. Finance is reconciling supplier invoices against purchase orders by hand, in a spreadsheet, and it takes roughly three days at month end. We want to stop doing that.
+
+00:00:19.000 --> 00:00:33.000
+<v Marco Bianchi>How many invoices are we talking about? Because if it's a few hundred I'd question whether this is worth building.
+
+00:00:33.000 --> 00:00:47.000
+<v Priya Raman>Last quarter it was about eleven thousand a month across four entities. It's not a few hundred.
+
+00:00:47.000 --> 00:01:06.000
+<v Elena Fischer>The matching itself isn't the hard part. The hard part is the exceptions. Roughly one in seven invoices doesn't match cleanly, usually because of partial deliveries or a currency rounding difference of a few cents.
+
+00:01:06.000 --> 00:01:22.000
+<v Marco Bianchi>So we need a tolerance. Can we agree the system auto-matches when the amounts differ by less than one percent or two euros, whichever is smaller?
+
+00:01:22.000 --> 00:01:31.000
+<v Priya Raman>Yes. Let's lock that in as the default tolerance and make it configurable per entity.
+
+00:01:31.000 --> 00:01:50.000
+<v Elena Fischer>Then anything outside tolerance goes to an exception queue. A human picks it up, sees the invoice and the PO side by side, and either approves the match or rejects it with a reason code.
+
+00:01:50.000 --> 00:02:04.000
+<v Marco Bianchi>Reason codes need to be a fixed list, not free text. Otherwise we'll never be able to report on why things fail.
+
+00:02:04.000 --> 00:02:12.000
+<v Priya Raman>Agreed. Fixed list. Elena, can you own drafting the initial set of codes?
+
+00:02:12.000 --> 00:02:17.000
+<v Elena Fischer>Yes, I'll have them by the end of next week.
+
+00:02:17.000 --> 00:02:38.000
+<v Marco Bianchi>One thing I want to flag. We are regulated for audit retention. Every automated match decision has to be reproducible seven years later, which means we store the inputs and the tolerance that was in force at the time, not just the outcome.
+
+00:02:38.000 --> 00:02:49.000
+<v Priya Raman>That's a hard requirement then. Immutable audit log, seven years.
+
+00:02:49.000 --> 00:03:05.000
+<v Elena Fischer>What about the ERP integration? We pull POs from SAP today via a nightly batch. If we're doing this properly we want near-real-time, but I don't know whether the SAP team can give us an event stream.
+
+00:03:05.000 --> 00:03:15.000
+<v Priya Raman>Let's leave that open. Nightly batch is acceptable for the first release, but we should design so it can move to streaming.
+
+00:03:15.000 --> 00:03:32.000
+<v Marco Bianchi>Last thing from me. I do not want this to become an approval workflow product. We are matching invoices to POs. Approvals stay in the ERP where they already are.
+
+00:03:32.000 --> 00:03:40.000
+<v Priya Raman>Noted as explicitly out of scope. Anything else? No? Good, thanks everyone.

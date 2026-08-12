@@ -1,0 +1,128 @@
+WEBVTT
+
+NOTE Project Boomerang - kickoff meeting, 26 March, 45 minutes.
+NOTE Recorded and auto-transcribed. Speaker labels verified by the organiser.
+
+1
+00:00:04.000 --> 00:00:19.000
+Priya Raman: Right, everyone's here. This is the kickoff for the self-service returns portal, internally Project Boomerang. Marco circulated the business requirements last week, Lena sent the architecture constraints on Friday. The purpose today is to agree what we are actually building, and to close the things the two documents disagree on.
+
+2
+00:00:21.000 --> 00:00:38.000
+Marco Bianchi: Let me set the commercial picture. We handle about eight thousand two hundred returns a month and every one of them costs us roughly seven and a half euros in contact-centre time alone. In January it more than doubles and the team simply drowns. If we do nothing, next January is worse than the last one.
+
+3
+00:00:40.000 --> 00:00:52.000
+Tomasz Nowak: I can confirm that from the service side. Four out of ten contacts we get are somebody asking where their refund is. Not raising a return, not complaining about a product. Just asking where the money is. A status page would remove most of that on its own.
+
+4
+00:00:54.000 --> 00:01:08.000
+Priya Raman: Good, so the status view is not a nice-to-have, it is the single highest-value piece. Let's treat it as such. Marco, the return window. The BRD says fourteen days. Is that settled?
+
+5
+00:01:10.000 --> 00:01:29.000
+Marco Bianchi: It is what we do today, but I want to change it. I'd like thirty days for members of the loyalty programme and fourteen for everyone else. Our two biggest competitors both offer thirty. It is the single most common reason cited when customers tell us why they did not buy from us.
+
+6
+00:01:31.000 --> 00:01:44.000
+Sofia Greco: From a legal standpoint fourteen days is the statutory minimum under the EU consumer rights directive. You are free to offer longer, that is a commercial decision, not a legal one. What you cannot do is offer less, or offer thirty days and then quietly withdraw it for some customers.
+
+7
+00:01:46.000 --> 00:01:57.000
+Priya Raman: Then let's decide it now. Thirty days for loyalty members, fourteen days for everyone else, and the rule has to be visible to the customer before they buy. Marco, you own the commercial modelling on that. Agreed?
+
+8
+00:01:59.000 --> 00:02:03.000
+Marco Bianchi: Agreed.
+
+9
+00:02:05.000 --> 00:02:24.000
+Lena Fischer: Then I need to raise the two things in my note that block the BRD as written. The first is the refund service level. The BRD says the refund is issued within five business days. Adyen settles at T plus seven. We can call the Adyen API within five days, but the money does not appear on the customer's statement for up to seven banking days after that. Those are two different events and the requirement treats them as one.
+
+10
+00:02:26.000 --> 00:02:39.000
+Tomasz Nowak: That difference is exactly what generates the calls, by the way. The customer gets an email saying refunded, looks at their bank, sees nothing, and phones us. If the portal shows two separate states we would kill that whole category of contact.
+
+11
+00:02:41.000 --> 00:02:56.000
+Priya Raman: Then that is the decision: we model refund initiated and refund settled as two distinct states, both visible to the customer, with the expected settlement date shown. The five business day target applies to initiation only. Lena, write that into the interface spec.
+
+12
+00:02:58.000 --> 00:03:14.000
+Lena Fischer: Understood. Second blocker is the return label. The BRD says the label is generated immediately. Our carrier integration is a batch job that runs at two in the morning. A label requested at nine in the morning is not available until the next day. Changing that means renegotiating the DHL and GLS contracts, which is not a one-quarter conversation.
+
+13
+00:03:16.000 --> 00:03:27.000
+Marco Bianchi: That is genuinely bad. The whole promise is that you request a return and walk to the drop-off point that afternoon. If the label arrives tomorrow we have not really removed the friction, we have just moved it.
+
+14
+00:03:29.000 --> 00:03:48.000
+Lena Fischer: There is a middle option. Both carriers support a pre-generated label pool. We draw a block of labels overnight and assign one to a request when it comes in. The customer gets a real label within about fifteen minutes. It costs us a small number of unused labels each month.
+
+15
+00:03:50.000 --> 00:04:02.000
+Priya Raman: Fifteen minutes is close enough to instant for the customer promise. Let's take that. Decision: label available within fifteen minutes of the request being approved, using a pre-drawn pool. Marco, is fifteen minutes acceptable commercially?
+
+16
+00:04:04.000 --> 00:04:09.000
+Marco Bianchi: Fifteen minutes is fine. Next day was not.
+
+17
+00:04:11.000 --> 00:04:28.000
+Sofia Greco: I need to flag the retention conflict before we move on. The BRD says personal data is kept for twenty-four months. Lena's note says audit records for seven years. Both are correct obligations and they overlap. I do not want to answer that in the room, I will come back with a written position.
+
+18
+00:04:30.000 --> 00:04:36.000
+Priya Raman: Action on Sofia then, written position on retention before the end of the month. Do not let the team design the data model until that lands.
+
+19
+00:04:38.000 --> 00:04:55.000
+Tomasz Nowak: One thing nobody has mentioned. Roughly one return in forty comes from somebody we already suspect of serial returning. Today an agent spots it by memory. If this is fully automated we will refund those without anyone looking. We need a review queue, not a hard block, because we get it wrong sometimes and blocking a good customer is expensive.
+
+20
+00:04:57.000 --> 00:05:06.000
+Priya Raman: Agreed, review queue rather than automatic rejection. That is already BR-08 in the document, but let's be explicit that it is a queue and a human decision, never an automatic refusal.
+
+21
+00:05:08.000 --> 00:05:26.000
+Marco Bianchi: Then the question I keep avoiding. Marketplace. About eleven percent of our order volume is third-party sellers now. Those returns are contractually the seller's problem, but the customer does not know that and complains to us anyway. I do not think we can solve it in phase one but I do not want to pretend it does not exist.
+
+22
+00:05:28.000 --> 00:05:41.000
+Sofia Greco: It is not only a scope question. If the portal accepts a marketplace return request we may be taking on an obligation that contractually sits with the seller. I would want to look at the seller agreement before we let that button exist.
+
+23
+00:05:43.000 --> 00:05:52.000
+Priya Raman: Then it stays open. It is not a decision we can take today and I am not going to force it. Action on me to bring a scope proposal for marketplace returns to the next steering group.
+
+24
+00:05:54.000 --> 00:06:04.000
+Marco Bianchi: Related: Poland. The BRD says Germany, Austria and Netherlands at launch. Poznan is one of our four distribution centres so people assume Poland is in. Probably not at launch. Third quarter is more realistic, but I would not write it in stone today.
+
+25
+00:06:06.000 --> 00:06:22.000
+Lena Fischer: One constraint that is not negotiable regardless of scope. There is a deployment freeze from the fifteenth of December to the sixth of January. If this is not live and stable before that freeze, it does not go live until the second week of January, which is after the peak we are building it for.
+
+26
+00:06:24.000 --> 00:06:38.000
+Priya Raman: So the real deadline is not January, it is the first of December, with two weeks of stabilisation before the freeze. Everyone please plan against that date and not against the peak itself. That is the constraint that shapes everything else.
+
+27
+00:06:40.000 --> 00:06:49.000
+Lena Fischer: On resourcing, I have four engineers and a designer for the quarter. That is what the estimate in my note assumes. If we add marketplace returns to phase one, something else comes out.
+
+28
+00:06:51.000 --> 00:07:02.000
+Priya Raman: Understood, and nothing is being added today. Let me summarise the decisions so we all leave with the same list.
+
+29
+00:07:04.000 --> 00:07:26.000
+Priya Raman: Thirty day return window for loyalty members, fourteen for everyone else. Refund initiated and refund settled shown as two separate states. Label within fifteen minutes from a pre-drawn pool. Suspicious returns go to a human review queue, never an automatic refusal. Live and stable by the first of December. Open: marketplace scope, and the retention position from Legal. Poland is deferred but not formally decided.
+
+30
+00:07:28.000 --> 00:07:33.000
+Marco Bianchi: That matches what I have. One correction, the free-returns threshold is not on your list and I think it needs revisiting.
+
+31
+00:07:35.000 --> 00:07:42.000
+Priya Raman: Take it to the refinement session on Thursday with Tomasz. It is a pricing question, not an architecture one. Thanks everyone.
