@@ -346,9 +346,20 @@ class RequirementsExecutor(SkillExecutor):
         total = sum(len(d.requirements) for d in produced)
         await progress(f"{total} requirement(s) across {len(produced)} slice(s); merging")
         keyed = _keyed(produced)
-        decision = await self.llm.structured(
-            MERGE_SYSTEM, _render_for_merge(keyed, produced), MergeDecision, role="reasoning"
-        )
+        try:
+            decision = await self.llm.structured(
+                MERGE_SYSTEM, _render_for_merge(keyed, produced), MergeDecision, role="reasoning"
+            )
+        except Exception as exc:  # noqa: BLE001 - the slices are worth more than the merge
+            # A slice failing is already survivable; the merge failing was not,
+            # and it is the *last* call in the longest phase of the run. One
+            # timeout here discarded 82 requirements and twenty minutes of
+            # extraction that had already succeeded.
+            logger.exception("merge pass failed")
+            await progress(
+                f"Merge pass failed ({type(exc).__name__}); consolidating in code instead"
+            )
+            decision = _merge_in_code(keyed, produced, why=f"{type(exc).__name__}: {exc}")
         merged = _apply_merge(keyed, produced, decision)
         await progress(
             f"Merged {total} into {len(merged.requirements)} requirement(s), "
@@ -457,6 +468,61 @@ def _render_for_merge(
         lines.append("\nGLOSSARY TERMS DEFINED:")
         lines += [f"- {term}: {definition}" for term, definition in glossary.items()]
     return "\n".join(lines)
+
+
+def _merge_in_code(
+    keyed: dict[str, DraftRequirement],
+    drafts: list[RequirementDraft],
+    *,
+    why: str,
+) -> MergeDecision:
+    """The merge the model would have made, minus the judgement.
+
+    Fed through :func:`_apply_merge` like any other decision, so the fallback
+    path is the same code as the normal one and cannot rot separately.
+
+    What survives is what can be decided without a model: two requirements
+    whose statements match after normalising whitespace and case are the same
+    requirement, by :func:`_same_claim`'s reasoning. What does not survive is
+    what the merge pass is actually for - recognising that "orders must be
+    returnable within 30 days" and "the returns window is one month" are one
+    need. Those stay as two, and the summary says so rather than presenting a
+    degraded set as a clean one.
+
+    Open questions are kept from every slice, deduplicated by text. The normal
+    path lets the model drop a question another slice answered; here nothing
+    knows which those are, and an extra question is cheaper than a lost one.
+    """
+    by_statement: dict[str, list[str]] = {}
+    for key, item in keyed.items():
+        by_statement.setdefault(" ".join(item.statement.split()).casefold(), []).append(key)
+    duplicates = [
+        MergeGroup(keys=keys, title=keyed[keys[0]].title, statement=keyed[keys[0]].statement)
+        for keys in by_statement.values()
+        if len(keys) > 1
+    ]
+
+    questions: list[DraftQuestion] = []
+    seen: set[str] = set()
+    for draft in drafts:
+        for question in draft.open_questions:
+            fingerprint = " ".join(question.question.split()).casefold()
+            if fingerprint not in seen:
+                seen.add(fingerprint)
+                questions.append(question)
+
+    folded = sum(len(g.keys) - 1 for g in duplicates)
+    return MergeDecision(
+        summary=(
+            f"{len(keyed) - folded} requirement(s) from {len(drafts)} slice(s) of the "
+            f"evidence. The consolidation pass did not run ({why}), so only exact "
+            "duplicates were folded - requirements that say the same thing in "
+            "different words are still listed separately, and no conflicts between "
+            "slices have been identified."
+        ),
+        duplicates=duplicates,
+        open_questions=questions,
+    )
 
 
 def _apply_merge(
