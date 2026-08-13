@@ -170,7 +170,11 @@ async def extract_evidence(
         for item in draft.items:
             if not item.text.strip():
                 continue
-            locator = _resolve_locator(item.locator, allowed) or fallback
+            locator = (
+                _resolve_locator(item.locator, allowed)
+                or _locate_by_text(item.text, batch)
+                or fallback
+            )
             evidence.append(
                 Evidence(
                     source_id=source.id,
@@ -184,6 +188,25 @@ async def extract_evidence(
             )
 
     return evidence, " ".join(summaries).strip(), warnings
+
+
+def _locate_by_text(claim: str, batch: list[Block]) -> str | None:
+    """The block a claim was quoted from, when exactly one contains it.
+
+    A model that cites `BR-04` rather than `p.2` has named something real and
+    unmatchable - the reference is inside the page, and the page is what the
+    reader needs. But the claim text is usually lifted almost verbatim from the
+    block, and *that* can be checked rather than guessed.
+
+    Only when exactly one block matches. Two blocks containing the same sentence
+    means this cannot tell them apart, and the whole point of the surrounding
+    code is that a locator nobody can stand behind is worse than none.
+    """
+    needle = " ".join(claim.split()).casefold()
+    if len(needle) < 24:  # too short to identify a block rather than coincide
+        return None
+    hits = [loc for loc, body in batch if needle in " ".join(body.split()).casefold()]
+    return hits[0] if len(hits) == 1 else None
 
 
 _TIMESTAMP = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
