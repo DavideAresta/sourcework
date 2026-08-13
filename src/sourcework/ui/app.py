@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field, ValidationError
 # every uploaded file and the run proceeds with no sources.
 from starlette.datastructures import UploadFile
 
-from sourcework import checkpoint, readiness
+from sourcework import auth, checkpoint, readiness
 from sourcework.a2a_common import AgentPool
 from sourcework.backends import probe
 from sourcework.config import LLMOverrides, settings
@@ -104,6 +104,15 @@ class RefineRun(BaseModel):
     llm: LLMOverrides | None = None
 
 
+_OPEN_PATHS = frozenset({"/healthz", "/", "/favicon.ico"})
+"""Reachable without a principal.
+
+Liveness, because a load balancer has no credentials, and the shell, because the
+page that would let somebody sign in cannot itself require having signed in.
+Everything the shell then fetches is guarded, so an unauthenticated visitor gets
+the frame and no data."""
+
+
 def _bound_beyond_loopback() -> bool:
     """Is this instance reachable from other machines?
 
@@ -160,6 +169,37 @@ def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | N
             detail = f"{type(exc).__name__} - see the server log"
         return JSONResponse(status_code=500, content={"detail": detail})
 
+    authenticator = auth.build()
+
+    @app.middleware("http")
+    async def require_a_principal(request: Request, call_next):  # noqa: ANN001, ANN202
+        """Resolve who is asking, and refuse when nobody is.
+
+        The rule lives here rather than on each route on purpose: a per-route
+        dependency is one someone forgets to add, and the route they forget it
+        on is unauthenticated with nothing to say so. One gate, and adding a
+        route cannot open a hole.
+
+        With core's :class:`~sourcework.auth.NullAuth` this never refuses - it
+        stamps the local operator on every request and the app behaves exactly
+        as it did before. It is the installed authenticator that decides.
+        """
+        if request.url.path in _OPEN_PATHS or request.url.path.startswith("/static/"):
+            # Liveness and the shell that renders the sign-in prompt. A 401 on
+            # the page that would let you log in is a locked door with the key
+            # behind it.
+            return await call_next(request)
+
+        principal = await authenticator.principal(request)
+        if principal is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Not signed in."},
+                headers=authenticator.challenge(),
+            )
+        request.state.principal = principal
+        return await call_next(request)
+
     @app.middleware("http")
     async def require_same_origin(request: Request, call_next):  # noqa: ANN001, ANN202
         """Reject cross-site writes.
@@ -201,6 +241,24 @@ def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | N
     @app.get("/dashboard", include_in_schema=False)
     async def dashboard_page() -> HTMLResponse:
         return HTMLResponse((STATIC / "dashboard.html").read_text(encoding="utf-8"))
+
+    @app.get("/api/me", tags=["ops"])
+    async def me(request: Request) -> dict[str, Any]:
+        """Who this installation thinks you are.
+
+        On core that is always the local operator, which is exactly what makes
+        it worth having: the front end can render a name and a sign-out control
+        when an authenticator is installed, and nothing when one is not, without
+        knowing which case it is in.
+        """
+        principal = getattr(request.state, "principal", auth.LOCAL)
+        return {
+            "id": principal.id,
+            "name": principal.display,
+            "email": principal.email,
+            "roles": sorted(principal.roles),
+            "authentication": authenticator.id,
+        }
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, Any]:
