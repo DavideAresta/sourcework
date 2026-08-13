@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 
 from sourcework import stream
 from sourcework.a2a_common import AgentPool, RemoteAgentError
+from sourcework.agents.orchestrator import checkpoint
 from sourcework.agents.schemas import (
     AnalyseRequest,
     ConfluenceFetchRequest,
@@ -103,6 +104,10 @@ def _extraction_failed(extraction) -> bool:  # noqa: ANN001 - the A2A extraction
 async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult:  # noqa: ANN001
     """Execute the full pipeline. ``notify`` is an optional async progress sink."""
     log = RunLog()
+    saved = checkpoint.Checkpoint(run_id=request.run_id, resume=request.resume)
+    # Every stage fingerprint starts here: which models answered is part of what
+    # produced the artifact, so changing the backend invalidates the lot.
+    config_fp = request.llm.model_dump(mode="json") if request.llm else None
 
     async def say(message: str) -> None:
         logger.info(message)
@@ -180,9 +185,24 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         )
 
     if inputs:
-        await say(f"Ingesting {len(inputs)} new input(s)")
-        with clock("ingest"):
-            extractions += await _ingest(inputs, pool, available, say, relay, log)
+        ingest_fp = checkpoint.digest(
+            [checkpoint.input_identity(ref) for ref in inputs], config_fp
+        )
+        stored = saved.load(
+            "ingest", ingest_fp, lambda d: [ExtractionResult.model_validate(e) for e in d]
+        )
+        if stored is not None:
+            extractions += stored
+            await say(
+                f"Reusing {sum(len(e.evidence) for e in stored)} evidence item(s) already "
+                f"extracted from {len(stored)} source(s) by the interrupted run"
+            )
+        else:
+            await say(f"Ingesting {len(inputs)} new input(s)")
+            with clock("ingest"):
+                fresh = await _ingest(inputs, pool, available, say, relay, log)
+            saved.save("ingest", ingest_fp, fresh)
+            extractions += fresh
 
     if not extractions:
         raise RuntimeError(
@@ -208,23 +228,30 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         raise RuntimeError("Sources parsed but yielded no evidence; nothing to build a PRD from.")
 
     # -- 3. requirements ---------------------------------------------------
-    await say("Normalising requirements")
-    with clock("analyse"):
-        analysis = await pool.call(
-            "requirements",
-            "analyse_requirements",
-            AnalyseRequest.from_extractions(
-                request.title,
-                extractions,
-                instructions=request.extra_instructions,
-                audience=request.audience,
-                # Present, this turns the analyst's job from "produce a
-                # requirement set" into "produce the next version of this one".
-                prior=baseline.requirements if baseline else None,
-            ),
-            on_progress=relay("analyst"),
-        )
-    requirement_set = RequirementSet.model_validate(analysis)
+    analyse_request = AnalyseRequest.from_extractions(
+        request.title,
+        extractions,
+        instructions=request.extra_instructions,
+        audience=request.audience,
+        # Present, this turns the analyst's job from "produce a requirement
+        # set" into "produce the next version of this one".
+        prior=baseline.requirements if baseline else None,
+    )
+    # The whole request, so a changed audience or instruction invalidates the
+    # stored requirements as surely as changed evidence would.
+    analyse_fp = checkpoint.digest(analyse_request.model_dump(mode="json"), config_fp)
+    requirement_set = saved.load("analyse", analyse_fp, RequirementSet.model_validate)
+    if requirement_set is None:
+        await say("Normalising requirements")
+        with clock("analyse"):
+            analysis = await pool.call(
+                "requirements", "analyse_requirements", analyse_request,
+                on_progress=relay("analyst"),
+            )
+        requirement_set = RequirementSet.model_validate(analysis)
+        saved.save("analyse", analyse_fp, requirement_set)
+    else:
+        await say("Reusing the requirements from the interrupted run")
     await say(
         f"{len(requirement_set.requirements)} requirement(s), "
         f"{len(requirement_set.conflicts)} conflict(s), "
@@ -247,25 +274,40 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
 
     for round_no in range(max(1, request.review_rounds + 1)):
         label = "Drafting" if round_no == 0 else f"Revising (round {round_no})"
-        await say(label)
-        with clock(f"write_{round_no}"):
-            written = WriteResult.model_validate(
-                await pool.call("writer", "write_prd", write_request, on_progress=relay("writer"))
-            )
+        # The request carries the previous round's revision notes, so this
+        # fingerprint chains: a different review produces a different draft key
+        # and no round can be reused out of the context that produced it.
+        write_fp = checkpoint.digest(write_request.model_dump(mode="json"), config_fp)
+        written = saved.load(f"write:{round_no}", write_fp, WriteResult.model_validate)
+        if written is None:
+            await say(label)
+            with clock(f"write_{round_no}"):
+                written = WriteResult.model_validate(
+                    await pool.call(
+                        "writer", "write_prd", write_request, on_progress=relay("writer")
+                    )
+                )
+            saved.save(f"write:{round_no}", write_fp, written)
+        else:
+            await say(f"{label}: reusing the draft from the interrupted run")
 
         if round_no >= request.review_rounds or "critic" not in available:
             break
 
-        await say("Reviewing")
-        with clock(f"review_{round_no}"):
-            review = ReviewResponse.model_validate(
-                await pool.call(
-                    "critic",
-                    "review_prd",
-                    ReviewRequest(prd=written.prd, markdown=written.markdown),
-                    on_progress=relay("critic"),
+        review_request = ReviewRequest(prd=written.prd, markdown=written.markdown)
+        review_fp = checkpoint.digest(review_request.model_dump(mode="json"), config_fp)
+        review = saved.load(f"review:{round_no}", review_fp, ReviewResponse.model_validate)
+        if review is None:
+            await say("Reviewing")
+            with clock(f"review_{round_no}"):
+                review = ReviewResponse.model_validate(
+                    await pool.call(
+                        "critic", "review_prd", review_request, on_progress=relay("critic")
+                    )
                 )
-            )
+            saved.save(f"review:{round_no}", review_fp, review)
+        else:
+            await say("Reusing the review from the interrupted run")
         blocking = review.report.blocking
         await say(f"Review: {review.verdict}, {len(blocking)} blocking finding(s)")
         if not blocking:
@@ -311,6 +353,18 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
 
     for extraction in extractions:
         log.warnings.extend(f"{extraction.source.title}: {w}" for w in extraction.warnings)
+
+    if saved.reused:
+        # In the stats rather than only in the log: a reader is entitled to know
+        # which parts of this document were produced by the run they are looking
+        # at and which were carried over from an earlier attempt.
+        log.warnings.append(
+            "Resumed from an interrupted run; these stages were not recomputed: "
+            + ", ".join(saved.reused)
+        )
+    # There is a result now, so there is nothing left to resume; refining it is
+    # what a baseline is for.
+    saved.clear()
 
     return PRDResult(
         prd=written.prd,

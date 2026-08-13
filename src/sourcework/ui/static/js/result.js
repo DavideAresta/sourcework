@@ -125,6 +125,19 @@ export function runView(runId, { onChanged }) {
         onClick: async () => { await api.cancelRun(runId); toast('Cancelling…'); },
       }, 'Cancel'));
     }
+    // Offered only when there is state to resume from, and never for a run that
+    // already produced a document - that one wants refining, not repeating.
+    if (run.resumable?.length && !run.result && !run.active) {
+      actions.append(el('button', {
+        class: 'primary',
+        title: `Reuses ${run.resumable.join(', ')} and continues from there`,
+        onClick: async () => {
+          const { reusing } = await api.resumeRun(runId);
+          toast(`Resuming, keeping ${reusing.length} finished stage(s)`);
+          load();
+        },
+      }, 'Resume'));
+    }
     if (run.result) {
       actions.append(
         el('a', { href: api.artifactUrl(runId, 'md') }, el('button', {}, 'Markdown')),

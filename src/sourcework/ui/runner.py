@@ -61,7 +61,36 @@ class RunManager:
             request=request.model_dump(mode="json"),
         )
         await self.store.save(run)
+        # Stamped here rather than by every caller, so that anything which
+        # starts a run - a new one, a refinement, a future caller - writes its
+        # stages down without having to remember to.
+        request = request.model_copy(update={"run_id": run.id})
         self._tasks[run.id] = asyncio.create_task(self._execute(run.id, request))
+        return run
+
+    async def resume(self, run_id: str) -> Run | None:
+        """Run ``run_id`` again, reusing the stages it had already finished.
+
+        The same run, continued - not a new one. A refinement is a new version
+        with its own id because it is a different document; this is the *same*
+        document, interrupted, and giving it a second id would put two rows in
+        the history for one piece of work.
+
+        Its events are kept rather than cleared, so the record shows the failure
+        and the recovery instead of quietly replacing one with the other.
+        """
+        run = await self.store.get(run_id)
+        if run is None or self.is_active(run_id):
+            return None
+
+        request = PRDRequest.model_validate(run.request).model_copy(
+            update={"run_id": run_id, "resume": True}
+        )
+        run.status = "queued"
+        run.error = None
+        run.finished_at = None
+        await self.store.save(run)
+        self._tasks[run_id] = asyncio.create_task(self._execute(run_id, request))
         return run
 
     async def cancel(self, run_id: str) -> bool:
