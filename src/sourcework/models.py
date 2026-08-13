@@ -317,6 +317,20 @@ class PRDRequest(BaseModel):
     is carried in, ``inputs`` supplies whatever is new, and the analyst
     reconciles the two."""
 
+    run_id: str | None = None
+    """Names the run, so each stage can write down what it produced. Without it
+    a run keeps its intermediate state only in memory and an interruption costs
+    everything it had already paid for."""
+
+    resume: bool = False
+    """Reuse the saved stages of a previous attempt at ``run_id``.
+
+    Deliberately not implied by ``run_id`` being present. Saving is free and
+    keeps the option open; *reusing* is a judgement about whether the earlier
+    output is still wanted, and a run is most often cancelled because it was
+    not. Stages whose fingerprint no longer matches are recomputed regardless of
+    this flag."""
+
 
 class PRDResult(BaseModel):
     prd: PRDDocument

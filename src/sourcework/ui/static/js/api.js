@@ -34,6 +34,7 @@ export const api = {
   getRun: (id) => request(`/api/runs/${id}`),
   deleteRun: (id) => request(`/api/runs/${id}`, { method: 'DELETE' }),
   cancelRun: (id) => request(`/api/runs/${id}/cancel`, { method: 'POST' }),
+  resumeRun: (id) => request(`/api/runs/${id}/resume`, { method: 'POST' }),
   publish: (id, body) => request(`/api/runs/${id}/publish`, { method: 'POST', ...json(body) }),
 
   mesh: () => request('/api/mesh'),

@@ -42,6 +42,7 @@ from starlette.datastructures import UploadFile
 
 from sourcework import readiness
 from sourcework.a2a_common import AgentPool
+from sourcework.agents.orchestrator import checkpoint
 from sourcework.backends import probe
 from sourcework.config import LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
@@ -321,11 +322,36 @@ def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | N
         run = await store.get(run_id)
         if run is None:
             raise HTTPException(404, "no such run")
-        return {**run.as_dict(), "active": manager.is_active(run_id)}
+        return {
+            **run.as_dict(),
+            "active": manager.is_active(run_id),
+            # What a resume would skip. Sent with the run rather than fetched
+            # separately so the view can offer resuming only when there is
+            # something to resume, and can say what it would keep.
+            "resumable": checkpoint.saved_stages(run_id),
+        }
+
+    @app.post("/api/runs/{run_id}/resume", tags=["runs"])
+    async def resume_run(run_id: str) -> dict[str, Any]:
+        """Continue an interrupted run from the last stage it completed.
+
+        Explicit, never automatic. A run is most often cancelled because the
+        configuration was wrong, and silently reusing what that configuration
+        produced would hand back a PRD the user had already rejected. Stages
+        whose fingerprint no longer matches are recomputed anyway.
+        """
+        stages = checkpoint.saved_stages(run_id)
+        if not stages:
+            raise HTTPException(404, "that run saved no stages to resume from")
+        run = await manager.resume(run_id)
+        if run is None:
+            raise HTTPException(409, "that run is already in flight")
+        return {"id": run.id, "reusing": stages}
 
     @app.delete("/api/runs/{run_id}", tags=["runs"])
     async def delete_run(run_id: str) -> dict[str, bool]:
         await manager.cancel(run_id)
+        checkpoint.discard(run_id)
         return {"deleted": await store.delete(run_id)}
 
     @app.post("/api/runs/{run_id}/cancel", tags=["runs"])

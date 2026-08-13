@@ -446,6 +446,40 @@ self-contained statement (the extractor sees the text alone, so "yes, in scope"
 without its question is evidence of nothing). It becomes evidence, and the
 requirement it settles cites it.
 
+### 4.2 Resuming, not restarting
+
+A run is minutes of model calls arranged as a chain, and every artifact along
+it used to live only in a local variable. A timeout in the last call of the
+analysis phase unwound the stack and discarded 180 evidence items and 82
+requirements — work that had already succeeded and had already been paid for.
+
+Each stage now writes what it produced to `workspace/checkpoints/<run id>.json`,
+and a resume reads it back instead of making the call again. Stages are
+`ingest`, `analyse`, and `write:N` / `review:N` per revision round.
+
+This is the opposite of a refinement: same run, same id, continued. A
+refinement is a *different document* and earns its own id; an interrupted run
+is one piece of work, and giving it a second id would put two rows in the
+history for it.
+
+Three rules, each because the obvious alternative is wrong:
+
+| Rule | What breaks without it |
+|---|---|
+| Always write, only read when asked | Cancelling is a decision — most often "I picked the wrong model". A resume that happened automatically would rebuild the PRD from output the user had just rejected. Writing costs nothing and keeps the option open. |
+| Every stage carries a fingerprint of what produced it | Change the backend, or edit a source document, and the stored evidence no longer corresponds to what a fresh run would produce. Without a fingerprint the result is a PRD that is half one configuration and half another, with nothing on its face to say so. A stale stage is recomputed. |
+| Artifacts are stored, never recipes | Evidence ids are minted randomly, so re-extracting a document yields the same claims under new ids and breaks every citation in a PRD already written against them. The stored bytes *are* the state. |
+
+A local file contributes its size and mtime to the fingerprint, so editing a
+source between attempts discards the evidence taken from the old contents.
+Contents are not hashed — these are documents, some large, and the fingerprint
+is computed at every stage boundary.
+
+Anything reused is named in `stats.warnings`, because a reader is entitled to
+know which parts of the document in front of them were produced by the run they
+are looking at. Checkpoints are deleted once a run has a result: there is
+nothing left to resume, and refining it is what a baseline is for.
+
 ## 9. The web UI
 
 A ninth service (`sourcework/ui/`), and deliberately **not** mounted on the

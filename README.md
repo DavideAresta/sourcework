@@ -205,6 +205,21 @@ Two deliberate choices:
   event rewrites the run record. Reload a finished run and the panel is empty —
   the PRD is the artifact, this was the model getting there.
 
+## Resuming an interrupted run
+
+A run that dies — a timeout, a cancel, a restart of the app — keeps whatever it
+had already finished. Open it and press **Resume**: it picks up from the last
+completed stage instead of re-reading every document and re-analysing every
+piece of evidence.
+
+Resuming is never automatic, because cancelling a run usually means the
+configuration was wrong, and quietly reusing what that configuration produced
+would hand back the document you had just rejected. Any stage whose inputs have
+changed since — a different backend, an edited source file — is recomputed
+regardless, and whatever *was* reused is recorded in the run's stats.
+
+A finished run has nothing to resume. That one wants **Refine**.
+
 ## Refining a PRD
 
 A PRD is never finished on the first pass — it ends by telling you what it
