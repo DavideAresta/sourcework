@@ -12,6 +12,7 @@ The orchestrator uses :class:`AgentPool` to talk to its peers. The pool:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -21,7 +22,7 @@ import httpx
 from a2a.client import ClientCallContext, ClientConfig, create_client
 from a2a.client.client import Client
 from a2a.helpers import get_data_parts, get_message_text, new_message
-from a2a.types import AgentCard, Role, SendMessageRequest, TaskState
+from a2a.types import AgentCard, CancelTaskRequest, Role, SendMessageRequest, TaskState
 from pydantic import BaseModel
 
 from sourcework.a2a_common.parts import USAGE_KEY, envelope
@@ -72,6 +73,9 @@ class AgentPool:
         self._cards: dict[str, AgentCard] = {}
         self._httpx: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
+        self._cancellations: list[asyncio.Task[Any]] = []
+        """Cancel requests still on the wire. Held so :meth:`close` can let them
+        land before the transport underneath them is torn down."""
 
     async def __aenter__(self) -> AgentPool:
         return self
@@ -80,6 +84,16 @@ class AgentPool:
         await self.close()
 
     async def close(self) -> None:
+        # Before the transport goes: a cancel request racing a closing httpx
+        # client is a cancel that never arrives, which is the whole failure this
+        # pool now exists to prevent.
+        if self._cancellations:
+            # CancelledError included: this runs while the caller is unwinding
+            # from its own cancellation, and cleanup must not raise something
+            # new over the top of it.
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await asyncio.wait(self._cancellations, timeout=10)
+            self._cancellations.clear()
         for client in self._clients.values():
             await client.close()
         self._clients.clear()
@@ -128,6 +142,31 @@ class AgentPool:
                 logger.warning("agent %s unreachable: %s", name, exc)
         return found
 
+    # -- cancellation ------------------------------------------------------
+
+    async def _cancel_remote(self, agent: str, task_id: str) -> None:
+        """Ask ``agent`` to stop the task it is running for us.
+
+        Sent from inside an ``except CancelledError``, which is a hostile place
+        to await from: the enclosing task is unwinding and anything tied to it
+        can be torn down mid-flight. So the request goes out as its own task,
+        shielded, and is only *waited* on briefly - if the wait is cut short the
+        request is still in the air, and :meth:`close` gives it until the
+        transport shuts.
+
+        Every failure is swallowed. The caller is already being cancelled; the
+        one thing that must not happen is this raising something new over the
+        top of the cancellation.
+        """
+        client = self._clients.get(agent)
+        if client is None:  # pragma: no cover - we only get here after a call
+            return
+        sending = asyncio.ensure_future(client.cancel_task(CancelTaskRequest(id=task_id)))
+        self._cancellations.append(sending)
+        logger.info("cancelling %s task %s", agent, task_id)
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(sending), timeout=5)
+
     # -- invocation --------------------------------------------------------
 
     async def call(
@@ -163,31 +202,45 @@ class AgentPool:
         artifacts: list[Any] = []
         failure: str | None = None
         ctx = ClientCallContext()
+        remote_task: str | None = None
 
-        async for event in client.send_message(request, context=ctx):
-            which = event.WhichOneof("payload")
-            if which == "artifact_update":
-                artifacts.extend(get_data_parts(list(event.artifact_update.artifact.parts)))
-            elif which == "status_update":
-                state = event.status_update.status.state
-                if state in _FAILED_STATES:
-                    failure = get_message_text(event.status_update.status.message) or str(state)
-                elif event.status_update.status.HasField("message"):
-                    text = get_message_text(event.status_update.status.message)
-                    logger.debug("[%s] %s", agent, text)
-                    if on_progress is not None and text:
-                        await on_progress(text)
-            elif which == "task":
-                for artifact in event.task.artifacts:
-                    artifacts.extend(get_data_parts(list(artifact.parts)))
-                if event.task.status.state in _FAILED_STATES:
-                    failure = (
-                        get_message_text(event.task.status.message)
-                        if event.task.status.HasField("message")
-                        else str(event.task.status.state)
-                    )
-            elif which == "message":
-                logger.debug("[%s] message: %s", agent, get_message_text(event.message))
+        try:
+            async for event in client.send_message(request, context=ctx):
+                remote_task = _task_id(event) or remote_task
+                which = event.WhichOneof("payload")
+                if which == "artifact_update":
+                    artifacts.extend(get_data_parts(list(event.artifact_update.artifact.parts)))
+                elif which == "status_update":
+                    state = event.status_update.status.state
+                    if state in _FAILED_STATES:
+                        failure = get_message_text(event.status_update.status.message) or str(state)
+                    elif event.status_update.status.HasField("message"):
+                        text = get_message_text(event.status_update.status.message)
+                        logger.debug("[%s] %s", agent, text)
+                        if on_progress is not None and text:
+                            await on_progress(text)
+                elif which == "task":
+                    for artifact in event.task.artifacts:
+                        artifacts.extend(get_data_parts(list(artifact.parts)))
+                    if event.task.status.state in _FAILED_STATES:
+                        failure = (
+                            get_message_text(event.task.status.message)
+                            if event.task.status.HasField("message")
+                            else str(event.task.status.state)
+                        )
+                elif which == "message":
+                    logger.debug("[%s] message: %s", agent, get_message_text(event.message))
+        except asyncio.CancelledError:
+            # Cancelling this await stops us *listening*. On its own it does not
+            # stop the agent, which carries on to completion and bills for every
+            # token of it - measured at six minutes past a Ctrl-C.
+            #
+            # Doing it here makes one cancel travel the whole mesh: the pipeline
+            # is nested calls all the way down, and each agent is itself a
+            # caller whose await is now being cancelled.
+            if remote_task is not None:
+                await self._cancel_remote(agent, remote_task)
+            raise
 
         if failure:
             raise RemoteAgentError(agent, skill, failure)
@@ -242,3 +295,18 @@ def pretty(payload: BaseModel | dict[str, Any]) -> str:
     if isinstance(payload, BaseModel):
         return payload.model_dump_json(indent=2)
     return json.dumps(payload, indent=2, default=str)
+
+
+def _task_id(event: Any) -> str | None:  # noqa: ANN401 - the a2a event union
+    """The remote task id an event belongs to, if it carries one.
+
+    Captured on the way past rather than requested up front: the id is minted by
+    the agent, so the first event that mentions it is the earliest this side can
+    know what to cancel.
+    """
+    which = event.WhichOneof("payload")
+    if which == "task":
+        return event.task.id or None
+    if which in ("status_update", "artifact_update"):
+        return getattr(event, which).task_id or None
+    return None

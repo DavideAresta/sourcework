@@ -622,3 +622,27 @@ async def test_a_mesh_that_cannot_be_asked_does_not_block_the_resume(monkeypatch
     monkeypatch.setattr(a2a, "AgentPool", Unreachable)
 
     assert await _in_flight("r1") is False
+
+
+@pytest.mark.parametrize("name", sorted(__import__("sourcework.cli", fromlist=["AGENTS"]).AGENTS))
+def test_every_agent_finishes_building_its_executor(name):
+    """Each executor sets its own fields and then calls up.
+
+    Skipping that call leaves the base class's state unset, and nothing notices
+    until a request arrives: the agent starts, answers its card, advertises its
+    skills, and fails on the first call with an AttributeError. Caught here
+    because the end-to-end tests that would have caught it skip themselves
+    whenever a mesh is already running - which is exactly when someone is
+    working on this.
+    """
+    import importlib
+
+    from sourcework.a2a_common import SkillExecutor
+    from sourcework.cli import AGENTS
+
+    executor = importlib.import_module(AGENTS[name]).executor()
+
+    assert isinstance(executor, SkillExecutor)
+    assert executor.default_skill in executor.skills
+    # Set by SkillExecutor.__init__ and by nothing else.
+    assert executor._running == {}  # noqa: SLF001 - the contract being checked

@@ -67,6 +67,7 @@ class OrchestratorExecutor(SkillExecutor):
         stale lock after a crash - exactly when resuming is most wanted. A set
         that dies with the process cannot go stale.
         """
+        super().__init__()
 
     async def generate_prd(self, payload: dict[str, Any], progress: Progress) -> PRDResult:
         try:

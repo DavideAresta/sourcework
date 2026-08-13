@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import importlib
 import json
 import logging
+import signal
 import sys
 from pathlib import Path
 
@@ -258,17 +260,14 @@ async def _generate(args: argparse.Namespace) -> int:
     )
 
     try:
-        async with AgentPool() as pool:
-            data = await pool.call("orchestrator", "generate_prd", request)
+        with _stop_on_sigterm():
+            async with AgentPool() as pool:
+                data = await pool.call("orchestrator", "generate_prd", request)
     except (KeyboardInterrupt, asyncio.CancelledError):
         # The likeliest interruption of all, and the one that does not arrive as
         # an Exception: somebody watching a slow run and pressing Ctrl-C.
-        print(
-            "\nInterrupted. This stopped watching the run, not the run itself - the "
-            "orchestrator carries on and will finish on its own.",
-            file=sys.stderr,
-        )
-        _print_resume_hint(run_id, checkpoint, still_running=True)
+        print("\nInterrupted. Told the orchestrator to stop.", file=sys.stderr)
+        _print_resume_hint(run_id, checkpoint, still_running=False)
         return 130
     except Exception as exc:
         # The stages that did finish are on disk, and a terminal has no run
@@ -296,6 +295,32 @@ async def _generate(args: argparse.Namespace) -> int:
     return 0
 
 
+@contextlib.contextmanager
+def _stop_on_sigterm():  # noqa: ANN202
+    """Treat SIGTERM like Ctrl-C, so the run is cancelled rather than orphaned.
+
+    SIGINT already arrives as a cancellation - ``asyncio.run`` turns it into
+    one. SIGTERM does not: Python's default handler ends the process outright,
+    the coroutine never unwinds, nothing tells the orchestrator to stop, and the
+    run carries on billing. That is what a process manager sends - ``timeout``,
+    systemd, ``docker stop``, a desktop app being quit - so it is the more
+    likely of the two to end a long run on somebody else's machine.
+    """
+    loop = asyncio.get_event_loop()
+    task = asyncio.current_task()
+    installed = False
+    if task is not None:
+        with contextlib.suppress(NotImplementedError, RuntimeError):  # not on Windows
+            loop.add_signal_handler(signal.SIGTERM, task.cancel)
+            installed = True
+    try:
+        yield
+    finally:
+        if installed:
+            with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.remove_signal_handler(signal.SIGTERM)
+
+
 async def _in_flight(run_id: str) -> bool:
     """Is the orchestrator already running ``run_id``?
 
@@ -317,10 +342,9 @@ async def _in_flight(run_id: str) -> bool:
 def _print_resume_hint(run_id: str, checkpoint, *, still_running: bool) -> None:  # noqa: ANN001
     """What survived, and how to pick it up.
 
-    ``still_running`` because the two ways out are not the same situation. A run
-    that failed is over and can be resumed now; a run somebody interrupted is
-    almost certainly still going, and telling them to resume immediately would
-    be telling them to do the thing the next command refuses.
+    ``still_running`` for the case where the run is known to be continuing. A
+    cancel that did not land leaves one going, and ``--resume`` checks for that
+    before spending anything, so the hint stays correct either way.
     """
     stages = checkpoint.saved_stages(run_id)
     if not stages:

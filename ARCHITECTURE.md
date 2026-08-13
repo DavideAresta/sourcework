@@ -495,10 +495,39 @@ The ingest stage stores the routing map alongside the evidence, so a resumed
 run still reports which agent handled which input; without it `stats.routed`
 would come back empty and describe work that did happen as work that did not.
 
-**Disconnecting a client does not stop a run.** Ctrl-C kills the CLI process,
-not the orchestrator; a closed browser or a restarted UI is the same. The run
-carries on here and finishes on its own, which means the run somebody thinks
-they interrupted is usually still going — and resuming it would put two
+### 4.3 Cancelling
+
+A cancel used to be a relabelling. `SkillExecutor.cancel` marked the A2A task
+cancelled and never touched the coroutine doing the work, and no client ever
+called it anyway — the UI's Cancel button cancelled its own local task. So a run
+reported "cancelled" the instant the button was pressed and went on spending
+tokens for another ten minutes.
+
+Stopping it has to happen at three levels, because each one is a different
+process and stopping one does nothing to the next:
+
+| Level | What it does |
+|---|---|
+| `SkillExecutor` | Holds the asyncio task running each handler, so `cancel` stops the work rather than renaming it. |
+| `AgentPool.call` | On `CancelledError`, sends a cancel for the remote task it was listening to. This is what makes one cancel travel the whole mesh — the pipeline is nested calls, and each agent is itself a caller whose await is now being cancelled. |
+| `process.run` | Kills the child on cancellation. This is where the money is: the coroutine unwinding costs nothing, and the CLI answering a model prompt would otherwise run to completion and bill for every token of an answer nobody is waiting for. |
+
+The child is killed by **process group**, not by pid: every backend here is a CLI
+that shells out further, and killing only the direct child leaves the
+grandchildren holding the work. `start_new_session=True` at spawn is what makes
+the group addressable without signalling our own session.
+
+The CLI treats **SIGTERM** like Ctrl-C. SIGINT already arrives as a cancellation
+because `asyncio.run` converts it; SIGTERM ends the process outright, so nothing
+unwinds and nothing tells the mesh to stop — and SIGTERM is what a process
+manager sends, which makes it the likelier of the two to end a long run.
+
+A cancelled run keeps its checkpoints, so cancelling and resuming is a normal
+thing to do rather than a way to lose ten minutes.
+
+**A client that vanishes without cancelling still leaves a run going.** A
+closed browser, a killed container, a UI restarted mid-run: nothing unwinds, so
+nothing cancels, and the run carries on here to completion — and resuming it would put two
 pipelines on one checkpoint file and one piece of work.
 
 The orchestrator therefore refuses a second run of an id it is already
