@@ -411,6 +411,22 @@ def describe(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _means_unset(key: str, value: str) -> bool:
+    """Is a blank value for ``key`` a request to fall back to the default?
+
+    For a number it must be. ``MAX_TOKENS=`` reads back as the empty string,
+    which is not an int, and pydantic-settings raises at construction - so a
+    save that looked fine left every *subsequent* process unable to start. The
+    running one survived on its cached settings, which is what made this look
+    like an intermittent 500 rather than a broken config file.
+
+    Left alone for text fields, where an empty value is a real one and clearing
+    a box should not resurrect a default the operator was trying to remove.
+    """
+    field = BY_KEY.get(key)
+    return field is not None and field.kind == "number" and not value.strip()
+
+
 def write(path: Path, updates: dict[str, str]) -> list[str]:
     """Apply ``updates`` to the file. Returns the keys that actually changed.
 
@@ -440,7 +456,19 @@ def write(path: Path, updates: dict[str, str]) -> list[str]:
         match = _LINE.match(line.strip())
         if match and match.group("key") in remaining:
             key = match.group("key")
-            lines[index] = f"{key}={_quote(remaining.pop(key))}"
+            value = remaining.pop(key)
+            if _means_unset(key, value):
+                # Commented out rather than written as `KEY=`. An empty value is
+                # a valid *string*, so pydantic accepts `KEY=` for a text field
+                # and rejects it for an int - which turned a successful save into
+                # a config no process could load afterwards. The comment keeps the
+                # line visible where the operator left it.
+                lines[index] = f"# {key}="
+            else:
+                lines[index] = f"{key}={_quote(value)}"
+
+    # A key that was never in the file and is being cleared has nothing to write.
+    remaining = {k: v for k, v in remaining.items() if not _means_unset(k, v)}
 
     if remaining:
         if lines and lines[-1].strip():
