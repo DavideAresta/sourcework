@@ -55,11 +55,24 @@ logger = logging.getLogger(__name__)
 # flag, leaving agy's own default.
 _EFFORT = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high", "max": "high"}
 
-_TIERED_SUFFIXES = ("-high", "-medium", "-low")
-"""Most agy model ids end in a tier (``gemini-3.6-flash-low``) *and* there is a
-separate ``--effort`` flag. Sending both is a contradiction the CLI has to
-resolve somehow, so the id wins and the flag is only sent for an id that
-carries no tier of its own, like ``claude-sonnet-4-6``."""
+"""``--effort`` and ``--model`` are mutually exclusive on agy, always.
+
+Not "the id wins", which is what this code assumed and what a reading of the
+model list suggests - most ids end in a tier (``gemini-3.6-flash-low``) and two
+do not (``claude-sonnet-4-6``, ``claude-opus-4-6-thinking``), so sending the
+flag only for the untiered pair looks like the careful thing to do. It is
+exactly backwards. Measured against agy 1.1.12::
+
+    --model gemini-3.6-flash-low  --effort high
+        -> "--model gemini-3.6-flash-low conflicts with --effort=high"
+    --model claude-sonnet-4-6     --effort low
+        -> "--effort is not supported for model claude-sonnet-4-6"
+
+Two messages, one rule: name a model and the effort is already decided. So the
+flag goes only when no model is configured, where it steers whatever default agy
+would otherwise pick. Choosing a critic from another family - the one thing agy
+is uniquely good for, since it fronts three - failed outright on this.
+"""
 
 
 class AgyBackend(LLMBackend):
@@ -155,12 +168,12 @@ class AgyBackend(LLMBackend):
 
         if request.model:
             argv += ["--model", request.model]
-            tiered = request.model.endswith(_TIERED_SUFFIXES)
-        else:
-            tiered = False
 
+        # Only without a model: see the note above _EFFORT. Sending both is
+        # rejected by the CLI, not merged, so a run configured with any agy
+        # model and any effort would fail every call.
         effort = _EFFORT.get((request.effort or "").strip().lower())
-        if effort and not tiered:
+        if effort and not request.model:
             argv += ["--effort", effort]
 
         # The only CLI backend that can enforce the schema rather than just

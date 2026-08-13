@@ -577,17 +577,32 @@ async def test_agy_asks_for_no_schema_when_none_was_given(cli):
     ("xhigh", "high"), ("max", "high"),
 ])
 async def test_agy_collapses_the_top_of_the_effort_vocabulary(cli, asked, sent):
+    """agy takes three rungs; this project's vocabulary has five. Only reachable
+    with no model configured - see below for why."""
     cli.script(json.dumps(AGY_RESULT))
-    await AgyBackend().generate(request(model="claude-sonnet-4-6", effort=asked))
+    await AgyBackend().generate(request(model=None, effort=asked))
     assert cli.argv[cli.argv.index("--effort") + 1] == sent
 
 
-async def test_agy_lets_a_tiered_model_id_win_over_the_effort_flag(cli):
-    """Most ids already encode a tier (gemini-3.6-flash-low). Sending both is a
-    contradiction the CLI would have to resolve for us."""
+@pytest.mark.parametrize("model", ["gemini-3.6-flash-low", "claude-sonnet-4-6"])
+async def test_agy_never_sends_effort_alongside_a_model(cli, model):
+    """Rejected by the CLI, not merged. Two messages for one rule, measured
+    against agy 1.1.12:
+
+        --model gemini-3.6-flash-low --effort high
+            -> "--model gemini-3.6-flash-low conflicts with --effort=high"
+        --model claude-sonnet-4-6 --effort low
+            -> "--effort is not supported for model claude-sonnet-4-6"
+
+    This code sent the flag for exactly the ids that reject it hardest - the
+    untiered Claude pair - so a critic from another family, the one thing agy is
+    uniquely good for, failed on every call.
+    """
     cli.script(json.dumps(AGY_RESULT))
-    await AgyBackend().generate(request(model="gemini-3.6-flash-low", effort="high"))
+    await AgyBackend().generate(request(model=model, effort="high"))
+
     assert "--effort" not in cli.argv
+    assert cli.argv[cli.argv.index("--model") + 1] == model
 
 
 async def test_agy_oversized_prompt_goes_on_stdin_with_no_print_flag(cli):
