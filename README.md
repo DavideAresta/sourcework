@@ -241,6 +241,16 @@ evidence as it finishes, so an interrupted analysis costs the slices still in
 flight rather than all of them. What survived is listed by name —
 `ingest, analyst/slice:140ef0f6, analyst/slice:f7b34642`.
 
+Interrupting the command stops you watching the run, not the run — the
+orchestrator carries on and finishes on its own. Resuming while that is still
+happening is refused rather than allowed to collide:
+
+```
+Run run-50d7670154eb is still going. Interrupting this command did not stop it -
+the orchestrator carries on and will finish on its own. Wait for it, or cancel
+it, then resume.
+```
+
 Bare `--resume` takes the most recent saved run. Checkpoints nobody comes back
 for are discarded after two weeks - they hold the full text of every source
 that was ingested.
