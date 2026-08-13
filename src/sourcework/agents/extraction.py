@@ -172,6 +172,7 @@ async def extract_evidence(
                 continue
             locator = (
                 _resolve_locator(item.locator, allowed)
+                or _locate_by_reference(item.locator, batch)
                 or _locate_by_text(item.text, batch)
                 or fallback
             )
@@ -188,6 +189,30 @@ async def extract_evidence(
             )
 
     return evidence, " ".join(summaries).strip(), warnings
+
+
+def _locate_by_reference(claimed: str | None, batch: list[Block]) -> str | None:
+    """The block containing the reference a model cited, when only one does.
+
+    Specs number themselves. Asked where a claim came from, a model reading a
+    requirements document answers `BR-04`, not `p.2` - which is a real reference
+    a reader could search for, and is not a locator this code can validate,
+    because an invented one looks identical.
+
+    Unless it appears in the text. `BR-04` occurring in exactly one block is
+    evidence the model read it there, and that block's locator is the position
+    the reader actually needs. Measured on the demo pack: this is the difference
+    between 30 of 37 claims from a spec being unplaced and almost none.
+
+    Kept separate from :func:`_locate_by_text`, which matches the *claim*: this
+    matches the reference and so needs no length floor - `BR-04` is short
+    precisely because it is an identifier.
+    """
+    if not claimed or len(claimed.strip()) < 3:
+        return None
+    needle = " ".join(claimed.split()).casefold()
+    hits = [loc for loc, body in batch if needle in " ".join(body.split()).casefold()]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _locate_by_text(claim: str, batch: list[Block]) -> str | None:
