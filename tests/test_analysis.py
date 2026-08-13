@@ -444,3 +444,28 @@ class TestItemLimit:
     def test_both_limits_off_means_one_slice(self):
         evidence = [_ev_from("src-1", f"e-{i}", "x" * 5_000) for i in range(50)]
         assert len(_batch(evidence, {}, 0, 0)) == 1
+
+
+# ---------------------------------------------------------------------------
+# Telling a dead backend apart from a quiet document
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_extraction_is_not_reported_as_an_empty_document():
+    """The run that prompted this said "Sources parsed but yielded no evidence"
+    when in fact every model call had died with a connection error. Both end at
+    zero evidence, and blaming the documents sends the reader to re-read five
+    PDFs instead of restarting a backend."""
+    from sourcework.agents.orchestrator.pipeline import _extraction_failed
+
+    class Fake:
+        def __init__(self, warnings):
+            self.warnings = warnings
+
+    died = Fake(["batch 1 failed: LLMError: every configured backend failed"])
+    quiet = Fake(["Nothing quotable on this page."])
+    silent = Fake([])
+
+    assert _extraction_failed(died) is True
+    assert _extraction_failed(quiet) is False, "a real document warning is not a failure"
+    assert _extraction_failed(silent) is False
