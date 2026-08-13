@@ -36,6 +36,13 @@ PORT = 8000
 class MeshStatus(BaseModel):
     agents: dict[str, list[str]] = Field(default_factory=dict)
     unreachable: list[str] = Field(default_factory=list)
+    in_flight: list[str] = Field(default_factory=list)
+    """Run ids executing here right now.
+
+    Reported so a client can find out *before* it asks for something that would
+    collide. The refusal in :meth:`generate_prd` is the race-free backstop; this
+    is what lets the answer arrive without a wasted round trip through a
+    request the caller could have been told not to make."""
     summary: str = ""
 
 
@@ -46,7 +53,20 @@ class OrchestratorExecutor(SkillExecutor):
             "mesh_status": self.mesh_status,
         }
         self.default_skill = "generate_prd"
-        super().__init__()
+        self._in_flight: set[str] = set()
+        """Run ids currently executing here.
+
+        Resuming a run that is still going would put two pipelines on the same
+        checkpoint file and the same work, and the case is not hypothetical: a
+        client that disconnects - Ctrl-C in the CLI, a closed browser, a
+        restarted UI - does not stop the run, which carries on here to
+        completion. The client then has every reason to think it is dead.
+
+        Held in memory on purpose. A lock file would have to answer "is the
+        process that wrote this still alive", and would strand a run behind a
+        stale lock after a crash - exactly when resuming is most wanted. A set
+        that dies with the process cannot go stale.
+        """
 
     async def generate_prd(self, payload: dict[str, Any], progress: Progress) -> PRDResult:
         try:
@@ -65,11 +85,24 @@ class OrchestratorExecutor(SkillExecutor):
         # Narration propagates the same way, but is not carried on the request:
         # the executor installs a sink when the caller asked to watch, so its
         # presence *is* the answer to "is anyone looking at this run".
-        async with AgentPool(llm=request.llm, narrate=stream.current_sink() is not None) as pool:
-            try:
-                return await pipeline.run(request, pool, notify=progress)
-            except RuntimeError as exc:
-                raise SkillError(str(exc)) from exc
+        if request.run_id and request.run_id in self._in_flight:
+            raise SkillError(
+                f"Run {request.run_id} is already in flight here. Disconnecting a client "
+                f"does not stop a run - it carries on and will finish on its own. Wait for "
+                f"it, or cancel it, before resuming."
+            )
+        if request.run_id:
+            self._in_flight.add(request.run_id)
+        try:
+            async with AgentPool(
+                llm=request.llm, narrate=stream.current_sink() is not None
+            ) as pool:
+                try:
+                    return await pipeline.run(request, pool, notify=progress)
+                except RuntimeError as exc:
+                    raise SkillError(str(exc)) from exc
+        finally:
+            self._in_flight.discard(request.run_id or "")
 
     async def mesh_status(self, payload: dict[str, Any]) -> MeshStatus:
         async with AgentPool() as pool:
@@ -78,6 +111,7 @@ class OrchestratorExecutor(SkillExecutor):
         return MeshStatus(
             agents=found,
             unreachable=unreachable,
+            in_flight=sorted(self._in_flight),
             summary=f"{len(found)}/{len(found) + len(unreachable)} agents reachable.",
         )
 

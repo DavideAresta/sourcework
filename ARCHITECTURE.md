@@ -495,6 +495,20 @@ The ingest stage stores the routing map alongside the evidence, so a resumed
 run still reports which agent handled which input; without it `stats.routed`
 would come back empty and describe work that did happen as work that did not.
 
+**Disconnecting a client does not stop a run.** Ctrl-C kills the CLI process,
+not the orchestrator; a closed browser or a restarted UI is the same. The run
+carries on here and finishes on its own, which means the run somebody thinks
+they interrupted is usually still going — and resuming it would put two
+pipelines on one checkpoint file and one piece of work.
+
+The orchestrator therefore refuses a second run of an id it is already
+executing, and reports its live ids through `mesh_status` so a client can find
+out before asking. The refusal is the race-free backstop; the report is what
+lets the answer arrive without a wasted round trip. The set is held in memory on
+purpose: a lock file would have to answer "is the process that wrote this still
+alive", and would strand a run behind a stale lock after a crash — exactly when
+resuming is most wanted.
+
 Anything reused is named in `stats.warnings`, because a reader is entitled to
 know which parts of the document in front of them were produced by the run they
 are looking at. Checkpoints are deleted once a run has a result: there is

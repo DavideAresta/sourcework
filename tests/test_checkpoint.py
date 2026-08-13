@@ -465,3 +465,160 @@ async def test_a_half_analysed_run_says_how_far_it_got(workspace):
     assert stages[0] == "ingest"
     assert len(stages) == 2
     assert stages[1].startswith("analyst/slice:")
+
+
+# --- resuming into a run that is still going -------------------------------
+
+
+class FakeAgentPool:
+    """A pool that connects to nothing. `registry` is what mesh_status counts."""
+
+    registry = {"orchestrator": "", "requirements": ""}
+
+    def __init__(self, *a, **k) -> None:  # noqa: ANN002, ANN003
+        self.usage = SimpleNamespace(as_dict=dict)
+
+    async def __aenter__(self):  # noqa: ANN204
+        return self
+
+    async def __aexit__(self, *exc) -> None:  # noqa: ANN002
+        return None
+
+    async def discover(self) -> dict[str, list[str]]:
+        return {"requirements": ["analyse_requirements"]}
+
+
+@pytest.fixture
+def orchestrator(monkeypatch):
+    """An executor whose pipeline blocks until the test lets it finish."""
+    import asyncio
+
+    from sourcework.agents.orchestrator import agent as orch
+
+    state = SimpleNamespace(started=asyncio.Event(), release=asyncio.Event(), runs=0)
+
+    async def blocking_run(request, pool, notify=None):  # noqa: ANN001
+        state.runs += 1
+        state.started.set()
+        await state.release.wait()
+        return "a result"
+
+    monkeypatch.setattr(orch.pipeline, "run", blocking_run)
+    monkeypatch.setattr(orch, "AgentPool", FakeAgentPool)
+    state.executor = orch.OrchestratorExecutor()
+    return state
+
+
+def _payload(run_id: str = "r1") -> dict:
+    return {
+        "title": "Returns",
+        "inputs": [{"uri": "inline:note", "text": "Returns must be free."}],
+        "run_id": run_id,
+    }
+
+
+async def test_the_orchestrator_refuses_to_run_one_id_twice(orchestrator):
+    """Disconnecting a client does not stop a run. Resuming one that is still
+    going would put two pipelines on the same checkpoint and the same work."""
+    import asyncio
+
+    from sourcework.a2a_common import SkillError
+
+    async def progress(_message: str) -> None:
+        return None
+
+    first = asyncio.create_task(orchestrator.executor.generate_prd(_payload(), progress))
+    await orchestrator.started.wait()
+
+    with pytest.raises(SkillError, match="already in flight"):
+        await orchestrator.executor.generate_prd(_payload(), progress)
+
+    orchestrator.release.set()
+    await first
+    assert orchestrator.runs == 1
+
+
+async def test_a_different_run_is_not_blocked_by_one_in_flight(orchestrator):
+    import asyncio
+
+    async def progress(_message: str) -> None:
+        return None
+
+    first = asyncio.create_task(orchestrator.executor.generate_prd(_payload("r1"), progress))
+    await orchestrator.started.wait()
+    second = asyncio.create_task(orchestrator.executor.generate_prd(_payload("r2"), progress))
+    await asyncio.sleep(0)
+
+    orchestrator.release.set()
+    await asyncio.gather(first, second)
+    assert orchestrator.runs == 2
+
+
+async def test_the_mesh_reports_which_runs_are_in_flight(orchestrator):
+    """So a client can find out before asking for something that would collide,
+    rather than by making the request and being turned down."""
+    import asyncio
+
+    async def progress(_message: str) -> None:
+        return None
+
+    assert (await orchestrator.executor.mesh_status({})).in_flight == []
+
+    running = asyncio.create_task(orchestrator.executor.generate_prd(_payload(), progress))
+    await orchestrator.started.wait()
+    assert (await orchestrator.executor.mesh_status({})).in_flight == ["r1"]
+
+    orchestrator.release.set()
+    await running
+    # Released on the way out, so a finished run does not block its own resume.
+    assert (await orchestrator.executor.mesh_status({})).in_flight == []
+
+
+async def test_a_run_that_fails_still_releases_its_id(orchestrator, monkeypatch):
+    """The failure path is exactly when somebody resumes, so a lock leaked there
+    would block the case the whole feature exists for."""
+    from sourcework.a2a_common import SkillError
+    from sourcework.agents.orchestrator import agent as orch
+
+    async def exploding_run(request, pool, notify=None):  # noqa: ANN001
+        raise RuntimeError("every backend failed")
+
+    monkeypatch.setattr(orch.pipeline, "run", exploding_run)
+
+    async def progress(_message: str) -> None:
+        return None
+
+    with pytest.raises(SkillError, match="every backend failed"):
+        await orchestrator.executor.generate_prd(_payload(), progress)
+
+    assert (await orchestrator.executor.mesh_status({})).in_flight == []
+
+
+def test_the_cli_says_so_rather_than_starting_a_second_run(workspace, monkeypatch, capsys):
+    from sourcework import cli
+
+    checkpoint.Checkpoint(run_id="r1").save("ingest", "fp", [_extraction()])
+
+    async def in_flight(_run_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(cli, "_in_flight", in_flight)
+
+    assert cli.main(["generate", "Returns", "-n", "a note", "--resume", "r1"]) == 2
+    assert "still going" in capsys.readouterr().err
+
+
+async def test_a_mesh_that_cannot_be_asked_does_not_block_the_resume(monkeypatch):
+    """"I could not check" is not "it is running". Treating it as such would
+    refuse the resume whenever the mesh is unreachable - and the real call a
+    moment later reports that far better than this could."""
+    import sourcework.a2a_common as a2a
+    from sourcework.cli import _in_flight
+
+    class Unreachable(FakeAgentPool):
+        async def __aenter__(self):  # noqa: ANN204
+            raise OSError("connection refused")
+
+    monkeypatch.setattr(a2a, "AgentPool", Unreachable)
+
+    assert await _in_flight("r1") is False

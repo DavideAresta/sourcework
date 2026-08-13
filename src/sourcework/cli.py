@@ -226,6 +226,19 @@ async def _generate(args: argparse.Namespace) -> int:
         if not stages:
             print(f"Run {run_id} saved no stages to resume from.", file=sys.stderr)
             return 2
+        if await _in_flight(run_id):
+            # Asked before anything is spent. Disconnecting a client does not
+            # stop a run - Ctrl-C kills this process, not the orchestrator - so
+            # the run somebody thinks they interrupted is usually still going.
+            # The orchestrator refuses this too; that guard is race-free and
+            # this one is early, and the early answer is the useful one.
+            print(
+                f"Run {run_id} is still going. Interrupting this command did not stop "
+                f"it - the orchestrator carries on and will finish on its own. Wait for "
+                f"it, or cancel it, then resume.",
+                file=sys.stderr,
+            )
+            return 2
         print(f"Resuming {run_id}, reusing: {', '.join(stages)}")
     else:
         run_id = new_id("run")
@@ -250,8 +263,12 @@ async def _generate(args: argparse.Namespace) -> int:
     except (KeyboardInterrupt, asyncio.CancelledError):
         # The likeliest interruption of all, and the one that does not arrive as
         # an Exception: somebody watching a slow run and pressing Ctrl-C.
-        print("\nInterrupted.", file=sys.stderr)
-        _print_resume_hint(run_id, checkpoint)
+        print(
+            "\nInterrupted. This stopped watching the run, not the run itself - the "
+            "orchestrator carries on and will finish on its own.",
+            file=sys.stderr,
+        )
+        _print_resume_hint(run_id, checkpoint, still_running=True)
         return 130
     except Exception as exc:
         # The stages that did finish are on disk, and a terminal has no run
@@ -259,7 +276,7 @@ async def _generate(args: argparse.Namespace) -> int:
         # the command to pick it up. Without this the checkpoint might as well
         # not exist.
         print(f"\nRun failed: {type(exc).__name__}: {exc}", file=sys.stderr)
-        _print_resume_hint(run_id, checkpoint)
+        _print_resume_hint(run_id, checkpoint, still_running=False)
         return 1
 
     result = PRDResult.model_validate(data)
@@ -279,13 +296,39 @@ async def _generate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _print_resume_hint(run_id: str, checkpoint) -> None:  # noqa: ANN001 - the module
+async def _in_flight(run_id: str) -> bool:
+    """Is the orchestrator already running ``run_id``?
+
+    A failure to ask is not a reason to refuse: an unreachable mesh fails
+    informatively a moment later on the real call, and treating "I could not
+    check" as "it is running" would block the resume this exists to enable.
+    """
+    from sourcework.a2a_common import AgentPool
+
+    try:
+        async with AgentPool() as pool:
+            status = await pool.call("orchestrator", "mesh_status", {})
+        return run_id in (status.get("in_flight") or [])
+    except Exception:  # noqa: BLE001 - the next call reports it properly
+        logging.getLogger(__name__).debug("could not check for in-flight runs", exc_info=True)
+        return False
+
+
+def _print_resume_hint(run_id: str, checkpoint, *, still_running: bool) -> None:  # noqa: ANN001
+    """What survived, and how to pick it up.
+
+    ``still_running`` because the two ways out are not the same situation. A run
+    that failed is over and can be resumed now; a run somebody interrupted is
+    almost certainly still going, and telling them to resume immediately would
+    be telling them to do the thing the next command refuses.
+    """
     stages = checkpoint.saved_stages(run_id)
     if not stages:
         return
+    when = "Once it stops, re-run" if still_running else "Re-run"
     print(
         f"\n{len(stages)} stage(s) survived ({', '.join(stages)}). "
-        f"Re-run the same command with --resume to continue from there, or "
+        f"{when} the same command with --resume to continue from there, or "
         f"--resume {run_id} to name it explicitly.",
         file=sys.stderr,
     )
