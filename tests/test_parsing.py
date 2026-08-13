@@ -241,3 +241,48 @@ async def test_a_single_block_batch_still_gets_its_locator():
     evidence, _, _ = await extract_evidence(FakeLLM(), source, [("p.7", "Only block.")])
 
     assert [e.locator for e in evidence] == ["p.7"]
+
+
+async def test_a_claim_quoted_from_one_block_is_placed_in_that_block():
+    """A model that cites `BR-04` has named something real and unmatchable - the
+    reference lives inside the page, and the page is what a reader needs. The
+    claim text is usually lifted near-verbatim, and that can be checked."""
+    from sourcework.agents.extraction import extract_evidence
+    from sourcework.models import Modality, SourceDocument
+
+    blocks = [
+        ("p.1", "Returns are handled manually today by a shared mailbox."),
+        ("p.2", "BR-04: a printable return label must be generated immediately."),
+    ]
+
+    class FakeLLM:
+        async def structured(self, system, user, model, **kw):  # noqa: ANN001
+            return model.model_validate({"summary": "", "warnings": "", "items": [
+                {"text": "a printable return label must be generated immediately",
+                 "locator": "BR-04"},
+            ]} | {"warnings": []})
+
+    source = SourceDocument(id="s", uri="file:///a.pdf", title="A", modality=Modality.DOCUMENT)
+    evidence, _, _ = await extract_evidence(FakeLLM(), source, blocks)
+
+    assert [e.locator for e in evidence] == ["p.2"]
+
+
+def test_a_sentence_in_two_blocks_places_a_claim_in_neither():
+    """This cannot tell them apart, and a locator nobody can stand behind is
+    worse than none."""
+    from sourcework.agents.extraction import _locate_by_text
+
+    repeated = "the refund is issued within five business days of booking-in"
+    blocks = [("p.1", f"Summary: {repeated}."), ("p.4", f"Service level: {repeated}.")]
+
+    assert _locate_by_text(repeated, blocks) is None
+    assert _locate_by_text(repeated, [blocks[0]]) == "p.1"
+
+
+def test_a_fragment_too_short_to_identify_anything_places_nothing():
+    """"Yes." appears in every block of a transcript. Matching on it would put a
+    claim wherever the shortest coincidence happened to be."""
+    from sourcework.agents.extraction import _locate_by_text
+
+    assert _locate_by_text("Agreed.", [("00:01:00 A", "Agreed. And the rest of it.")]) is None
