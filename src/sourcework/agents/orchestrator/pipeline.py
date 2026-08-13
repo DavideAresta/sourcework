@@ -90,6 +90,16 @@ def classify(ref: InputRef) -> Modality:
     return guess_modality(ref.uri, ref.media_type)
 
 
+def _extraction_failed(extraction) -> bool:  # noqa: ANN001 - the A2A extraction shape
+    """Did the model call fail, as opposed to finding nothing worth quoting?
+
+    The extraction agents record a ``batch N failed:`` warning when a call
+    raises and then carry on with the next source, so the evidence count on its
+    own cannot tell "the backend is down" from "this page was a cover sheet".
+    """
+    return any("failed" in str(w) and str(w).startswith("batch ") for w in extraction.warnings)
+
+
 async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult:  # noqa: ANN001
     """Execute the full pipeline. ``notify`` is an optional async progress sink."""
     log = RunLog()
@@ -179,8 +189,22 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
             "Every input failed to ingest: " + "; ".join(log.failures[:5])
         )
     evidence_count = sum(len(e.evidence) for e in extractions)
-    await say(f"{evidence_count} evidence item(s) from {len(extractions)} source(s)")
+    # A source whose extraction *call* failed is not a source that said nothing.
+    # Both land on zero evidence, and the difference is the whole diagnosis: one
+    # is a document worth re-reading, the other is a backend that is down.
+    broken = [e for e in extractions if not e.evidence and _extraction_failed(e)]
+    await say(
+        f"{evidence_count} evidence item(s) from {len(extractions)} source(s)"
+        + (f" - {len(broken)} failed to extract" if broken else "")
+    )
     if evidence_count == 0:
+        if broken:
+            reason = broken[0].warnings[0] if broken[0].warnings else "no detail recorded"
+            raise RuntimeError(
+                f"Extraction failed on {len(broken)} of {len(extractions)} source(s), so there is "
+                f"no evidence to build from. That is a backend problem, not a problem with the "
+                f"documents. First failure: {reason}"
+            )
         raise RuntimeError("Sources parsed but yielded no evidence; nothing to build a PRD from.")
 
     # -- 3. requirements ---------------------------------------------------
