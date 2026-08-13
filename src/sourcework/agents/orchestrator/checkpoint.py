@@ -40,6 +40,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,16 @@ T = TypeVar("T")
 
 FORMAT_VERSION = 1
 DIRNAME = "checkpoints"
+
+RETENTION_DAYS = 14
+"""How long an unclaimed checkpoint is kept.
+
+A finished run deletes its own; these are the ones nobody came back for. They
+hold the full text of every source that was ingested, so keeping them forever
+would make a directory that only grows out of runs the user has forgotten
+about. Two weeks is long enough that "I will get back to it on Monday" works
+and short enough that the disk does not fill with abandoned attempts.
+"""
 
 
 def directory() -> Path:
@@ -97,6 +108,45 @@ def _local_path(uri: str) -> Path | None:
     if "://" not in uri:
         return Path(uri)
     return None
+
+
+def saved_runs() -> list[str]:
+    """Every run with state on disk, most recently written first.
+
+    The UI has a history to pick a run out of; the CLI does not, so it resolves
+    a bare ``--resume`` to the first of these.
+    """
+    try:
+        files = list(directory().glob("*.json"))
+    except OSError:  # pragma: no cover - unreadable workspace
+        return []
+    files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+    return [f.stem for f in files]
+
+
+def prune(max_age_days: int = RETENTION_DAYS) -> int:
+    """Delete checkpoints nobody came back for. Returns how many went.
+
+    Called when a run starts rather than on a timer: this is a desktop
+    application that is not running most of the time, and the moment it is
+    about to write a new one is exactly when the old ones are worth counting.
+    """
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    try:
+        candidates = list(directory().glob("*.json"))
+    except OSError:  # pragma: no cover - unreadable workspace
+        return 0
+    for path in candidates:
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:  # pragma: no cover - vanished under us, or read-only
+            continue
+    if removed:
+        logger.info("discarded %d checkpoint(s) older than %d days", removed, max_age_days)
+    return removed
 
 
 def saved_stages(run_id: str | None) -> list[str]:
@@ -220,9 +270,19 @@ class Checkpoint:
 
 
 def _jsonable(payload: Any) -> Any:  # noqa: ANN401
+    """Models to dicts, all the way down.
+
+    Recurses through lists *and* dicts: a stage that stores more than one thing
+    hands over a dict of models, and a version of this that only walked lists
+    would leave them in place to fail at ``json.dumps`` - inside the try that
+    swallows save failures, so the stage would simply never be written and
+    nothing would say why.
+    """
     dump = getattr(payload, "model_dump", None)
     if callable(dump):
         return dump(mode="json")
     if isinstance(payload, list):
         return [_jsonable(item) for item in payload]
+    if isinstance(payload, dict):
+        return {key: _jsonable(value) for key, value in payload.items()}
     return payload

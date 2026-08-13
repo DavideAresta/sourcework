@@ -91,6 +91,21 @@ def classify(ref: InputRef) -> Modality:
     return guess_modality(ref.uri, ref.media_type)
 
 
+def _parse_ingest(data: object) -> tuple[list[ExtractionResult], dict[str, str]]:
+    """The ingest checkpoint: what was extracted, and what routed it there.
+
+    Raises on anything else, which is how a checkpoint written by an older build
+    is recognised - :meth:`Checkpoint.load` treats a parse failure as "recompute
+    this stage" rather than as an error.
+    """
+    if not isinstance(data, dict):
+        raise TypeError("ingest checkpoint predates the routing map")
+    return (
+        [ExtractionResult.model_validate(e) for e in data["extractions"]],
+        dict(data.get("routed") or {}),
+    )
+
+
 def _extraction_failed(extraction) -> bool:  # noqa: ANN001 - the A2A extraction shape
     """Did the model call fail, as opposed to finding nothing worth quoting?
 
@@ -105,6 +120,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
     """Execute the full pipeline. ``notify`` is an optional async progress sink."""
     log = RunLog()
     saved = checkpoint.Checkpoint(run_id=request.run_id, resume=request.resume)
+    checkpoint.prune()
     # Every stage fingerprint starts here: which models answered is part of what
     # produced the artifact, so changing the backend invalidates the lot.
     config_fp = request.llm.model_dump(mode="json") if request.llm else None
@@ -188,20 +204,24 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         ingest_fp = checkpoint.digest(
             [checkpoint.input_identity(ref) for ref in inputs], config_fp
         )
-        stored = saved.load(
-            "ingest", ingest_fp, lambda d: [ExtractionResult.model_validate(e) for e in d]
-        )
+        stored = saved.load("ingest", ingest_fp, _parse_ingest)
         if stored is not None:
-            extractions += stored
+            reused, routed = stored
+            extractions += reused
+            # Restored with the evidence, because the stats block says which
+            # agent handled which input and a resumed run that reported nothing
+            # routed would be describing work that did happen as work that did
+            # not.
+            log.routed.update(routed)
             await say(
-                f"Reusing {sum(len(e.evidence) for e in stored)} evidence item(s) already "
-                f"extracted from {len(stored)} source(s) by the interrupted run"
+                f"Reusing {sum(len(e.evidence) for e in reused)} evidence item(s) already "
+                f"extracted from {len(reused)} source(s) by the interrupted run"
             )
         else:
             await say(f"Ingesting {len(inputs)} new input(s)")
             with clock("ingest"):
                 fresh = await _ingest(inputs, pool, available, say, relay, log)
-            saved.save("ingest", ingest_fp, fresh)
+            saved.save("ingest", ingest_fp, {"extractions": fresh, "routed": dict(log.routed)})
             extractions += fresh
 
     if not extractions:
