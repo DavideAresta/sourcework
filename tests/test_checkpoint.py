@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from sourcework.agents.orchestrator import checkpoint, pipeline
+from sourcework import checkpoint
+from sourcework.agents.orchestrator import pipeline
 from sourcework.models import (
     Evidence,
     ExtractionResult,
@@ -321,3 +322,146 @@ def test_resuming_a_run_that_never_saved_anything_names_it(workspace, capsys):
 
     assert main(["generate", "Returns", "-n", "a note", "--resume", "nosuchrun"]) == 2
     assert "nosuchrun saved no stages" in capsys.readouterr().err
+
+
+# --- inside the analyst ----------------------------------------------------
+
+
+class FakeLLM:
+    """The analyst's model, minus the model. Records what it was asked."""
+
+    def __init__(self, *, fail_on: str | None = None) -> None:
+        self.prompts: list[str] = []
+        self.fail_on = fail_on
+
+    async def structured(self, system, user, model, role=None):  # noqa: ANN001
+        from sourcework.agents.requirements.agent import (
+            DraftRequirement,
+            MergeDecision,
+            RequirementDraft,
+        )
+
+        if model is MergeDecision:
+            return MergeDecision()
+        self.prompts.append(user)
+        if self.fail_on and self.fail_on in user:
+            raise RuntimeError("the backend timed out")
+        claim = user.rsplit("\n", 1)[-1]
+        return RequirementDraft(
+            requirements=[DraftRequirement(title=claim[:20], statement=claim, evidence_ids=[])]
+        )
+
+
+def _slices(*texts: str) -> list[list[Evidence]]:
+    """One evidence item per slice, with fixed ids.
+
+    Ids are minted randomly in real use and appear in the rendered prompt, so
+    they must be pinned here or two calls would look like different work - which
+    is exactly what happens when a resumed run re-ingests instead of reusing,
+    and exactly why it should.
+    """
+    return [
+        [Evidence(id=f"ev-{text}", source_id="src-1", modality=Modality.DOCUMENT, text=text)]
+        for text in texts
+    ]
+
+
+async def _analyse(llm, saved, config_fp="cfg", batches=None):  # noqa: ANN001
+    """Drive the batching path directly."""
+    from sourcework.agents.requirements.agent import RequirementsExecutor
+
+    async def progress(_message: str) -> None:
+        return None
+
+    batches = batches if batches is not None else _slices("alpha", "beta")
+    return await RequirementsExecutor._analyse_in_batches(  # noqa: SLF001 - no mesh needed
+        SimpleNamespace(llm=llm),
+        batches,
+        {"src-1": "A"},
+        "SYSTEM",
+        lambda body: f"Product: X\n{body}",
+        progress,
+        saved,
+        config_fp,
+    )
+
+
+async def test_a_slice_that_finished_is_not_analysed_again():
+    """The phase this exists for: minutes per slice, and the stage-level
+    checkpoint cannot help because this lives inside a single stage."""
+    first = FakeLLM(fail_on="beta")
+    await _analyse(first, checkpoint.Checkpoint(run_id="r1", scope="analyst"))
+    assert len(first.prompts) == 2
+
+    second = FakeLLM()
+    await _analyse(second, checkpoint.Checkpoint(run_id="r1", scope="analyst", resume=True))
+
+    assert len(second.prompts) == 1
+    assert "beta" in second.prompts[0]
+
+
+async def test_slices_are_keyed_by_what_they_answered_not_by_their_position():
+    """Change the batch size and the boundaries move. Keying by index would
+    hand slice 2 the answer to a question that is now half of slice 1."""
+    await _analyse(FakeLLM(), checkpoint.Checkpoint(run_id="r1", scope="analyst"))
+
+    resumed = FakeLLM()
+    await _analyse(
+        resumed,
+        checkpoint.Checkpoint(run_id="r1", scope="analyst", resume=True),
+        batches=_slices("alpha", "gamma"),
+    )
+
+    assert len(resumed.prompts) == 1
+    assert "gamma" in resumed.prompts[0]
+
+
+async def test_slices_from_a_different_model_are_analysed_again():
+    await _analyse(FakeLLM(), checkpoint.Checkpoint(run_id="r1", scope="analyst"))
+
+    resumed = FakeLLM()
+    await _analyse(
+        resumed,
+        checkpoint.Checkpoint(run_id="r1", scope="analyst", resume=True),
+        config_fp="a-different-backend",
+    )
+
+    assert len(resumed.prompts) == 2
+
+
+async def test_the_analyst_writes_its_own_file(workspace):
+    """Two processes save state for one run. Sharing one file would mean both
+    doing read-modify-write on it, safe only by an ordering invariant that
+    lives in the other process."""
+    checkpoint.Checkpoint(run_id="r1").save("ingest", "fp", [_extraction()])
+    await _analyse(FakeLLM(), checkpoint.Checkpoint(run_id="r1", scope="analyst"))
+
+    assert {p.name for p in checkpoint.directory().glob("*.json")} == {
+        "r1.json",
+        "r1.analyst.json",
+    }
+
+
+async def test_a_finished_run_takes_the_analysts_slices_with_it(workspace):
+    """Per-scope clearing would leave them behind for the whole retention
+    period, long after the run they belonged to stopped existing."""
+    checkpoint.Checkpoint(run_id="r1").save("ingest", "fp", [_extraction()])
+    await _analyse(FakeLLM(), checkpoint.Checkpoint(run_id="r1", scope="analyst"))
+
+    checkpoint.discard("r1")
+
+    assert checkpoint.saved_stages("r1") == []
+    assert not list(checkpoint.directory().glob("*.json"))
+
+
+async def test_a_half_analysed_run_says_how_far_it_got(workspace):
+    """`ingest` alone would understate it: three of five slices done is the
+    difference between resuming being worth it and not."""
+    checkpoint.Checkpoint(run_id="r1").save("ingest", "fp", [_extraction()])
+    await _analyse(FakeLLM(fail_on="beta"), checkpoint.Checkpoint(run_id="r1", scope="analyst"))
+
+    stages = checkpoint.saved_stages("r1")
+
+    assert stages[0] == "ingest"
+    assert len(stages) == 2
+    assert stages[1].startswith("analyst/slice:")

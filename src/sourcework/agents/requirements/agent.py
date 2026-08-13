@@ -21,6 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from sourcework import checkpoint
 from sourcework.a2a_common import Progress, SkillError, SkillExecutor, build_card, public_url, skill
 from sourcework.agents.schemas import AnalyseRequest
 from sourcework.config import effective_llm
@@ -278,7 +279,15 @@ class RequirementsExecutor(SkillExecutor):
             )
         else:
             draft = await self._analyse_in_batches(
-                batches, source_titles, system, prompt_for, progress
+                batches,
+                source_titles,
+                system,
+                prompt_for,
+                progress,
+                checkpoint.Checkpoint(run_id=req.run_id, scope="analyst", resume=req.resume),
+                # Which model answers is part of what produced a slice, so a run
+                # resumed on a different backend recomputes rather than mixing.
+                checkpoint.digest(cfg.model_dump(mode="json")),
             )
         await progress(f"Model proposed {len(draft.requirements)} requirement(s); validating citations")
 
@@ -305,6 +314,8 @@ class RequirementsExecutor(SkillExecutor):
         system: str,
         prompt_for,  # noqa: ANN001
         progress: Progress,
+        saved: checkpoint.Checkpoint,
+        config_fp: str,
     ) -> RequirementDraft:
         """Map over slices of the evidence, then reduce to one draft.
 
@@ -313,6 +324,17 @@ class RequirementsExecutor(SkillExecutor):
         A slice that fails is a warning, not a failed run - the same rule
         ingestion follows, and for the same reason: losing one of six slices
         should not cost the user the other five.
+
+        Each slice is written down as it finishes, so an interruption costs the
+        slices still in flight rather than all of them. This is the longest
+        phase of a run by a wide margin - minutes per slice - and it is the one
+        the stage-level checkpoint cannot help with, because it lives *inside* a
+        single stage.
+
+        A slice is keyed by the prompt it answered, not by its position. Change
+        the batch size and the boundaries move: keying by index would hand slice
+        3 the answer to a question that used to be slice 3 and is now half of
+        slice 2. Keyed by content, a reshuffle simply misses and recomputes.
         """
         await progress(
             f"Evidence is too large for one pass - analysing it in {len(batches)} slices"
@@ -321,18 +343,31 @@ class RequirementsExecutor(SkillExecutor):
         drafts: list[RequirementDraft | None] = [None] * len(batches)
 
         async def analyse(index: int, batch: list[Evidence]) -> None:
+            prompt = prompt_for(_render_evidence(batch, titles))
+            stage = f"slice:{checkpoint.digest(system, prompt, config_fp)}"
+
+            stored = saved.load(stage, config_fp, RequirementDraft.model_validate)
+            if stored is not None:
+                drafts[index] = stored
+                await progress(
+                    f"Slice {index + 1}/{len(batches)}: reusing "
+                    f"{len(stored.requirements)} requirement(s) from the interrupted run"
+                )
+                return
+
             async with semaphore:
                 await progress(f"Slice {index + 1}/{len(batches)}: {len(batch)} evidence item(s)")
                 try:
                     drafts[index] = await self.llm.structured(
-                        system + SLICE,
-                        prompt_for(_render_evidence(batch, titles)),
-                        RequirementDraft,
-                        role="reasoning",
+                        system + SLICE, prompt, RequirementDraft, role="reasoning"
                     )
                 except Exception as exc:  # noqa: BLE001 - one slice must not kill the set
                     logger.exception("evidence slice %d failed", index + 1)
                     await progress(f"Slice {index + 1} failed ({type(exc).__name__}); continuing")
+                    return
+            # Outside the semaphore: writing a file must not hold a slot that
+            # another slice is waiting on.
+            saved.save(stage, config_fp, drafts[index])
 
         await asyncio.gather(*(analyse(i, b) for i, b in enumerate(batches)))
 

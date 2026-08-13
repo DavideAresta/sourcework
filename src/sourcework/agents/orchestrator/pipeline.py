@@ -19,9 +19,8 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from sourcework import stream
+from sourcework import checkpoint, stream
 from sourcework.a2a_common import AgentPool, RemoteAgentError
-from sourcework.agents.orchestrator import checkpoint
 from sourcework.agents.schemas import (
     AnalyseRequest,
     ConfluenceFetchRequest,
@@ -256,10 +255,18 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         # Present, this turns the analyst's job from "produce a requirement
         # set" into "produce the next version of this one".
         prior=baseline.requirements if baseline else None,
+        # So the analyst can save each slice of the evidence it gets through,
+        # below the granularity this checkpoint works at.
+        run_id=request.run_id,
+        resume=request.resume,
     )
     # The whole request, so a changed audience or instruction invalidates the
-    # stored requirements as surely as changed evidence would.
-    analyse_fp = checkpoint.digest(analyse_request.model_dump(mode="json"), config_fp)
+    # stored requirements as surely as changed evidence would - minus the two
+    # fields that name the run rather than describe the work, which would
+    # otherwise make every fingerprint unique to its run for no reason.
+    analyse_fp = checkpoint.digest(
+        analyse_request.model_dump(mode="json", exclude={"run_id", "resume"}), config_fp
+    )
     requirement_set = saved.load("analyse", analyse_fp, RequirementSet.model_validate)
     if requirement_set is None:
         await say("Normalising requirements")
@@ -383,8 +390,9 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
             + ", ".join(saved.reused)
         )
     # There is a result now, so there is nothing left to resume; refining it is
-    # what a baseline is for.
-    saved.clear()
+    # what a baseline is for. Across every scope, or the analyst's slices would
+    # outlive the run they belonged to by the whole retention period.
+    checkpoint.discard(request.run_id)
 
     return PRDResult(
         prd=written.prd,

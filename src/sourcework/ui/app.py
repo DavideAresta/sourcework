@@ -40,9 +40,8 @@ from pydantic import BaseModel, Field, ValidationError
 # every uploaded file and the run proceeds with no sources.
 from starlette.datastructures import UploadFile
 
-from sourcework import readiness
+from sourcework import checkpoint, readiness
 from sourcework.a2a_common import AgentPool
-from sourcework.agents.orchestrator import checkpoint
 from sourcework.backends import probe
 from sourcework.config import LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
