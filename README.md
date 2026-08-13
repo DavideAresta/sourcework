@@ -241,9 +241,13 @@ evidence as it finishes, so an interrupted analysis costs the slices still in
 flight rather than all of them. What survived is listed by name —
 `ingest, analyst/slice:140ef0f6, analyst/slice:f7b34642`.
 
-Interrupting the command stops you watching the run, not the run — the
-orchestrator carries on and finishes on its own. Resuming while that is still
-happening is refused rather than allowed to collide:
+Ctrl-C cancels the run itself, not just the command watching it — the mesh
+stops and the model subprocess is killed. SIGTERM does the same, so a process
+manager quitting the app does not leave a run billing in the background. What
+finished is kept, so cancelling and resuming is a normal thing to do.
+
+If a run is somehow still going — a client that vanished without cancelling —
+resuming is refused rather than allowed to collide:
 
 ```
 Run run-50d7670154eb is still going. Interrupting this command did not stop it -

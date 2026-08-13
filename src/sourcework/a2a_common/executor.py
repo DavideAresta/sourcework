@@ -15,6 +15,7 @@ protobuf.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import traceback
@@ -77,8 +78,23 @@ class SkillExecutor(AgentExecutor):
             raise ValueError(f"{type(self).__name__} declares no skills")
         if self.default_skill is None:
             self.default_skill = next(iter(self.skills))
+        self._running: dict[str, asyncio.Task[Any]] = {}
+        """task id -> the asyncio task executing it, so :meth:`cancel` can stop
+        the work rather than only relabel it."""
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        # The server runs this in its own task; holding a reference is what
+        # turns a cancel request into a stopped model call instead of a status
+        # change on a run that keeps going.
+        running = asyncio.current_task()
+        if running is not None:
+            self._running[context.task_id] = running
+        try:
+            await self._execute(context, event_queue)
+        finally:
+            self._running.pop(context.task_id, None)
+
+    async def _execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if context.current_task is None:
             await event_queue.enqueue_event(
                 new_task(
@@ -155,8 +171,26 @@ class SkillExecutor(AgentExecutor):
         await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Stop the work, then say so.
+
+        Marking the task cancelled without stopping anything was the whole bug:
+        a run reported "cancelled" the instant the button was pressed and went
+        on spending tokens for another ten minutes, because nothing here ever
+        touched the coroutine doing the work.
+
+        The status goes out first. Cancelling the task unwinds the handler,
+        which tears down the event queue it would otherwise have used to report
+        the outcome.
+        """
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
         await updater.cancel(new_text_message("Cancelled by caller.", role=Role.ROLE_AGENT))
+
+        running = self._running.get(context.task_id)
+        if running is None:
+            logger.info("cancel for task %s: nothing running here", context.task_id)
+            return
+        logger.info("cancelling task %s", context.task_id)
+        running.cancel()
 
     # -- internals ---------------------------------------------------------
 

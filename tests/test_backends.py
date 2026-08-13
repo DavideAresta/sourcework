@@ -8,8 +8,12 @@ and the exact parse, which is where these integrations actually break.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import contextlib
 import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pydantic
@@ -787,6 +791,60 @@ async def test_run_kills_a_hung_process_and_still_reports_what_it_said():
     assert result.timed_out
     # The output produced before the kill is usually the only clue about the hang.
     assert "partial" in result.stdout
+
+
+async def test_cancelling_a_call_kills_the_process_it_started():
+    """Unwinding the coroutine stops nothing on its own.
+
+    This is where the money is: the child is a CLI answering a model prompt,
+    and left alone it runs to completion and bills for every token of an answer
+    nobody is waiting for. Watched happening before this - the Python side
+    reported "cancelled" while the subprocess was still going.
+    """
+    marker = Path(tempfile.mkdtemp()) / "still-running"
+    started = Path(str(marker) + ".started")
+    call = asyncio.create_task(
+        process.run(
+            ["sh", "-c", f"touch {started}; sleep 5; touch {marker}"], timeout_s=30
+        )
+    )
+    for _ in range(100):  # wait for the child to be up, without a fixed sleep
+        if started.exists():
+            break
+        await asyncio.sleep(0.05)
+
+    call.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await call
+
+    await asyncio.sleep(0.3)
+    assert started.exists(), "the child never ran, so this proves nothing"
+    assert not marker.exists(), "the child outlived the call that started it"
+
+
+async def test_cancelling_a_call_kills_what_the_child_started_too():
+    """The group, not the process. Every backend here is a CLI that shells out
+    further, and killing only the direct child leaves the grandchildren holding
+    the work."""
+    marker = Path(tempfile.mkdtemp()) / "grandchild-finished"
+    started = Path(str(marker) + ".started")
+    call = asyncio.create_task(
+        process.run(
+            ["sh", "-c", f"(sleep 5; touch {marker}) & touch {started}; wait"], timeout_s=30
+        )
+    )
+    for _ in range(100):
+        if started.exists():
+            break
+        await asyncio.sleep(0.05)
+
+    call.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await call
+
+    await asyncio.sleep(0.3)
+    assert started.exists(), "the child never ran, so this proves nothing"
+    assert not marker.exists(), "a grandchild outlived the call that started it"
 
 
 async def test_run_survives_a_child_that_ignores_stdin():

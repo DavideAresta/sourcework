@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import tempfile
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -74,6 +75,23 @@ def which(program: str) -> str | None:
     return shutil.which(program)
 
 
+def _kill(proc: asyncio.subprocess.Process) -> None:
+    """Stop ``proc`` and anything it started.
+
+    The process *group*, not the process. Every backend here is a CLI that
+    shells out further - a model client spawning its own helpers - and killing
+    only the direct child leaves the grandchildren holding the work.
+    ``start_new_session`` at spawn time is what makes the group addressable;
+    without it this would signal our own session, including the agent doing the
+    killing.
+    """
+    with contextlib.suppress(ProcessLookupError, OSError):
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        return
+    with contextlib.suppress(ProcessLookupError):
+        proc.kill()
+
+
 @dataclass(slots=True)
 class ProcessResult:
     exit_code: int
@@ -114,6 +132,10 @@ async def run(
             stderr=asyncio.subprocess.PIPE,
             cwd=str(cwd) if cwd else None,
             env=merged,
+            # Its own process group, so cancelling a call can kill the CLI *and*
+            # whatever it spawned. Without this there is nothing to address but
+            # the direct child, and the helpers it started keep working.
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"{argv[0]!r} is not on PATH") from exc
@@ -193,10 +215,20 @@ async def run(
         )
     except TimeoutError:
         timed_out = True
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
+        _kill(proc)
         with contextlib.suppress(Exception):
             await proc.wait()
+    except asyncio.CancelledError:
+        # A cancelled call has to take the child with it. Unwinding the
+        # coroutine costs nothing and stops nothing: this is a CLI answering a
+        # model prompt, and left alone it runs to completion and bills for
+        # every token of an answer nobody is waiting for any more. Watched
+        # happening - the Python side reported "cancelled" while the subprocess
+        # was still going.
+        _kill(proc)
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await proc.wait()
+        raise
     finally:
         # The readers finish on their own once the pipes close, which killing
         # the process guarantees. Whatever they gathered is still worth having.
