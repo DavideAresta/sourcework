@@ -87,6 +87,16 @@ class AnalyseRequest(BaseModel):
     next version of this one" - carrying ids forward, closing questions the new
     evidence answers, and revising rather than duplicating."""
 
+    run_id: str | None = None
+    """Which run this analysis belongs to, so a slice of the evidence that has
+    already been analysed can be written down and read back. The analyst is a
+    separate process from the orchestrator and would otherwise have no way to
+    know that two calls are the same piece of work."""
+
+    resume: bool = False
+    """Reuse slices saved by an earlier attempt at ``run_id``. Same rule as
+    everywhere else: saving is unconditional, reusing is asked for."""
+
     @classmethod
     def from_extractions(
         cls, title: str, extractions: list[ExtractionResult], **kw: object

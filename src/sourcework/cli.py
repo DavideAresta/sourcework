@@ -206,8 +206,8 @@ def cmd_ui(args: argparse.Namespace) -> int:
 
 
 async def _generate(args: argparse.Namespace) -> int:
+    from sourcework import checkpoint
     from sourcework.a2a_common import AgentPool
-    from sourcework.agents.orchestrator import checkpoint
     from sourcework.models import InputRef, PRDRequest, PRDResult, new_id
 
     inputs = [InputRef(uri=_as_uri(p)) for p in args.input or []]

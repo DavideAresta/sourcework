@@ -236,6 +236,11 @@ Interrupted.
 continue from there, or --resume run-98d617b1bb87 to name it explicitly.
 ```
 
+Resuming works below the stage level too: the analyst saves each slice of the
+evidence as it finishes, so an interrupted analysis costs the slices still in
+flight rather than all of them. What survived is listed by name —
+`ingest, analyst/slice:140ef0f6, analyst/slice:f7b34642`.
+
 Bare `--resume` takes the most recent saved run. Checkpoints nobody comes back
 for are discarded after two weeks - they hold the full text of every source
 that was ingested.

@@ -475,6 +475,22 @@ source between attempts discards the evidence taken from the old contents.
 Contents are not hashed — these are documents, some large, and the fingerprint
 is computed at every stage boundary.
 
+Below `analyse` the analyst saves each **evidence slice** as it finishes, into
+its own file under a *scope* (`<run id>.analyst.json`). This is the phase that
+cannot be helped by a stage boundary, because it lives inside one: five slices
+at a minute or more each, and an interruption used to cost all of them.
+
+A slice is keyed by the prompt it answered, not by its position. Change the
+batch size and the boundaries move — keying by index would hand slice 3 the
+answer to a question that used to be slice 3 and is now half of slice 2. Keyed
+by content, a reshuffle simply misses and recomputes.
+
+Two processes writing one file would mean both doing read-modify-write on it,
+safe today only because of a call-ordering invariant that lives in the *other*
+process. Separate files per scope make that structural. `discard` removes every
+scope, so a finished run does not leave the analyst's slices behind for the
+whole retention period.
+
 The ingest stage stores the routing map alongside the evidence, so a resumed
 run still reports which agent handled which input; without it `stats.routed`
 would come back empty and describe work that did happen as work that did not.
