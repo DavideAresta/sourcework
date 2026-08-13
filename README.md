@@ -173,6 +173,7 @@ curl localhost:8000/.well-known/agent-card.json
 | [docs/backends.md](docs/backends.md) | Every backend, per-role models, failover, narration, the full configuration reference |
 | [docs/local-models.md](docs/local-models.md) | Local inference end to end: context windows, constrained JSON, llama-swap, large inputs |
 | [docs/a2a.md](docs/a2a.md) | Driving the mesh as an A2A client |
+| [docs/extending.md](docs/extending.md) | Adding a publish destination, authentication or a run store from outside the repo |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Why it is shaped this way — the design rationale and message flow |
 | [docs/desktop.md](docs/desktop.md) | Running as a local desktop app, and why not Electron |
 | [docs/multi-tenant.md](docs/multi-tenant.md) | What a hosted service would take. Considered and not taken |
