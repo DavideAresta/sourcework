@@ -150,3 +150,94 @@ class TestStorageFormat:
     def test_storage_reader_decodes_entities(self):
         blocks = storage.storage_to_blocks("<h2>T</h2><p>a &amp; b</p>")
         assert blocks[0][1] == "a & b"
+
+
+# --- locators are a promise a reader can check ----------------------------
+
+
+def test_a_claim_can_cite_the_line_it_came_from_not_the_block_it_sat_in():
+    """A transcript block is a window of 25 cues carrying the first cue's
+    locator. Without the wider allow-list the finest attribution possible was
+    one point per twenty-five, and a model that correctly cited the line it read
+    had that answer thrown away for not matching a block marker."""
+    from sourcework.agents.extraction import _resolve_locator
+
+    cues = {"00:00:04 Priya Raman", "00:12:40 Tom Achebe", "00:31:02 Priya Raman"}
+
+    assert _resolve_locator("00:12:40", cues) == "00:12:40 Tom Achebe"
+    assert _resolve_locator("00:12:40 Tom Achebe", cues) == "00:12:40 Tom Achebe"
+    assert _resolve_locator("[[00:31:02 Priya Raman]]", cues) == "00:31:02 Priya Raman"
+
+
+def test_a_locator_naming_nothing_real_resolves_to_nothing():
+    """Worse than an empty cell: a locator that resolves to the wrong place is
+    precise, confident and wrong, and the empty cell is the one a reader
+    questions."""
+    from sourcework.agents.extraction import _resolve_locator
+
+    known = {"p.1", "p.2"}
+
+    assert _resolve_locator("p.9", known) is None
+    assert _resolve_locator("somewhere in the appendix", known) is None
+    assert _resolve_locator(None, known) is None
+    assert _resolve_locator("", known) is None
+
+
+def test_case_and_stray_brackets_do_not_lose_a_good_locator():
+    from sourcework.agents.extraction import _resolve_locator
+
+    known = {"heading: Scope", "p.4"}
+
+    assert _resolve_locator("Heading: scope", known) == "heading: Scope"
+    assert _resolve_locator("  [[p.4]] ", known) == "p.4"
+
+
+async def test_evidence_from_a_multi_block_batch_is_not_all_pinned_to_the_first():
+    """The bug this pair of fixes exists for.
+
+    Found by generating a real PRD from the demo pack and checking it: all 62
+    claims from a 31-cue meeting carried the same locator - the first thing said
+    by the first speaker. Any claim whose locator did not match a block marker
+    fell back to the batch's *first* block, so a whole batch was attributed to
+    whatever happened to be at the top of it.
+    """
+    from sourcework.agents.extraction import extract_evidence
+    from sourcework.models import Modality, SourceDocument
+
+    blocks = [("p.1", "Opening remarks."), ("p.2", "Returns are free."), ("p.3", "Refunds in 5 days.")]
+    claims = [
+        {"text": "Returns are free.", "locator": "p.2"},
+        {"text": "Refunds take five days.", "locator": "p.3"},
+        {"text": "Something the model could not place.", "locator": "appendix"},
+    ]
+
+    class FakeLLM:
+        async def structured(self, system, user, model, **kw):  # noqa: ANN001
+            return model.model_validate({"summary": "s", "items": claims, "warnings": []})
+
+    source = SourceDocument(
+        id="src-1", uri="file:///a.pdf", title="A", modality=Modality.DOCUMENT
+    )
+    evidence, _, _ = await extract_evidence(FakeLLM(), source, blocks)
+
+    assert [e.locator for e in evidence] == ["p.2", "p.3", None]
+
+
+async def test_a_single_block_batch_still_gets_its_locator():
+    """When the batch *is* one block, every claim in it demonstrably came from
+    that block - so the fallback is knowledge, not a guess."""
+    from sourcework.agents.extraction import extract_evidence
+    from sourcework.models import Modality, SourceDocument
+
+    class FakeLLM:
+        async def structured(self, system, user, model, **kw):  # noqa: ANN001
+            return model.model_validate(
+                {"summary": "s", "items": [{"text": "A claim.", "locator": None}], "warnings": []}
+            )
+
+    source = SourceDocument(
+        id="src-1", uri="file:///a.pdf", title="A", modality=Modality.DOCUMENT
+    )
+    evidence, _, _ = await extract_evidence(FakeLLM(), source, [("p.7", "Only block.")])
+
+    assert [e.locator for e in evidence] == ["p.7"]
