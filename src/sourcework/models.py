@@ -303,6 +303,15 @@ class PRDRequest(BaseModel):
     audience: str = "engineering and product"
     template: str = "standard"
     publish: bool = False
+    publish_to: str | None = None
+    """Which destination, by :class:`~sourcework.publishers.PublishTarget` id.
+    Unset means Confluence, so every request written before there was a choice
+    still means what it meant."""
+
+    publish_options: dict[str, str] = Field(default_factory=dict)
+    """Target-specific settings for anything that is not Confluence, which has
+    its own two fields below for the connector and UI that already use them."""
+
     confluence_space_key: str | None = None
     confluence_parent_id: str | None = None
     review_rounds: int = 1

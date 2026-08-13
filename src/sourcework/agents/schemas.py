@@ -58,10 +58,28 @@ class ConfluenceFetchRequest(BaseModel):
 
 
 class PublishRequest(BaseModel):
+    """What every publishing agent is handed.
+
+    Two renderings travel, not one. ``storage_xhtml`` is Confluence's format and
+    means nothing to anything else; ``markdown`` is what a target that speaks
+    anything else will want to convert from. Sending both costs a string and
+    saves every future publisher from asking the writer to run again.
+    """
+
     title: str
     storage_xhtml: str
+    markdown: str = ""
+
     space_key: str | None = None
     parent_id: str | None = None
+    """Confluence's two, kept as named fields because the connector, the UI form
+    and the CLI flags all already speak them. New targets use ``options``."""
+
+    options: dict[str, str] = Field(default_factory=dict)
+    """Whatever the target needs and this schema does not know about - a Jira
+    project key, a board id. Strings only: it crosses a process boundary and
+    arrives as JSON, and a schema that promised more would be lying about what
+    survives the trip."""
 
 
 class PublishResult(BaseModel):

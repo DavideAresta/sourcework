@@ -19,7 +19,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from sourcework import checkpoint, stream
+from sourcework import checkpoint, publishers, stream
 from sourcework.a2a_common import AgentPool, RemoteAgentError
 from sourcework.agents.schemas import (
     AnalyseRequest,
@@ -354,21 +354,42 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
     # -- 5. publish --------------------------------------------------------
     published_url = None
     if request.publish:
-        if "confluence" not in available:
-            log.warnings.append("Publish requested but the Confluence agent is unreachable.")
+        # Which agent, looked up rather than named. Publishing was already an
+        # A2A call to an agent that advertises `publish_prd`, so a second
+        # destination is a second agent - the same thing every modality already
+        # is, and the reason ROUTES exists a few lines up.
+        target = publishers.get(request.publish_to)
+        if target is None:
+            log.warnings.append(
+                f"Publish requested to unknown target {request.publish_to!r}. "
+                f"Known: {sorted(publishers.targets())}."
+            )
+        elif target.agent not in available:
+            log.warnings.append(
+                f"Publish requested but the {target.name} agent is unreachable."
+            )
+        elif target.skill not in available[target.agent]:
+            # Caught here rather than at the call, which is the same rule
+            # `pool.call(strict=True)` applies: a missing skill is a
+            # configuration error and should read like one.
+            log.warnings.append(
+                f"The {target.agent} agent does not advertise {target.skill}."
+            )
         else:
-            await say("Publishing to Confluence")
+            await say(f"Publishing to {target.name}")
             with clock("publish"):
                 try:
                     result = PublishResult.model_validate(
                         await pool.call(
-                            "confluence",
-                            "publish_prd",
+                            target.agent,
+                            target.skill,
                             PublishRequest(
                                 title=request.title,
                                 storage_xhtml=written.confluence_storage,
+                                markdown=written.markdown,
                                 space_key=request.confluence_space_key,
                                 parent_id=request.confluence_parent_id,
+                                options=request.publish_options,
                             ),
                         )
                     )
