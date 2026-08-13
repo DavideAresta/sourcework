@@ -914,3 +914,47 @@ def test_no_datalist_is_used_in_the_front_end():
         if any(use in path.read_text(encoding="utf-8") for use in uses)
     ]
     assert not offenders, f"datalist is back in {offenders}"
+
+
+def test_clearing_a_number_leaves_a_config_that_still_loads(tmp_path: Path):
+    """The bug this closes: the settings page posts every control it drew, so a
+    blank "Max output tokens" arrived as "". Written as `KEY=` that reads back
+    as the empty string - fine for a text field, not an int - and pydantic
+    raised at construction. The save returned 200 and the *running* process
+    carried on with its cached settings, so the symptom was every process
+    started afterwards dying at startup, which looks nothing like a bad save.
+    """
+    from sourcework.config import Settings
+
+    path = tmp_path / ".env"
+    path.write_text("SOURCEWORK_LLM__MAX_TOKENS=8192\nSOURCEWORK_LLM__TEMPERATURE=0.2\n",
+                    encoding="utf-8")
+
+    env_file.write(path, {"SOURCEWORK_LLM__MAX_TOKENS": "", "SOURCEWORK_LLM__TEMPERATURE": ""})
+
+    # Commented out, so `read` no longer sees it as set...
+    assert "SOURCEWORK_LLM__MAX_TOKENS" not in env_file.read(path)
+    assert "# SOURCEWORK_LLM__MAX_TOKENS=" in path.read_text(), "left visible, not deleted"
+    # ...and the real assertion: a fresh process can still load the file.
+    settings = Settings(_env_file=str(path))
+    assert settings.llm.max_tokens == 8192, "cleared, so back to the code default"
+
+
+def test_clearing_a_text_field_really_clears_it(tmp_path: Path):
+    """Only numbers get the fallback treatment. Emptying a text box is a real
+    value, and resurrecting a default there would undo what was asked for."""
+    path = tmp_path / ".env"
+    path.write_text("SOURCEWORK_CONFLUENCE__EMAIL=me@example.com\n", encoding="utf-8")
+
+    env_file.write(path, {"SOURCEWORK_CONFLUENCE__EMAIL": ""})
+
+    assert env_file.read(path).get("SOURCEWORK_CONFLUENCE__EMAIL", "") == ""
+
+
+def test_a_number_never_set_and_left_blank_adds_nothing(tmp_path: Path):
+    path = tmp_path / ".env"
+    path.write_text("SOURCEWORK_LLM__BACKEND=litellm\n", encoding="utf-8")
+
+    env_file.write(path, {"SOURCEWORK_LLM__TIMEOUT_S": ""})
+
+    assert "TIMEOUT_S" not in path.read_text()
