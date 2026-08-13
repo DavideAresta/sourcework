@@ -121,3 +121,4 @@ def test_the_principal_reaches_the_route(monkeypatch, tmp_path):
     assert me["name"] == "Ada"
     assert me["roles"] == ["reviewer"]
     assert me["authentication"] == "doorman"
+

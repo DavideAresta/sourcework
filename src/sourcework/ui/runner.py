@@ -24,7 +24,7 @@ from sourcework import stream
 from sourcework.a2a_common import AgentPool, RemoteAgentError
 from sourcework.config import settings
 from sourcework.models import PRDRequest
-from sourcework.ui.store import Run, RunStore, new_run_id, now_iso
+from sourcework.ui.store import Run, Store, new_run_id, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ SUBSCRIBER_BACKLOG = 256
 class RunManager:
     """Starts runs, keeps the live ones, fans their events out."""
 
-    def __init__(self, store: RunStore, *, max_concurrent: int | None = None) -> None:
+    def __init__(self, store: Store, *, max_concurrent: int | None = None) -> None:
         self.store = store
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any] | None]]] = {}

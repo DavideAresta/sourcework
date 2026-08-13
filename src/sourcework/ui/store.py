@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -99,7 +99,42 @@ class Run:
         }
 
 
+@runtime_checkable
+class Store(Protocol):
+    """What the UI needs of a place to keep runs.
+
+    Six methods, taken from what :class:`~sourcework.ui.runner.RunManager` and
+    the routes actually call rather than from what :class:`RunStore` happens to
+    expose - a protocol wider than its use is a promise nobody asked for and
+    every implementation has to keep.
+
+    Deliberately no notion of an owner. This is a single-user application and
+    :class:`RunStore` is the right shape for it; an installation that needs runs
+    to belong to people supplies its own implementation, and the day core grows
+    a principal on the run record is the day to widen this, not before.
+    """
+
+    async def save(self, run: Run) -> None: ...
+
+    async def get(self, run_id: str) -> Run | None: ...
+
+    async def list(self, limit: int = 50) -> list[Run]: ...
+
+    async def delete(self, run_id: str) -> bool: ...
+
+    async def reap_orphans(self) -> int: ...
+
+    def close(self) -> None: ...
+
+
 class RunStore:
+    """The one that ships: SQLite, one file, no service.
+
+    Satisfies :class:`Store` structurally rather than by inheritance, so the
+    protocol can describe it without this class having to know the protocol
+    exists.
+    """
+
     def __init__(self, path: Path) -> None:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)

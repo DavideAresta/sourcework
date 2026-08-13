@@ -47,7 +47,7 @@ from sourcework.config import LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
 from sourcework.ui import env_file
 from sourcework.ui.runner import RunManager
-from sourcework.ui.store import RunStore, new_run_id
+from sourcework.ui.store import RunStore, Store, new_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -125,16 +125,26 @@ def _bound_beyond_loopback() -> bool:
     return bool(host) and host not in ("127.0.0.1", "localhost", "::1")
 
 
-def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | None = None) -> FastAPI:
+def build_app(
+    workspace: Path | None = None,
+    on_shutdown: Callable[[], None] | None = None,
+    store: Store | None = None,
+) -> FastAPI:
     """The web app. ``on_shutdown``, when given, exposes a way to stop it.
 
     Only the desktop launcher passes one. A running-in-a-checkout server or a
     compose deployment has no business offering "quit" over HTTP - there the
     process lifetime belongs to whoever started it, and an endpoint that ends it
     is a denial of service wearing a button.
+
+    ``store`` defaults to the SQLite one, which is the right shape for a
+    single-user application: one file, no service, something the operator can
+    back up or delete. An installation where runs belong to different people
+    needs a different one, and the parameter is what lets it arrive from outside
+    rather than by editing this line.
     """
     paths = UIPaths(workspace or Path(settings().ui_workspace))
-    store = RunStore(paths.db)
+    store = store if store is not None else RunStore(paths.db)
     manager = RunManager(store)
 
     @asynccontextmanager
