@@ -104,6 +104,18 @@ class RefineRun(BaseModel):
     llm: LLMOverrides | None = None
 
 
+def _bound_beyond_loopback() -> bool:
+    """Is this instance reachable from other machines?
+
+    Read from the environment rather than passed in, because `build_app` is
+    called from three places and none of them knows the bind address.
+    """
+    import os
+
+    host = os.environ.get("SOURCEWORK_UI_HOST", "")
+    return bool(host) and host not in ("127.0.0.1", "localhost", "::1")
+
+
 def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | None = None) -> FastAPI:
     """The web app. ``on_shutdown``, when given, exposes a way to stop it.
 
@@ -126,6 +138,27 @@ def build_app(workspace: Path | None = None, on_shutdown: Callable[[], None] | N
         store.close()
 
     app = FastAPI(title="SourceWork", lifespan=lifespan)
+
+    @app.exception_handler(Exception)
+    async def unhandled(request: Request, exc: Exception) -> JSONResponse:
+        """Return the failure instead of "Internal Server Error".
+
+        This binds to loopback and serves one operator, so hiding the cause buys
+        nothing and costs the only person who can fix it the ability to see what
+        happened. A bare 500 sent both of us hunting through server logs for a
+        message the browser could have shown - and the log is only written when
+        the app was started as `sourcework app`, so sometimes it is nowhere at
+        all.
+
+        Deliberately not enabled for a wider bind: exception text can carry file
+        paths and configuration values, which is fine on your own machine and not
+        fine on a shared one.
+        """
+        logger.exception("unhandled error on %s %s", request.method, request.url.path)
+        detail = f"{type(exc).__name__}: {exc}"
+        if _bound_beyond_loopback():
+            detail = f"{type(exc).__name__} - see the server log"
+        return JSONResponse(status_code=500, content={"detail": detail})
 
     @app.middleware("http")
     async def require_same_origin(request: Request, call_next):  # noqa: ANN001, ANN202
