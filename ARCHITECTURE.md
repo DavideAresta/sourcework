@@ -475,6 +475,10 @@ source between attempts discards the evidence taken from the old contents.
 Contents are not hashed — these are documents, some large, and the fingerprint
 is computed at every stage boundary.
 
+The ingest stage stores the routing map alongside the evidence, so a resumed
+run still reports which agent handled which input; without it `stats.routed`
+would come back empty and describe work that did happen as work that did not.
+
 Anything reused is named in `stats.warnings`, because a reader is entitled to
 know which parts of the document in front of them were produced by the run they
 are looking at. Checkpoints are deleted once a run has a result: there is

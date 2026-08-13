@@ -207,11 +207,28 @@ def cmd_ui(args: argparse.Namespace) -> int:
 
 async def _generate(args: argparse.Namespace) -> int:
     from sourcework.a2a_common import AgentPool
-    from sourcework.models import InputRef, PRDRequest, PRDResult
+    from sourcework.agents.orchestrator import checkpoint
+    from sourcework.models import InputRef, PRDRequest, PRDResult, new_id
 
     inputs = [InputRef(uri=_as_uri(p)) for p in args.input or []]
     for note in args.note or []:
         inputs.append(InputRef(uri="inline:note", text=note, title="Requester note"))
+
+    resuming = args.resume is not None
+    if resuming:
+        # A bare --resume means the last interrupted run. The browser has a
+        # history to point at; a terminal has the run you were just watching.
+        run_id = args.resume or next(iter(checkpoint.saved_runs()), None)
+        if run_id is None:
+            print("Nothing to resume: no run has saved state.", file=sys.stderr)
+            return 2
+        stages = checkpoint.saved_stages(run_id)
+        if not stages:
+            print(f"Run {run_id} saved no stages to resume from.", file=sys.stderr)
+            return 2
+        print(f"Resuming {run_id}, reusing: {', '.join(stages)}")
+    else:
+        run_id = new_id("run")
 
     request = PRDRequest(
         title=args.title,
@@ -223,10 +240,28 @@ async def _generate(args: argparse.Namespace) -> int:
         template=args.template,
         review_rounds=args.review_rounds,
         extra_instructions=args.instructions,
+        run_id=run_id,
+        resume=resuming,
     )
 
-    async with AgentPool() as pool:
-        data = await pool.call("orchestrator", "generate_prd", request)
+    try:
+        async with AgentPool() as pool:
+            data = await pool.call("orchestrator", "generate_prd", request)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # The likeliest interruption of all, and the one that does not arrive as
+        # an Exception: somebody watching a slow run and pressing Ctrl-C.
+        print("\nInterrupted.", file=sys.stderr)
+        _print_resume_hint(run_id, checkpoint)
+        return 130
+    except Exception as exc:
+        # The stages that did finish are on disk, and a terminal has no run
+        # history to discover that from - so the failure says so itself, with
+        # the command to pick it up. Without this the checkpoint might as well
+        # not exist.
+        print(f"\nRun failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        _print_resume_hint(run_id, checkpoint)
+        return 1
+
     result = PRDResult.model_validate(data)
 
     out = Path(args.out or f"{_slug(args.title)}.md")
@@ -242,6 +277,18 @@ async def _generate(args: argparse.Namespace) -> int:
     if result.review:
         print(f"Review verdict: {result.review.verdict} ({len(result.review.findings)} findings)")
     return 0
+
+
+def _print_resume_hint(run_id: str, checkpoint) -> None:  # noqa: ANN001 - the module
+    stages = checkpoint.saved_stages(run_id)
+    if not stages:
+        return
+    print(
+        f"\n{len(stages)} stage(s) survived ({', '.join(stages)}). "
+        f"Re-run the same command with --resume to continue from there, or "
+        f"--resume {run_id} to name it explicitly.",
+        file=sys.stderr,
+    )
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -316,6 +363,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--template", default="standard", choices=["standard", "lean", "technical", "discovery"])
     p.add_argument("--review-rounds", type=int, default=1)
     p.add_argument("--instructions", help="extra steer for the analyst and writer")
+    p.add_argument(
+        "--resume", nargs="?", const="", metavar="RUN_ID",
+        help="continue an interrupted run instead of starting over, reusing the stages it "
+             "finished. Bare --resume takes the most recent. Stages whose inputs have changed "
+             "since - a different backend, an edited source - are recomputed either way.",
+    )
     p.set_defaults(func=cmd_generate)
 
     args = parser.parse_args(argv)

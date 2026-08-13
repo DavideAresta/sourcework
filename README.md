@@ -220,6 +220,26 @@ regardless, and whatever *was* reused is recorded in the run's stats.
 
 A finished run has nothing to resume. That one wants **Refine**.
 
+From the command line the same thing is `--resume`:
+
+```bash
+sourcework generate "Returns" -i docs/*.pdf --resume
+```
+
+A run that fails or that you interrupt with Ctrl-C prints what survived and how
+to continue it, because a terminal has no history to discover that from:
+
+```
+Interrupted.
+
+2 stage(s) survived (ingest, analyse). Re-run the same command with --resume to
+continue from there, or --resume run-98d617b1bb87 to name it explicitly.
+```
+
+Bare `--resume` takes the most recent saved run. Checkpoints nobody comes back
+for are discarded after two weeks - they hold the full text of every source
+that was ingested.
+
 ## Refining a PRD
 
 A PRD is never finished on the first pass — it ends by telling you what it

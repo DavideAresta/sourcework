@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -108,6 +110,18 @@ def test_a_stage_whose_shape_no_longer_parses_is_recomputed(workspace):
     assert cp.load("analyse", "fp", RequirementSet.model_validate) is None
 
 
+def test_a_stage_holding_more_than_one_model_is_still_written(workspace):
+    """Save failures are swallowed - insurance must not cause the accident - so
+    a payload this could not serialise would leave the stage silently unwritten
+    and nothing to say why."""
+    cp = checkpoint.Checkpoint(run_id="r1", resume=True)
+    cp.save("ingest", "fp", {"extractions": [_extraction()], "routed": {"A": "ingestion.x"}})
+
+    stored = cp.load("ingest", "fp", lambda d: d)
+    assert stored is not None
+    assert stored["extractions"][0]["evidence"][0]["id"] == "ev-1"
+
+
 def test_the_file_is_replaced_whole_so_a_crash_cannot_truncate_it(workspace):
     cp = checkpoint.Checkpoint(run_id="r1")
     cp.save("ingest", "fp", [_extraction()])
@@ -203,6 +217,24 @@ async def test_resuming_does_not_read_the_sources_again():
     assert checkpoint.saved_stages("r1") == ["ingest"]
 
 
+async def test_a_resumed_run_still_reports_which_agent_handled_which_input():
+    """The stats block names the route taken for every input. A resumed run
+    that reported an empty map would describe work that did happen as work that
+    did not."""
+    pool = FakePool(fail_at="analyse_requirements")
+    with pytest.raises(Exception, match="timed out"):
+        await pipeline.run(_request(), pool)
+
+    second = FakePool(fail_at="analyse_requirements")
+    with pytest.raises(Exception, match="timed out"):
+        await pipeline.run(_request(resume=True), second)
+
+    stored = json.loads((checkpoint.directory() / "r1.json").read_text())
+    assert stored["stages"]["ingest"]["data"]["routed"] == {
+        "Note": "ingestion.extract_document"
+    }
+
+
 async def test_a_rerun_that_did_not_ask_to_resume_starts_over():
     pool = FakePool(fail_at="analyse_requirements")
     with pytest.raises(Exception, match="timed out"):
@@ -240,3 +272,52 @@ async def test_changing_the_evidence_invalidates_the_requirements_built_on_it():
         await pipeline.run(changed, second)
 
     assert second.calls == ["extract_document", "analyse_requirements", "write_prd"]
+
+
+# --- retention and the command line ----------------------------------------
+
+
+def test_saved_runs_are_offered_newest_first(workspace):
+    """A bare `--resume` means "the one I was just watching"."""
+    for run_id in ("older", "newer"):
+        checkpoint.Checkpoint(run_id=run_id).save("ingest", "fp", [_extraction()])
+    old = checkpoint.directory() / "older.json"
+    os.utime(old, (0, 0))
+
+    assert checkpoint.saved_runs() == ["newer", "older"]
+
+
+def test_checkpoints_nobody_came_back_for_are_eventually_dropped(workspace):
+    """A finished run deletes its own; these are the abandoned ones, and each
+    holds the full text of every source it ingested."""
+    checkpoint.Checkpoint(run_id="stale").save("ingest", "fp", [_extraction()])
+    checkpoint.Checkpoint(run_id="fresh").save("ingest", "fp", [_extraction()])
+    forgotten = checkpoint.directory() / "stale.json"
+    os.utime(forgotten, (0, 0))
+
+    assert checkpoint.prune() == 1
+    assert checkpoint.saved_runs() == ["fresh"]
+
+
+def test_pruning_keeps_a_run_the_user_could_still_resume(workspace):
+    checkpoint.Checkpoint(run_id="yesterday").save("ingest", "fp", [_extraction()])
+    day_old = checkpoint.directory() / "yesterday.json"
+    os.utime(day_old, (time.time() - 86400, time.time() - 86400))
+
+    assert checkpoint.prune() == 0
+
+
+def test_resuming_with_nothing_saved_says_so_instead_of_starting_a_run(workspace, capsys):
+    """Exit 2, not a silent full run: somebody who typed --resume is telling you
+    they do not want to pay for the whole thing again."""
+    from sourcework.cli import main
+
+    assert main(["generate", "Returns", "-n", "a note", "--resume"]) == 2
+    assert "Nothing to resume" in capsys.readouterr().err
+
+
+def test_resuming_a_run_that_never_saved_anything_names_it(workspace, capsys):
+    from sourcework.cli import main
+
+    assert main(["generate", "Returns", "-n", "a note", "--resume", "nosuchrun"]) == 2
+    assert "nosuchrun saved no stages" in capsys.readouterr().err
