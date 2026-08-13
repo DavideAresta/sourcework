@@ -13,6 +13,7 @@ during ingestion.
 from __future__ import annotations
 
 import logging
+import re
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +29,11 @@ class EvidenceItem(BaseModel):
     text: str = Field(description="The claim, restated as one self-contained sentence.")
     locator: str | None = Field(
         default=None,
-        description="Copy the [[locator]] of the block this came from, verbatim.",
+        description=(
+            "Where in the source this came from. Copy the [[locator]] of the block, "
+            "or give a more precise one shown inside it - a transcript block lists a "
+            "timestamp per line, and the line's timestamp is better than the block's."
+        ),
     )
     speaker: str | None = Field(default=None, description="Who said it, if known.")
     kind: str = Field(
@@ -51,8 +56,11 @@ Rules, in priority order:
    never fill gaps with domain knowledge. A later agent does the inferring.
 2. One claim per item, restated as a single self-contained sentence that makes
    sense without its surrounding context.
-3. Copy the [[locator]] marker of the block a claim came from into `locator`,
-   exactly as given. This is what lets a reader verify the claim.
+3. Put where the claim came from into `locator`. The [[marker]] on the block is
+   always valid; if the block shows finer positions inside it - a timestamp on
+   each line of a transcript - cite the one the claim actually came from. This
+   is what lets a reader verify the claim, so a locator pointing at the wrong
+   place is worse than none at all.
 4. Keep anything that constrains, scopes, or measures the product: features,
    behaviours, rules, limits, SLAs, integrations, compliance obligations,
    decisions taken, explicit non-goals, numbers and dates.
@@ -101,10 +109,17 @@ async def extract_evidence(
     *,
     focus: str | None = None,
     images: list[ImageInput] | None = None,
+    locators: set[str] | None = None,
     role: str = "default",
     max_chars_per_batch: int = 12000,
 ) -> tuple[list[Evidence], str, list[str]]:
     """Run the extraction over ``blocks``, batching to stay inside context.
+
+    ``locators`` widens what a claim is allowed to cite beyond the block markers.
+    A transcript block is a window of twenty-five cues carrying the *first* cue's
+    locator, so without this the finest attribution possible is one point per
+    twenty-five - and a model that correctly cited the line it read would have
+    that answer thrown away for not matching a block marker.
 
     Returns ``(evidence, summary, warnings)``.
     """
@@ -145,11 +160,17 @@ async def extract_evidence(
 
         summaries.append(draft.summary)
         warnings.extend(draft.warnings)
-        known_locators = {loc for loc, _ in batch}
+        allowed = {loc for loc, _ in batch} | (locators or set())
+        # Only when the batch *is* one block: then every claim in it demonstrably
+        # came from that block. Across several, the old fallback to the first
+        # one attributed the whole batch to whatever happened to be at the top -
+        # a locator that is precise, confident and wrong, which is worse for a
+        # reader than the empty cell they would otherwise have questioned.
+        fallback = batch[0][0] if len(batch) == 1 else None
         for item in draft.items:
             if not item.text.strip():
                 continue
-            locator = item.locator if item.locator in known_locators else (batch[0][0] if batch else None)
+            locator = _resolve_locator(item.locator, allowed) or fallback
             evidence.append(
                 Evidence(
                     source_id=source.id,
@@ -163,6 +184,50 @@ async def extract_evidence(
             )
 
     return evidence, " ".join(summaries).strip(), warnings
+
+
+_TIMESTAMP = re.compile(r"\d{1,2}:\d{2}(?::\d{2})?")
+
+
+def _resolve_locator(claimed: str | None, allowed: set[str]) -> str | None:
+    """The canonical locator a model meant, or ``None`` if it named nothing real.
+
+    Three passes, each stricter than the model's likely sloppiness and looser
+    than the last:
+
+    * exact, which is what the prompt asks for and usually gets;
+    * ignoring case, surrounding whitespace and the ``[[ ]]`` a model sometimes
+      copies along with the value;
+    * for anything containing a timestamp, matching on the timestamp alone -
+      a transcript locator is ``00:12:40 Priya Raman`` and a model citing the
+      line it read writes ``00:12:40``. Returning the canonical form keeps the
+      speaker attached.
+
+    ``None`` for anything else, deliberately. A locator is a promise that a
+    reader can go and look; one that resolves to the wrong place is worth less
+    than an empty cell, because the empty cell gets questioned.
+    """
+    if not claimed:
+        return None
+    if claimed in allowed:
+        return claimed
+
+    def tidy(value: str) -> str:
+        return value.strip().strip("[]").strip().casefold()
+
+    wanted = tidy(claimed)
+    by_tidy = {tidy(a): a for a in allowed}
+    if wanted in by_tidy:
+        return by_tidy[wanted]
+
+    stamp = _TIMESTAMP.search(claimed)
+    if stamp is None:
+        return None
+    for candidate in allowed:
+        found = _TIMESTAMP.search(candidate)
+        if found and found.group() == stamp.group():
+            return candidate
+    return None
 
 
 def _batch(blocks: list[Block], max_chars: int) -> list[list[Block]]:

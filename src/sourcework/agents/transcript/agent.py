@@ -110,7 +110,15 @@ class TranscriptExecutor(SkillExecutor):
 
         blocks = transcripts.to_blocks(cues)
         evidence, summary, warnings = await extract_evidence(
-            self.llm, source, blocks, focus=req.focus
+            self.llm,
+            source,
+            blocks,
+            # Every cue, not just the twenty-five that start a block. The
+            # timestamps are in the block text the model reads, so a claim can
+            # be attributed to the line it came from rather than to whatever was
+            # being said twenty-four cues earlier.
+            locators={c.locator for c in cues if c.locator},
+            focus=req.focus,
         )
         await progress(f"{len(evidence)} evidence item(s) extracted")
 
