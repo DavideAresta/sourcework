@@ -264,6 +264,10 @@ figure{margin:1.9rem 0 0}
 .fig--lead .figplate{border-left:0;border-right:0;padding:1.9rem 2.4rem}
 /* the caption returns to the text column the figure broke out of */
 .fig--lead figcaption{margin-left:calc(var(--gutter) + 1.5rem + 2.4rem);font-size:1rem}
+/* screenshots: a hairline frame rather than the grey plate, because the app's
+   light theme is the same paper as this page and a plate behind it would vanish */
+.shots{display:grid;gap:1rem}
+.shots img{display:block;width:100%;height:auto;border:1px solid var(--ink)}
 svg.f-fig{display:block;width:100%;min-width:60rem;height:auto}
 figcaption{margin-top:1.1rem;color:var(--muted);font-size:.96rem;max-width:74ch}
 figcaption b{color:var(--ink);font-weight:600}
@@ -795,7 +799,7 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
   </section>
 
   <!-- ============ START ============ -->
-  <section class="wrap">
+  <section class="wrap wrap--wide">
     <div class="sheet rise">
       <div class="sigla"><b>§10</b> Start</div>
       <div>
@@ -812,6 +816,22 @@ git clone https://github.com/DavideAresta/sourcework
 <span class="c"># then point it at something real</span>
 <span class="k">sourcework</span> app      <span class="c"># the mesh and the web UI in one process</span>
 <span class="k">sourcework</span> doctor   <span class="c"># what is configured, and what is reachable</span></pre>
+        <figure class="fig--lead">
+          <div class="shots">
+            <img src="ui-run.png" loading="lazy" width="1440" height="640"
+                 alt="A finished run in SourceWork: the progress log shows 23 requirements from 3 sources, the critic reporting 100% of requirements cited, then six blocking findings sending the draft back for one revision round.">
+            <img src="ui-new.png" loading="lazy" width="1440" height="560"
+                 alt="The New PRD screen: a title field, a drop area for documents, transcripts and images, fields for URIs, inline notes and a Confluence CQL query.">
+          </div>
+          <figcaption>
+            <b>The run above took 2m 41s on a laptop, with no API key.</b> An 8B model served
+            locally by Ollama did the reading, the analysis and the drafting; the log is the
+            product stating its own guarantee — <code>100% of requirements are cited</code> — and
+            then the critic sending six blocking findings back for a re-draft, which is the inner
+            loop of §4 actually running. The interface follows your system theme and can be pinned
+            to either, and the light one is the palette of this page.
+          </figcaption>
+        </figure>
       </div>
     </div>
   </section>
@@ -832,6 +852,11 @@ git clone https://github.com/DavideAresta/sourcework
             <td>59 requirements from 170 pieces of evidence</td>
             <td><a href="https://github.com/DavideAresta/sourcework/blob/main/examples/sample_output/returns-portal.md">examples/sample_output/</a></td>
             <td class="loc">committed unedited</td>
+          </tr>
+          <tr>
+            <td>An 8B model on a laptop runs the whole pipeline</td>
+            <td><a href="https://github.com/DavideAresta/sourcework/blob/main/docs/local-models.md">docs/local-models.md</a></td>
+            <td class="loc">screenshot above</td>
           </tr>
           <tr>
             <td>Runs with no API key</td>
