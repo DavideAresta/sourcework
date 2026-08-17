@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SourceWork — a PRD where every requirement cites its source</title>
+<meta name="description" content="Open-source, MIT. Eight agents turn meeting recordings, PDFs, wireframes and wiki pages into a PRD where every requirement cites the evidence that justifies it — and no model can invent a citation.">
+<meta property="og:title" content="SourceWork — a model cannot invent a citation">
+<meta property="og:description" content="Meeting recordings, PDFs, wireframes and wiki pages in. A traceable PRD out. Runs with no API key, or entirely on your own hardware. MIT.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://davidearesta.github.io/sourcework/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23E4E6EA'/%3E%3Crect x='6' y='5' width='20' height='22' fill='%23FAFAFB'/%3E%3Crect x='6' y='5' width='2.5' height='22' fill='%234634C4'/%3E%3Crect x='12' y='10' width='10' height='2' fill='%2316171F'/%3E%3Crect x='12' y='15' width='10' height='2' fill='%2316171F'/%3E%3Crect x='12' y='20' width='6' height='2' fill='%23C0311C'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --desk:#E4E6EA;
+  --sheet:#FAFAFB;
+  --ink:#16171F;
+  --muted:#5E626F;
+  --rule:#D3D6DD;
+  --carbon:#4634C4;
+  --carbon-soft:#EAE7FA;
+  --stamp:#C0311C;
+
+  --display:"Newsreader",Georgia,"Times New Roman",serif;
+  --body:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  --gutter:5.5rem;
+  --measure:64rem;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--desk);
+  color:var(--ink);
+  font-family:var(--body);
+  font-size:17px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:inherit}
+::selection{background:var(--carbon);color:#fff}
+:focus-visible{outline:2px solid var(--carbon);outline-offset:3px}
+
+.wrap{max-width:var(--measure);margin:0 auto;padding:0 1.5rem}
+
+/* ---------- top bar ---------- */
+.bar{
+  position:sticky;top:0;z-index:20;
+  background:color-mix(in srgb,var(--desk) 88%,transparent);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--rule);
+}
+.bar__in{
+  max-width:var(--measure);margin:0 auto;padding:.7rem 1.5rem;
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  font-family:var(--mono);font-size:.78rem;letter-spacing:.02em;
+}
+.mark{display:flex;align-items:center;gap:.55rem;font-weight:500;text-decoration:none}
+.mark__tick{width:.32rem;height:1.05rem;background:var(--carbon);display:block}
+.bar__meta{display:flex;align-items:center;gap:1.1rem;color:var(--muted)}
+.bar__meta a{text-decoration:none;border-bottom:1px solid var(--rule);padding-bottom:1px}
+.bar__meta a:hover{color:var(--carbon);border-color:var(--carbon)}
+.hide-sm{display:inline}
+
+/* ---------- the sheet: every block of content is a page with a margin ---------- */
+.sheet{
+  background:var(--sheet);
+  border:1px solid var(--rule);
+  box-shadow:2px 2px 0 rgba(22,23,31,.05);
+  padding:2.6rem 2.4rem;
+  display:grid;
+  grid-template-columns:var(--gutter) 1fr;
+  column-gap:1.5rem;
+}
+.sheet + .sheet{margin-top:1.25rem}
+.sigla{
+  font-family:var(--mono);font-size:.72rem;line-height:1.5;
+  color:var(--muted);letter-spacing:.04em;text-transform:uppercase;
+  padding-top:.55rem;
+}
+.sigla b{display:block;color:var(--carbon);font-weight:500}
+
+/* ---------- hero ---------- */
+.hero{padding:4.5rem 0 2.5rem}
+.eyebrow{
+  font-family:var(--mono);font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted);margin:0 0 1.6rem;
+}
+h1{
+  font-family:var(--display);
+  font-size:clamp(2.9rem,8.4vw,6.4rem);
+  line-height:.94;
+  letter-spacing:-.025em;
+  font-weight:500;
+  margin:0;
+  max-width:14ch;
+}
+h1 em{font-style:italic;color:var(--carbon)}
+.lead{
+  font-size:clamp(1.05rem,1.9vw,1.28rem);
+  line-height:1.55;max-width:52ch;color:var(--ink);
+  margin:1.8rem 0 0;
+}
+.lead b{font-weight:600}
+
+/* the apparatus: the page cites its own claim */
+.apparatus{margin-top:2.6rem;border-top:1px solid var(--ink);padding-top:1rem;max-width:64ch}
+.apparatus__head{
+  display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:baseline;
+  font-family:var(--mono);font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+}
+.apparatus__head b{color:var(--ink);font-weight:500}
+.apparatus__head a{color:var(--carbon);text-decoration:none;border-bottom:1px solid var(--carbon-soft);text-transform:none;letter-spacing:0}
+.apparatus__head a:hover{border-color:var(--carbon)}
+.apparatus q{
+  display:block;margin-top:.7rem;
+  font-family:var(--display);font-size:1.06rem;line-height:1.5;font-style:italic;color:var(--ink);
+  quotes:'"' '"';
+}
+
+.cta{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:2.4rem}
+.btn{
+  display:inline-flex;align-items:center;gap:.6rem;
+  font-family:var(--mono);font-size:.85rem;
+  padding:.78rem 1.15rem;text-decoration:none;border:1px solid var(--ink);
+  background:var(--ink);color:var(--sheet);
+  transition:transform .12s ease,background .12s ease;
+}
+.btn:hover{background:var(--carbon);border-color:var(--carbon);transform:translate(-1px,-1px)}
+.btn--ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn--ghost:hover{background:transparent;color:var(--carbon);border-color:var(--carbon)}
+.btn__note{color:var(--muted);font-size:.78rem}
+.btn--ghost:hover .btn__note{color:var(--carbon)}
+
+/* ---------- sections ---------- */
+section{padding:3.2rem 0}
+.h2{
+  font-family:var(--display);font-weight:500;
+  font-size:clamp(1.7rem,3.6vw,2.5rem);line-height:1.1;letter-spacing:-.015em;
+  margin:0 0 .9rem;max-width:24ch;
+}
+.p{margin:0 0 1rem;max-width:62ch;color:var(--ink)}
+.p--muted{color:var(--muted)}
+.p:last-child{margin-bottom:0}
+
+/* requirement + its evidence, the product's own form */
+.req{font-family:var(--mono);font-size:.82rem;letter-spacing:.02em}
+.req__id{color:var(--carbon);font-weight:500}
+.req__title{font-family:var(--body);font-size:1.12rem;font-weight:600;margin:.35rem 0 0;letter-spacing:-.005em}
+.chain{list-style:none;margin:1.1rem 0 0;padding:0;border-left:2px solid var(--carbon-soft)}
+.chain li{padding:.1rem 0 1.1rem 1.2rem;position:relative}
+.chain li:last-child{padding-bottom:0}
+.chain li::before{
+  content:"";position:absolute;left:-5px;top:.62rem;
+  width:8px;height:8px;background:var(--carbon);
+}
+.chain__src{font-family:var(--mono);font-size:.76rem;color:var(--muted);letter-spacing:.02em}
+.chain__src b{color:var(--ink);font-weight:500}
+.chain q{display:block;font-family:var(--display);font-size:1.02rem;line-height:1.5;margin-top:.3rem}
+
+.tag{
+  display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  padding:.16rem .45rem;border:1px solid var(--stamp);color:var(--stamp);
+  transform:rotate(-1.2deg);
+}
+.note{
+  margin-top:1.2rem;padding-top:1rem;border-top:1px dashed var(--rule);
+  color:var(--muted);font-size:.95rem;max-width:60ch;
+}
+.note b{color:var(--ink);font-weight:600}
+
+/* tables */
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{
+  font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);font-weight:400;border-bottom-color:var(--ink);
+}
+td:first-child{white-space:nowrap;font-weight:600}
+.loc{font-family:var(--mono);font-size:.82rem;color:var(--carbon)}
+.port{font-family:var(--mono);font-size:.82rem;color:var(--muted)}
+.scroll{overflow-x:auto}
+
+/* chips */
+.chips{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:1.3rem;padding:0;list-style:none}
+.chips li{
+  font-family:var(--mono);font-size:.78rem;padding:.32rem .6rem;
+  border:1px solid var(--rule);color:var(--muted);background:var(--desk);
+}
+.chips li b{color:var(--ink);font-weight:500}
+
+/* two-column ledger: enforced vs not */
+.ledger{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--ink);margin-top:1.5rem}
+.ledger__col{padding:1.4rem 1.5rem}
+.ledger__col + .ledger__col{border-left:1px solid var(--ink)}
+.ledger h3{
+  font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;
+  margin:0 0 .9rem;font-weight:400;
+}
+.ledger--yes h3{color:var(--carbon)}
+.ledger--no h3{color:var(--stamp)}
+.ledger ul{margin:0;padding-left:1.1rem}
+.ledger li{margin-bottom:.5rem}
+.ledger li:last-child{margin-bottom:0}
+
+/* code block */
+pre{
+  margin:1.4rem 0 0;padding:1.3rem 1.4rem;overflow-x:auto;
+  background:var(--ink);color:#E7E8EE;
+  font-family:var(--mono);font-size:.85rem;line-height:1.75;
+}
+pre .c{color:#8E93A8}
+pre .k{color:#A99CF5}
+
+/* footer matrix */
+.foot{border-top:1px solid var(--ink);margin-top:1rem;padding:3rem 0 4rem}
+.foot__title{
+  font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+  margin:0 0 1.1rem;
+}
+.foot table td:first-child{white-space:normal;font-weight:400;font-family:var(--display);font-size:1rem}
+.foot a{color:var(--carbon);text-decoration:none;font-family:var(--mono);font-size:.8rem}
+.foot a:hover{text-decoration:underline}
+.colophon{
+  display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;justify-content:space-between;
+  margin-top:2.5rem;font-family:var(--mono);font-size:.75rem;color:var(--muted);
+}
+
+/* motion */
+.rise{opacity:0;transform:translateY(14px)}
+.rise.in{opacity:1;transform:none;transition:opacity .6s cubic-bezier(.2,.7,.3,1),transform .6s cubic-bezier(.2,.7,.3,1)}
+.hero .rise{transition-delay:var(--d,0ms)}
+
+@media (max-width:820px){
+  :root{--gutter:0}
+  .sheet{grid-template-columns:1fr;padding:1.9rem 1.4rem}
+  .sigla{padding-top:0;margin-bottom:1.1rem}
+  .sigla b{display:inline;margin-right:.5rem}
+  .ledger{grid-template-columns:1fr}
+  .ledger__col + .ledger__col{border-left:0;border-top:1px solid var(--ink)}
+  .hide-sm{display:none}
+  .hero{padding:3rem 0 1.5rem}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+  .rise{opacity:1;transform:none}
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar__in">
+    <a class="mark" href="#top"><span class="mark__tick"></span>sourcework</a>
+    <nav class="bar__meta">
+      <span class="hide-sm">MIT</span>
+      <span class="hide-sm">v0.1.0</span>
+      <a href="https://github.com/DavideAresta/sourcework">GitHub&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <div class="wrap hero">
+    <p class="eyebrow rise" style="--d:0ms">Agentic PRD generation · open source</p>
+    <h1 class="rise" style="--d:90ms">A model cannot <em>invent</em> a citation.</h1>
+    <p class="lead rise" style="--d:180ms">
+      Meeting recordings, PDFs, wireframes and wiki pages go in. What comes out is a
+      PRD where every requirement carries the quote that justifies it — and the page,
+      the timestamp, the speaker, the region of the image where you can go and check.
+    </p>
+
+    <div class="apparatus rise" style="--d:280ms">
+      <div class="apparatus__head">
+        <span><b>§1</b> Enforced in code</span>
+        <a href="https://github.com/DavideAresta/sourcework/blob/main/src/sourcework/agents/requirements/agent.py#L9">src/sourcework/agents/requirements/agent.py:9 ↗</a>
+      </div>
+      <q>every source_ref is checked against the real evidence ids, and invented ones are
+         stripped. A model that hallucinates a citation loses the citation.</q>
+    </div>
+
+    <div class="cta rise" style="--d:360ms">
+      <a class="btn" href="https://github.com/DavideAresta/sourcework">Read the code</a>
+      <button class="btn btn--ghost" id="copy" type="button" data-cmd="make demo">
+        make demo <span class="btn__note" id="copy-note">copy</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ WHAT COMES OUT ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>§2</b> The output</div>
+      <div>
+        <h2 class="h2">Every requirement points back at the thing that justifies it.</h2>
+        <p class="p">
+          This is one requirement from the demo run committed in the repository —
+          59 requirements built from 170 pieces of evidence across five sources, generated
+          and committed unedited.
+        </p>
+
+        <div class="req" style="margin-top:1.8rem">
+          <span class="req__id">REQ-015</span> · MUST
+          <p class="req__title">Respect the peak trading deployment freeze</p>
+          <ul class="chain">
+            <li>
+              <span class="chain__src"><b>02-it-architecture-constraints.pdf</b> · p.1</span>
+              <q>Deployments are blocked between 15 December and 6 January, the peak trading freeze.</q>
+            </li>
+            <li>
+              <span class="chain__src"><b>03-kickoff-meeting.vtt</b> · 00:06:06 · Lena Fischer</span>
+              <q>There is a deployment freeze from the fifteenth of December to the sixth of January.</q>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet rise">
+      <div class="sigla"><b>§3</b> The tell</div>
+      <div>
+        <h2 class="h2">And where it reasoned instead of read, it says so.</h2>
+        <div class="req" style="margin-top:1.4rem">
+          <span class="req__id">REQ-032</span> · SHOULD · <span class="tag">derived</span>
+          <p class="req__title">
+            The system must handle at least twice the baseline monthly return volume
+            (approximately 16,400 returns in a peak month).
+          </p>
+        </div>
+        <p class="note">
+          <b>Nobody in that meeting said 16,400.</b> Two people said <i>“about 8,200 returns
+          per month”</i> and <i>“return volume more than doubles in January”</i>. The number is
+          the model's arithmetic — and <span class="tag">derived</span> is the document
+          telling you to check it, rather than hoping you don't.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHAT GOES IN ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>§4</b> The input</div>
+      <div>
+        <h2 class="h2">Nothing enters the pipeline except evidence with a locator.</h2>
+        <p class="p p--muted">
+          A locator means something different in every medium, so it is kept verbatim
+          and shown to the reader rather than normalised into uselessness.
+        </p>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Goes in</th><th>Read by</th><th>Locator you get back</th></tr></thead>
+            <tbody>
+              <tr><td>Documents</td><td>PDF, DOCX, PPTX, XLSX, CSV, Markdown, HTML</td><td class="loc">p.12 · #heading</td></tr>
+              <tr><td>Meetings</td><td>VTT, SRT, JSON transcripts</td><td class="loc">00:14:32 · Lena Fischer</td></tr>
+              <tr><td>Images</td><td>Mockups, screenshots, whiteboards, diagrams</td><td class="loc">region: top-left</td></tr>
+              <tr><td>Confluence</td><td>CQL search, pages and attachments</td><td class="loc">#anchor</td></tr>
+              <tr><td>Notes</td><td>Free text you type in yourself</td><td class="loc">the line</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ NO API KEY ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>§5</b> What it costs</div>
+      <div>
+        <h2 class="h2">It does not need your API key.</h2>
+        <p class="p">
+          If you are signed into a coding CLI, the whole pipeline runs on that subscription
+          with nothing plumbed through SourceWork. If you would rather nothing left the
+          machine at all, every model can be local — the confidential documents you would
+          feed this thing are exactly the ones you should not be uploading.
+        </p>
+        <ul class="chips">
+          <li><b>claude-code</b></li>
+          <li><b>codex-cli</b></li>
+          <li><b>copilot-cli</b></li>
+          <li><b>opencode-cli</b></li>
+          <li><b>agy-cli</b></li>
+          <li><b>litellm</b> any hosted provider</li>
+          <li><b>llama.cpp</b> entirely local</li>
+        </ul>
+        <p class="note">
+          Models are chosen per role: a cheap one for extraction, a strong one for the
+          analyst, and a <b>different family for the critic</b>, so the review is
+          adversarial rather than agreeable.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE MESH ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>§6</b> The mesh</div>
+      <div>
+        <h2 class="h2">Eight agents, each one an independently deployable service.</h2>
+        <p class="p p--muted">
+          They speak A2A v1.0 over JSON-RPC and publish an agent card. The orchestrator
+          hardcodes nobody's abilities — it reads the cards at start-up and dispatches by
+          skill, so the web UI is just another client, not a ninth agent.
+        </p>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>Agent</th><th class="hide-sm">Port</th><th>Does</th></tr></thead>
+            <tbody>
+              <tr><td>Orchestrator</td><td class="port hide-sm">8000</td><td>Routes inputs, sequences the pipeline, runs the review loop</td></tr>
+              <tr><td>Document Ingestor</td><td class="port hide-sm">8001</td><td>Documents and spreadsheets → evidence</td></tr>
+              <tr><td>Image Analyst</td><td class="port hide-sm">8002</td><td>Mockups, screenshots, whiteboards → evidence</td></tr>
+              <tr><td>Meeting Analyst</td><td class="port hide-sm">8003</td><td>Transcripts → evidence and a decision log</td></tr>
+              <tr><td>Confluence Connector</td><td class="port hide-sm">8004</td><td>CQL search, page read, idempotent publish</td></tr>
+              <tr><td>Requirements Analyst</td><td class="port hide-sm">8005</td><td>Cluster, de-dup, MoSCoW, conflicts, open questions</td></tr>
+              <tr><td>PRD Writer</td><td class="port hide-sm">8006</td><td>Narrative, Markdown, Confluence storage XHTML</td></tr>
+              <tr><td>PRD Critic</td><td class="port hide-sm">8007</td><td>Deterministic traceability checks, then adversarial review</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE LIMIT ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>§7</b> The limit</div>
+      <div>
+        <h2 class="h2">Be precise about what that guarantees.</h2>
+        <p class="p">
+          The difference matters when you are the one signing the document.
+        </p>
+        <div class="ledger">
+          <div class="ledger__col ledger--yes">
+            <h3>Enforced</h3>
+            <ul>
+              <li>Every citation resolves to evidence that really was extracted.</li>
+              <li>Invented ids are stripped before you ever read them.</li>
+              <li>A requirement left uncited is forced to render as <span class="tag">derived</span>.</li>
+            </ul>
+          </div>
+          <div class="ledger__col ledger--no">
+            <h3>Not enforced</h3>
+            <ul>
+              <li>That the cited evidence actually <i>supports</i> the claim.</li>
+              <li>No mechanical check catches that. The traceability matrix exists so a
+                  human can, in one pass, with the quote sitting next to the requirement.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ START ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>§8</b> Start</div>
+      <div>
+        <h2 class="h2">See the whole thing work before giving it credentials.</h2>
+        <p class="p p--muted">
+          <span class="loc">make demo</span> runs all eight agents over real HTTP and real
+          A2A against a deterministic fake model. No key, no model, no network.
+        </p>
+<pre><span class="c"># the full pipeline, offline, in about a minute</span>
+git clone https://github.com/DavideAresta/sourcework
+<span class="k">make</span> install
+<span class="k">make</span> demo
+
+<span class="c"># then point it at something real</span>
+<span class="k">sourcework</span> app      <span class="c"># the mesh and the web UI in one process</span>
+<span class="k">sourcework</span> doctor   <span class="c"># what is configured, and what is reachable</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER: the page cites itself ============ -->
+  <footer class="wrap foot">
+    <p class="foot__title">Traceability matrix — for this page</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Claim</th><th>Source</th><th>Location</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>A model cannot invent a citation</td>
+            <td><a href="https://github.com/DavideAresta/sourcework/blob/main/src/sourcework/agents/requirements/agent.py#L7-L12">agents/requirements/agent.py</a></td>
+            <td class="loc">L7–12</td>
+          </tr>
+          <tr>
+            <td>59 requirements from 170 pieces of evidence</td>
+            <td><a href="https://github.com/DavideAresta/sourcework/blob/main/examples/sample_output/returns-portal.md">examples/sample_output/</a></td>
+            <td class="loc">committed unedited</td>
+          </tr>
+          <tr>
+            <td>Runs with no API key</td>
+            <td><a href="https://github.com/DavideAresta/sourcework/blob/main/docs/backends.md">docs/backends.md</a></td>
+            <td class="loc">six backends</td>
+          </tr>
+          <tr>
+            <td>The UI has no authentication, and binds loopback</td>
+            <td><a href="https://github.com/DavideAresta/sourcework/blob/main/SECURITY.md">SECURITY.md</a></td>
+            <td class="loc">read it first</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="colophon">
+      <span>MIT · v0.1.0 · pre-1.0, so a minor bump may break things</span>
+      <span><a href="https://github.com/DavideAresta/sourcework">github.com/DavideAresta/sourcework</a></span>
+    </div>
+  </footer>
+
+</main>
+
+<script>
+(function(){
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Hero rises on load; everything else rises when it arrives.
+  var hero = document.querySelectorAll('.hero .rise');
+  if (reduce) {
+    document.querySelectorAll('.rise').forEach(function(el){ el.classList.add('in'); });
+  } else {
+    requestAnimationFrame(function(){ hero.forEach(function(el){ el.classList.add('in'); }); });
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, {rootMargin: '0px 0px -12% 0px'});
+    document.querySelectorAll('section .rise').forEach(function(el){ io.observe(el); });
+  }
+
+  // Copy the one command that needs no credentials.
+  var btn = document.getElementById('copy');
+  var note = document.getElementById('copy-note');
+  btn.addEventListener('click', function(){
+    navigator.clipboard.writeText(btn.dataset.cmd).then(function(){
+      note.textContent = 'copied';
+      setTimeout(function(){ note.textContent = 'copy'; }, 1600);
+    }, function(){
+      note.textContent = 'select it';
+    });
+  });
+})();
+</script>
+</body>
+</html>
