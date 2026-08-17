@@ -6,12 +6,22 @@
   <title>SourceWork</title>
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    /* Applied before first paint. This has to be a blocking classic script: the
+       page's module runs after parse, which is late enough to show one frame of
+       the wrong theme. */
+    try {
+      var t = localStorage.getItem("sourcework.theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="top">
     <div class="brand">Source<b>Work</b></div>
     <span id="mesh" class="pill">checking…</span>
     <div class="spacer"></div>
+    <button id="theme" class="ghost">Auto</button>
     <a href="/dashboard"><button class="ghost">Dashboard</button></a>
     <a href="/settings"><button class="ghost">Settings</button></a>
   </header>
@@ -25,6 +35,7 @@
     <main id="main"></main>
   </div>
 
+  <script type="module" src="/static/js/theme.js"></script>
   <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

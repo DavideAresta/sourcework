@@ -2,27 +2,38 @@
    One stylesheet, no framework, no build. Custom properties carry the theme so
    light and dark are one rule each rather than two of everything. */
 
+/* The light theme is the palette of the project's own page: a bond-paper grey
+   ground, paper panels, carbon violet for anything actionable, and red kept for
+   the single thing the page reserves it for - what the system threw away or
+   flagged. Somebody who arrives from the site and installs this should not feel
+   they have opened a different product. */
 :root {
-  --bg: #fbfbfa;
-  --panel: #ffffff;
-  --panel-2: #f4f4f2;
-  --ink: #1b1b19;
-  --ink-2: #5c5c56;
-  --ink-3: #8a8a82;
-  --line: #e3e3de;
-  --accent: #b4562a;
+  --bg: #e4e6ea;
+  --panel: #fafafb;
+  --panel-2: #f0f1f4;
+  --ink: #16171f;
+  --ink-2: #5e626f;
+  --ink-3: #8a8e9b;
+  --line: #d3d6dd;
+  --accent: #4634c4;
   --accent-ink: #ffffff;
   --ok: #2f7d5b;
-  --warn: #a86a1c;
-  --err: #b03030;
+  --warn: #9a6414;
+  --err: #c0311c;
   --radius: 8px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
 }
 
+/* Three states, not two: an explicit choice has to win over the operating
+   system in *both* directions, and the un-stamped document - which is what most
+   people have - must still follow it. So the dark values are listed twice, once
+   for "the OS says dark and nobody overrode it" and once for "somebody asked
+   for dark". There is no build step here to share them from one place, and a
+   preprocessor would be a large price for thirteen lines. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #17171a;
     --panel: #1e1e22;
     --panel-2: #26262b;
@@ -37,6 +48,22 @@
     --err: #e07070;
     color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --bg: #17171a;
+  --panel: #1e1e22;
+  --panel-2: #26262b;
+  --ink: #ececea;
+  --ink-2: #a9a9a4;
+  --ink-3: #77777199;
+  --line: #33333a;
+  --accent: #d9784a;
+  --accent-ink: #17171a;
+  --ok: #57b98c;
+  --warn: #d3a04a;
+  --err: #e07070;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
