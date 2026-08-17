@@ -16,9 +16,23 @@ and the version on every agent card are the same string by construction.
 
 ### Added
 
+- **A theme control in the web UI**, cycling Auto, Light and Dark from the header
+  of every page. Three states rather than a switch, because a two-way toggle
+  makes *follow the system* unreachable the moment somebody clicks it once. The
+  choice is remembered and applied before first paint, so the wrong theme never
+  flashes.
 - The README now carries the web UI itself — the five views, the per-run backend
   override, and how Resume and Refine differ — so the front page answers that
-  question rather than forwarding it.
+  question rather than forwarding it — and opens with a screenshot of a real
+  run: three sources end to end in 2m 41s on a local 8B model, no API key.
+
+### Changed
+
+- **The light theme is now the palette of the project's own page** — bond-paper
+  ground, carbon violet for anything actionable, red kept for what was thrown
+  away or flagged. It was warm paper and terracotta, which belonged to no other
+  surface this project has, and on a machine set to dark almost nobody had ever
+  seen it. Dark is unchanged.
 
 ### Removed
 

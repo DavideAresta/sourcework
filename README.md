@@ -16,7 +16,14 @@ Eight agents, each an independently deployable [A2A](https://a2a-protocol.org)
 service. Runs entirely on your own hardware if you want it to — your documents
 never have to leave the machine.
 
-<!-- DEMO GIF: a run streaming in the web UI. Record with the demo pack. -->
+![A finished run: the progress log shows 23 requirements from 3 sources, the
+critic reporting 100% of requirements cited, then six blocking findings sending
+the draft back for one revision round.](docs/img/ui-run.png)
+
+*Three sources through the whole pipeline in 2m 41s, on a laptop, with no API
+key — an 8B model served locally by Ollama did the reading, the analysis and the
+drafting. The log is the guarantee stating itself, and then the critic sending
+six blocking findings back for a re-draft.*
 
 ## The one idea worth knowing
 
@@ -129,6 +136,11 @@ Saved settings work differently. Agents read their configuration once, at
 start-up, so the settings page says **restart the mesh** rather than pretending
 otherwise. Secrets render masked, and a masked value is never written back — so
 opening the page cannot leak a token, and saving it cannot blank one.
+
+It follows your system theme, and the control in the header pins it to light or
+dark when you would rather it did not. Three states rather than a switch,
+because a two-way toggle makes *follow the system* unreachable the moment you
+click it once.
 
 ### Resume and Refine
 
