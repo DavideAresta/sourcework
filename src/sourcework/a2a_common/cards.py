@@ -20,6 +20,7 @@ from a2a.types import (
     StringList,
 )
 
+from sourcework import __version__
 from sourcework.config import settings
 
 PROTOCOL_VERSION = "1.0"
@@ -67,7 +68,7 @@ def build_card(
     description: str,
     url: str,
     skills: list[AgentSkill],
-    version: str = "0.1.0",
+    version: str = __version__,
     streaming: bool = True,
     default_input_modes: list[str] | None = None,
     default_output_modes: list[str] | None = None,
@@ -77,7 +78,9 @@ def build_card(
         name=name,
         description=description,
         version=version,
-        provider=AgentProvider(organization="SourceWork", url="https://example.internal/sourcework"),
+        provider=AgentProvider(
+            organization="SourceWork", url="https://github.com/DavideAresta/sourcework"
+        ),
         capabilities=AgentCapabilities(streaming=streaming, push_notifications=False),
         default_input_modes=default_input_modes or [JSON_MODE, TEXT_MODE],
         default_output_modes=default_output_modes or [JSON_MODE, TEXT_MODE],

@@ -1,0 +1,74 @@
+# Changelog
+
+Notable changes, newest first. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) — with the pre-1.0
+caveat spelled out: **while the major version is 0, a minor bump may break
+things.** `0.x` is where the seams are still moving. What will not move quietly
+is the evidence rule; a release that changed what a citation guarantees would
+say so at the top of its section.
+
+The version lives in `src/sourcework/__init__.py` and is read from there at
+build time, so `sourcework.__version__`, the installed distribution metadata,
+and the version on every agent card are the same string by construction.
+
+## [Unreleased]
+
+## [0.1.0] — 2026-08-17
+
+First public release. Everything below already worked; this is the version that
+puts a number on it.
+
+### The pipeline
+
+- Eight agents over **A2A v1.0** JSON-RPC — orchestrator, ingestion, vision,
+  transcript, Confluence, requirements, writer, critic — each publishing an
+  agent card at `/.well-known/agent-card.json`. The orchestrator hardcodes no
+  agent's abilities: it resolves cards at start-up and dispatches by skill id,
+  so an agent that advertises a skill is an agent that gets the work.
+- **Traceability is structural, not requested.** Only `Evidence` with a locator
+  enters the pipeline, every `Requirement` cites evidence ids, citations are
+  validated in code, an invented id is dropped, and an uncited requirement is
+  forced to render as `derived`. The PRD ends in a traceability matrix that
+  points at page numbers, timestamps, headings and image regions.
+- Ingestion of PDF, DOCX/DOC/RTF, PPTX, XLSX/CSV/TSV, Markdown, HTML, JSON,
+  plain text, VTT/SRT transcripts, PNG/JPEG/GIF/BMP/WebP images, and Confluence
+  pages — each with the locator its modality actually has.
+- Output as Markdown, Confluence storage XHTML, or JSON; publishing to
+  Confluence over REST.
+
+### Running it
+
+- **No API key required.** Model calls go through LiteLLM with failover across
+  backends, and the local-model path drives llama.cpp/llama-swap with discovered
+  rather than hand-written config. Five CLI backends are supported alongside
+  LiteLLM — `claude`, `codex`, `agy`, `copilot` and `opencode` — each funnelled
+  through one subprocess runner, which is where these integrations actually
+  break and therefore where the tests point.
+- A **desktop mode** with per-user paths, engine detection, a launcher entry and
+  a real log file, alongside the CLI and the web UI.
+- **Runs are resumable.** Each stage checkpoints, `--resume` picks an
+  interrupted run back up rather than paying for it twice, resuming a run that
+  is still going is refused, and a cancel actually stops the work.
+- A web UI on `127.0.0.1` with live model output over SSE, a SQLite run store,
+  and a settings page that edits `.env` with secrets masked both ways.
+
+### Extending it
+
+Three seams, documented in [docs/extending.md](docs/extending.md): publishers
+and authenticators arrive as entry points, and the run store arrives as a
+constructor argument. A publisher that will not load is skipped; an
+authenticator that will not load raises — the same decision made twice in
+opposite directions, because one costs a destination and the other costs the
+lock on the door.
+
+### Security posture
+
+Stated in full in [SECURITY.md](SECURITY.md), and worth reading before you point
+this at anything you care about. In short: it is a **local, single-operator
+tool**. The UI binds loopback and ships no authentication; the agent mesh ships
+a publicly known shared secret and does not enforce it by default; ingestion
+refuses private-network targets; and model output is treated as untrusted input.
+
+[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.1.0
