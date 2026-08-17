@@ -301,6 +301,32 @@ class PeerSettings(BaseModel):
         return self.model_dump()
 
 
+class RunsSettings(BaseModel):
+    """The UI's run history."""
+
+    retention_days: int = 0
+    """Delete finished runs older than this, on UI start-up.
+
+    0 (the default) keeps everything. The run store holds the full text of
+    every ingested source and the complete PRDs built from them, so an
+    installation with a data-retention policy needs a number here, not a
+    reminder to come back and delete things by hand. Only finished runs are
+    touched; anything in flight is left alone."""
+
+
+class QualitySettings(BaseModel):
+    """The requirements-quality rule pack (``sourcework.quality``)."""
+
+    ears: bool = False
+    """Write and check requirements in EARS patterns (WHEN/WHILE/IF-THEN/
+    WHERE/ubiquitous).
+
+    Off by default: conforming phrasing is a team choice, not a defect, and
+    turning it on changes what the analyst is asked to write, not just what the
+    critic flags. On, the analyst's prompt asks for EARS-shaped statements and
+    the critic flags statements that do not take one of the five shapes."""
+
+
 DEFAULT_MESH_KEY = "dev-local-shared-secret"
 """The shipped inter-agent secret. Published in a public repository, therefore
 known to everyone - which is fine while it is only ever used on a laptop, and
@@ -428,6 +454,8 @@ class Settings(BaseSettings):
     confluence: ConfluenceSettings = Field(default_factory=ConfluenceSettings)
     peers: PeerSettings = Field(default_factory=PeerSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
+    quality: QualitySettings = Field(default_factory=QualitySettings)
+    runs: RunsSettings = Field(default_factory=RunsSettings)
 
     max_concurrent_runs: int = 2
     """Runs executing at once; the rest queue.

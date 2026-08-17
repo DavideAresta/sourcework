@@ -122,8 +122,8 @@ it does can be done over JSON-RPC instead.
 |---|---|
 | **New run** | Drag files in, add URIs, notes and a CQL query; progress streams live while it works |
 | **Model output** | The reasoning and the prose as the model produces them, in their own panel below the progress log |
-| **Result** | The PRD rendered; a Requirements view putting each requirement beside the evidence that licenses it, flagging the ones with none; the evidence table; the critic's findings; per-backend token and cost totals |
-| **History** | Past runs, kept in SQLite, with downloads and Confluence publishing |
+| **Result** | The PRD rendered; a Requirements view putting each requirement beside the evidence that licenses it, flagging the ones with none; the evidence table; the critic's findings; per-backend token and cost totals. Approve/Reject signs off (append-only record), and the audit bundle downloads the whole run as one digest-verified zip |
+| **History** | Past runs, kept in SQLite, with downloads and Confluence publishing. `SOURCEWORK_RUNS__RETENTION_DAYS` purges finished runs past a limit on start-up |
 | **Settings** | A form over `.env`, with the backends this machine can actually use probed live |
 
 **The backend is a per-run choice.** The model controls on the run form become
@@ -231,7 +231,7 @@ is configured against what is actually reachable.
 | **Confluence Connector** | 8004 | CQL search, page + attachment read, idempotent publish |
 | **Requirements Analyst** | 8005 | Cluster, de-dup, MoSCoW, conflicts, open questions |
 | **PRD Writer** | 8006 | Narrative + Markdown + Confluence storage XHTML |
-| **PRD Critic** | 8007 | Deterministic traceability checks, then adversarial review |
+| **PRD Critic** | 8007 | Deterministic traceability + quality checks (ISO/IEC/IEEE 29148, INCOSE), then adversarial review |
 
 Every agent serves `/.well-known/agent-card.json`, `/healthz` and `/docs`, so
 any A2A client can drive the mesh — the web UI is one such client, not a ninth

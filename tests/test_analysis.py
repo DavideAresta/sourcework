@@ -97,6 +97,84 @@ class TestMaterialise:
         q = _materialise(draft, {"ev-1": _ev("ev-1")}).open_questions[0]
         assert len(q.source_refs) == 1
 
+    def test_estimates_are_carried_through(self):
+        draft = RequirementDraft(
+            requirements=[
+                DraftRequirement(
+                    title="A", statement="s", evidence_ids=["ev-1"],
+                    effort="M", effort_rationale="one integration",
+                )
+            ]
+        )
+        req = _materialise(draft, {"ev-1": _ev("ev-1")}).requirements[0]
+        assert req.effort == "M"
+        assert req.effort_rationale == "one integration"
+
+    def test_a_nonsense_size_is_dropped_not_rendered(self):
+        """"quick" is not a size; rendering it would be a claim the schema never made."""
+        draft = RequirementDraft(
+            requirements=[
+                DraftRequirement(title="A", statement="s", effort="quick", effort_rationale="x")
+            ]
+        )
+        req = _materialise(draft, {}).requirements[0]
+        assert req.effort is None
+        # A rationale with no size is an orphan - the reader cannot act on it.
+        assert req.effort_rationale is None
+
+    def test_long_form_sizes_normalise(self):
+        draft = RequirementDraft(
+            requirements=[
+                DraftRequirement(title="A", statement="s", effort="medium"),
+                DraftRequirement(title="B", statement="s", effort=" xl "),
+            ]
+        )
+        reqs = _materialise(draft, {}).requirements
+        assert reqs[0].effort == "M"
+        assert reqs[1].effort == "XL"
+
+    def test_an_untouched_requirement_keeps_its_estimate_on_refinement(self):
+        """Same rule as citations: what the model did not touch, it did not reject."""
+        prior = RequirementSet(
+            requirements=[
+                Requirement(
+                    id="REQ-001", title="Batch window", statement="Settle within 2 hours.",
+                    effort="M", effort_rationale="one integration",
+                )
+            ]
+        )
+        draft = RequirementDraft(
+            requirements=[
+                DraftRequirement(
+                    title="Batch window", statement="Settle within 2 hours.",
+                    existing_id="REQ-001",
+                )
+            ]
+        )
+        req = _materialise(draft, {}, prior).requirements[0]
+        assert req.effort == "M"
+        assert req.effort_rationale == "one integration"
+
+    def test_a_rewritten_requirement_loses_the_old_estimate(self):
+        """The old size says nothing about the new claim."""
+        prior = RequirementSet(
+            requirements=[
+                Requirement(
+                    id="REQ-001", title="Batch window", statement="Settle within 2 hours.",
+                    effort="M",
+                )
+            ]
+        )
+        draft = RequirementDraft(
+            requirements=[
+                DraftRequirement(
+                    title="Batch window", statement="Settle within 30 minutes.",
+                    existing_id="REQ-001",
+                )
+            ]
+        )
+        assert _materialise(draft, {}, prior).requirements[0].effort is None
+
 
 class TestStructuralFindings:
     def test_clean_prd_has_no_major_findings(self, prd: PRDDocument):
@@ -137,6 +215,40 @@ class TestStructuralFindings:
 
         prd.requirements.conflicts = [Conflict(requirement_ids=["REQ-001"], description="x")]
         assert any(f.severity == Severity.BLOCKER for f in structural_findings(prd))
+
+
+async def test_a_big_prd_does_not_grow_the_review_prompt_without_bound(prd: PRDDocument):
+    """The findings list in the prompt is capped, and the cap is announced.
+
+    The wording rules fire several times per requirement, so an uncapped list
+    would be the one part of this prompt that grows with the document - and a
+    prompt truncated in silence is the failure this project treats as a defect.
+    Every finding stays in the report; only the model's copy is trimmed.
+    """
+    from sourcework.agents.critic.agent import MAX_PROMPT_FINDINGS, CriticDraft, CriticExecutor
+
+    prd.requirements.requirements = [
+        Requirement(id=f"REQ-{i:03d}", title="Reliability", statement="The system must be reliable.")
+        for i in range(1, MAX_PROMPT_FINDINGS + 60)
+    ]
+    executor = CriticExecutor()
+    seen: dict[str, str] = {}
+
+    async def fake_structured(system, user, schema, **kw):  # noqa: ANN001, ANN202
+        seen["user"] = user
+        return CriticDraft(verdict="approved")
+
+    executor.llm.structured = fake_structured
+    said: list[str] = []
+
+    async def say(message: str) -> None:
+        said.append(message)
+
+    response = await executor.review_prd({"prd": prd.model_dump(mode="json")}, say)
+
+    assert seen["user"].count("\n- [") == MAX_PROMPT_FINDINGS
+    assert len(response.report.findings) > MAX_PROMPT_FINDINGS
+    assert any("left out of the review prompt" in m for m in said)
 
 
 def test_coverage_stats(prd: PRDDocument):
@@ -368,6 +480,20 @@ class TestMerge:
             _keyed(drafts), drafts, MergeDecision(duplicates=[MergeGroup(keys=["D-001"])])
         )
         assert len(merged.requirements) == 3
+
+    def test_a_merged_requirement_keeps_the_larger_estimate(self):
+        """The merged need is the union of its parts; the union is never smaller."""
+        drafts = self._keyed_pair()
+        keyed = _keyed(drafts)
+        keyed["D-001"].effort = "XL"
+        keyed["D-002"].effort = "S"
+        keyed["D-002"].effort_rationale = "small slice"
+        merged = _apply_merge(
+            keyed, drafts, MergeDecision(duplicates=[MergeGroup(keys=["D-001", "D-002"])])
+        )
+        assert merged.requirements[0].effort == "XL"
+        # The rationale survives from whichever side had one.
+        assert merged.requirements[0].effort_rationale == "small slice"
 
     def test_an_unknown_key_cannot_delete_a_requirement(self):
         drafts = self._keyed_pair()

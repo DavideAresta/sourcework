@@ -161,10 +161,30 @@ export function runView(runId, { onChanged }) {
         el('a', { href: api.artifactUrl(runId, 'md') }, el('button', {}, 'Markdown')),
         el('a', { href: api.artifactUrl(runId, 'json') }, el('button', {}, 'JSON')),
         el('a', { href: api.artifactUrl(runId, 'xhtml') }, el('button', {}, 'Confluence XHTML')),
+        // The audit bundle: request, result, evidence and events in one zip
+        // whose manifest digests show any after-the-fact edit.
+        el('a', { href: api.auditUrl(runId) }, el('button', {}, 'Audit bundle')),
       );
       if (!run.result.published_url) {
         actions.append(el('button', { onClick: () => publish(run) }, 'Publish to Confluence'));
       }
+      const approval = run.approval?.state;
+      actions.append(
+        el('button', {
+          class: approval === 'approved' ? 'ghost' : 'primary',
+          title: approval
+            ? `${approval} by ${run.approval.by || 'unknown'} at ${run.approval.at} — click to change`
+            : 'Sign off on this PRD',
+          onClick: () => approve(run, 'approved'),
+        }, approval === 'approved' ? `✓ ${approval}` : 'Approve'),
+        el('button', {
+          class: approval === 'rejected' ? 'danger' : 'ghost',
+          title: approval
+            ? `${approval} by ${run.approval.by || 'unknown'} at ${run.approval.at} — click to change`
+            : 'Send this PRD back',
+          onClick: () => approve(run, 'rejected'),
+        }, approval === 'rejected' ? `✗ ${approval}` : 'Reject'),
+      );
     }
     // Pushed to the far end: it was one button away from "Publish to
     // Confluence", and those two should not be neighbours.
@@ -173,7 +193,11 @@ export function runView(runId, { onChanged }) {
       class: 'danger ghost',
       onClick: async () => {
         if (!confirm('Delete this run and its history?')) return;
-        await api.deleteRun(runId);
+        // The erasure record says what stayed behind. Swallowing it would
+        // leave the reader believing the uploaded files went with the run.
+        const record = await api.deleteRun(runId);
+        const left = record?.left_in_place ?? [];
+        toast(left.length ? `Deleted. Left in place: ${left.join('; ')}` : 'Deleted', 'ok');
         onChanged?.(null);
       },
     }, 'Delete'));
@@ -206,6 +230,22 @@ export function runView(runId, { onChanged }) {
         parent_id: run.request.confluence_parent_id,
       });
       toast(`Published: ${result.url}`, 'ok');
+      load();
+    } catch (error) {
+      toast(error.message, 'err');
+    }
+  }
+
+  // Recorded, not authenticated: the name is what the operator types, kept so
+  // the audit bundle says who believed this PRD.
+  async function approve(run, state) {
+    const by = prompt(state === 'approved' ? 'Approved by (name):' : 'Rejected by (name):',
+      run.approval?.by || '');
+    if (by === null) return;  // cancelled
+    const note = prompt('Note (optional):', '') ?? '';
+    try {
+      await api.setApproval(runId, { state, by: by.trim(), note: note.trim() });
+      toast(`Marked ${state}`, 'ok');
       load();
     } catch (error) {
       toast(error.message, 'err');
@@ -276,6 +316,12 @@ export function runView(runId, { onChanged }) {
             el('span', { class: 'id' }, req.id),
             el('span', { class: 'pill' }, (req.priority ?? '').toUpperCase()),
             el('span', { class: 'pill' }, (req.kind ?? '').replaceAll('_', ' ')),
+            // ≈ for the same reason the renderers use it: a size is model
+            // inference, and this is the view where inference is labelled.
+            req.effort
+              ? el('span', { class: 'pill', title: req.effort_rationale || 'estimated effort' },
+                  `≈${req.effort}`)
+              : null,
             el('span', { class: 'title' }, req.title),
           ),
           el('div', { class: 'statement' }, req.statement),
@@ -311,10 +357,26 @@ export function runView(runId, { onChanged }) {
   function reviewTab(review) {
     if (!review) return el('div', { class: 'empty' }, 'No review was run.');
     const findings = review.findings ?? [];
+    const coverage = review.coverage ?? {};
+    // `requirements` is a count, everything else is a share of it. One dict,
+    // two units — reading them all as ratios prints "requirements 2500%".
+    const COUNTS = new Set(['requirements']);
+    const score = (key, value) => (COUNTS.has(key) ? `${value}` : `${Math.round(value * 100)}%`);
     return el('div', {},
       el('div', { class: 'row', style: 'margin-bottom:14px' },
         el('span', { class: 'pill' }, review.verdict ?? 'reviewed'),
         el('span', { class: 'muted' }, `${findings.length} finding(s)`)),
+      // The score line says what the deterministic rules found before the
+      // model said anything - a degrading pipeline shows up as a number here,
+      // not a vibe.
+      Object.keys(coverage).length > 0
+        ? el('div', { class: 'row', style: 'margin-bottom:10px' },
+            ...Object.entries(coverage).map(([k, v]) =>
+              el('span', { class: 'pill' }, `${k.replaceAll('_', ' ')} ${score(k, v)}`)))
+        : null,
+      review.standards
+        ? el('p', { class: 'muted small' }, `Quality rules checked: ${review.standards}`)
+        : null,
       review.summary ? el('p', {}, review.summary) : null,
       findings.length > 0
         ? el('div', { class: 'table-wrap' }, el('table', {},

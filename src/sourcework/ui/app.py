@@ -40,14 +40,14 @@ from pydantic import BaseModel, Field, ValidationError
 # every uploaded file and the run proceeds with no sources.
 from starlette.datastructures import UploadFile
 
-from sourcework import auth, checkpoint, readiness
+from sourcework import audit, auth, checkpoint, readiness
 from sourcework.a2a_common import AgentPool
 from sourcework.backends import probe
 from sourcework.config import LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
 from sourcework.ui import env_file
 from sourcework.ui.runner import RunManager
-from sourcework.ui.store import RunStore, Store, new_run_id
+from sourcework.ui.store import RunStore, Store, new_run_id, now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +83,21 @@ class NewRun(BaseModel):
     publish: bool = False
     confluence_space_key: str | None = None
     confluence_parent_id: str | None = None
+    estimate: bool = False
     llm: LLMOverrides | None = None
 
 
 class QuestionAnswer(BaseModel):
     question: str
     answer: str
+
+
+class ApprovalUpdate(BaseModel):
+    """The sign-off form: a state, who is deciding, and optionally why."""
+
+    state: str  # approved | rejected | draft
+    by: str = ""
+    note: str = ""
 
 
 class RefineRun(BaseModel):
@@ -152,6 +161,31 @@ def build_app(
         orphans = await store.reap_orphans()
         if orphans:
             logger.warning("marked %d interrupted run(s) as failed", orphans)
+        retention = settings().runs.retention_days
+        # purge_older_than is not on the Store protocol: a protocol wider than
+        # its use is a promise every implementation has to keep, and a custom
+        # store may not even have a clock-based notion of "old". An absent
+        # capability is announced rather than silently skipped.
+        purge = getattr(store, "purge_older_than", None)
+        if retention > 0:
+            if purge is None:
+                logger.warning(
+                    "retention is configured (%d day(s)) but this store cannot purge", retention
+                )
+            else:
+                purged = await purge(retention)
+                # A run is its row *and* its checkpoints, which hold the same
+                # source text; deleting one and leaving the other would make
+                # the retention setting a half-truth.
+                for run_id in purged:
+                    checkpoint.discard(run_id)
+                # Deleting history is never silent: a reader who expected a run
+                # to be there deserves a log line saying where it went.
+                if purged:
+                    logger.warning(
+                        "retention: purged %d run(s) older than %d day(s): %s",
+                        len(purged), retention, ", ".join(purged),
+                    )
         yield
         await manager.shutdown()
         store.close()
@@ -333,6 +367,7 @@ def build_app(
             publish=spec.publish,
             confluence_space_key=spec.confluence_space_key,
             confluence_parent_id=spec.confluence_parent_id,
+            estimate=spec.estimate,
             llm=spec.llm,
         )
         run = await manager.start(prd_request, run_id=run_id)
@@ -416,10 +451,92 @@ def build_app(
         return {"id": run.id, "reusing": stages}
 
     @app.delete("/api/runs/{run_id}", tags=["runs"])
-    async def delete_run(run_id: str) -> dict[str, bool]:
+    async def delete_run(run_id: str) -> dict[str, Any]:
+        """Erase a run and say exactly what went.
+
+        The response is the erasure record: what was deleted, and what was
+        deliberately left. Uploaded files stay - they live in the shared
+        workspace and a later run's checkpoints may still fingerprint them -
+        so they are listed, not removed, and the caller hears about it rather
+        than being told "deleted" and believing the bytes are gone.
+        """
         await manager.cancel(run_id)
         checkpoint.discard(run_id)
-        return {"deleted": await store.delete(run_id)}
+        deleted = await store.delete(run_id)
+        uploads = paths.uploads / run_id
+        left = []
+        if uploads.is_dir() and any(uploads.iterdir()):
+            left.append(
+                f"uploads in {uploads} (kept: the shared workspace is content-addressed "
+                "by later runs' checkpoints)"
+            )
+        return {"deleted": deleted, "run_id": run_id, "left_in_place": left}
+
+    @app.post("/api/runs/{run_id}/approval", tags=["runs"])
+    async def set_approval(run_id: str, body: ApprovalUpdate) -> dict[str, Any]:
+        """Sign off on a run, or send it back. Recorded, not authenticated.
+
+        Single-operator software: the name is what the operator typed, kept so
+        the audit bundle says *who* believed this PRD, not to keep anyone out.
+        The history is append-only - a rejected-then-approved run shows both,
+        which is exactly the trail an approval is for.
+        """
+        if body.state not in ("approved", "rejected", "draft"):
+            raise HTTPException(400, "state must be approved, rejected or draft")
+        run = await store.get(run_id)
+        if run is None:
+            raise HTTPException(404, "no such run")
+        if run.result is None:
+            raise HTTPException(409, "only a finished run can be approved")
+
+        entry = {"state": body.state, "by": body.by, "at": now_iso()}
+        if body.note:
+            entry["note"] = body.note
+        history = list((run.approval or {}).get("history") or [])
+        history.append(entry)
+        run.approval = {"state": body.state, "by": body.by, "at": entry["at"], "history": history}
+        # The rendered artifacts follow the decision. The renderers are pure
+        # functions of (prd, review), so re-rendering changes exactly one
+        # thing: the status line (and the Confluence lozenge it drives). The
+        # review has to be handed back in - the pipeline attached it to the
+        # shipped artifacts, and re-rendering without it would silently drop
+        # the review section from a document at the moment somebody signs it.
+        if isinstance(run.result.get("prd"), dict):
+            from sourcework.confluence.storage import render_prd
+            from sourcework.models import PRDDocument, ReviewReport
+            from sourcework.render import to_markdown
+
+            prd = PRDDocument.model_validate(run.result["prd"])
+            prd.status = body.state
+            stored_review = run.result.get("review")
+            review = (
+                ReviewReport.model_validate(stored_review)
+                if isinstance(stored_review, dict)
+                else None
+            )
+            run.result["prd"] = prd.model_dump(mode="json")
+            run.result["markdown"] = to_markdown(prd, review)
+            run.result["confluence_storage"] = render_prd(prd, review)
+        await store.save(run)
+        return run.approval
+
+    @app.get("/api/runs/{run_id}/audit", tags=["runs"])
+    async def audit_bundle(run_id: str) -> Response:
+        """The run as one downloadable zip: request, result, evidence, sources,
+        events, and a manifest whose digests make after-the-fact edits visible."""
+        run = await store.get(run_id)
+        if run is None:
+            raise HTTPException(404, "no such run")
+
+        body = audit.build_bundle(run)
+        return Response(
+            body,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="{_slug(run.title)}-{run_id}-audit.zip"'
+            },
+        )
 
     @app.post("/api/runs/{run_id}/cancel", tags=["runs"])
     async def cancel_run(run_id: str) -> dict[str, bool]:
@@ -535,6 +652,10 @@ def build_app(
             template=spec.template or parent.request.get("template") or "standard",
             review_rounds=spec.review_rounds,
             extra_instructions=spec.extra_instructions,
+            # The parent's choices carry forward: a refinement of an estimated
+            # run stays estimated, or the new requirements would be the only
+            # ones without a size.
+            estimate=bool(parent.request.get("estimate", False)),
             llm=spec.llm or parent.request.get("llm"),
             baseline=PRDBaseline(
                 run_id=parent.id,

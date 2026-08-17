@@ -21,6 +21,7 @@ async with AgentPool() as pool:
         template="standard",     # standard | lean | technical | discovery
         review_rounds=1,
         publish=True,
+        estimate=False,          # True: T-shirt effort estimate per requirement
     ))
 
 result = PRDResult.model_validate(data)

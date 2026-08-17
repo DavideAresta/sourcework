@@ -75,6 +75,7 @@ export function newRunView(onStarted) {
   const instructions = el('textarea', { placeholder: 'Treat GDPR retention as a hard constraint.' });
 
   const publish = el('input', { type: 'checkbox' });
+  const estimate = el('input', { type: 'checkbox' });
   const space = el('input', { type: 'text', placeholder: 'PRD' });
   const parent = el('input', { type: 'text', placeholder: 'parent page id' });
 
@@ -168,6 +169,7 @@ export function newRunView(onStarted) {
       review_rounds: Number(rounds.value) || 0,
       extra_instructions: instructions.value.trim() || null,
       publish: publish.checked,
+      estimate: estimate.checked,
       confluence_space_key: space.value.trim() || null,
       confluence_parent_id: parent.value.trim() || null,
       llm: Object.keys(llm).length ? llm : null,
@@ -229,6 +231,12 @@ export function newRunView(onStarted) {
         el('div', {}, el('label', {}, 'Review rounds'), rounds),
       ),
       el('div', { style: 'margin-top:12px' }, el('label', {}, 'Extra instructions'), instructions),
+      el('div', { class: 'row', style: 'margin-top:14px' },
+        el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0' }, estimate,
+          'Estimate effort',
+          el('span', { class: 'muted small' },
+            '— T-shirt size per requirement, marked as model inference')),
+      ),
       el('details', { class: 'adv', style: 'margin-top:14px' },
         el('summary', {}, 'Publish to Confluence'),
         el('div', { class: 'row' },

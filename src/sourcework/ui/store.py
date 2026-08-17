@@ -34,10 +34,15 @@ CREATE TABLE IF NOT EXISTS runs (
     result      TEXT,
     error       TEXT,
     events      TEXT NOT NULL DEFAULT '[]',
-    usage       TEXT
+    usage       TEXT,
+    approval    TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_created_at ON runs (created_at DESC);
 """
+
+SCHEMA_VERSION = 2
+"""Bumped when the shape changes; existing databases are migrated in __init__.
+1 -> 2 added the approval column."""
 
 
 def now_iso() -> str:
@@ -63,6 +68,11 @@ class Run:
     error: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, Any] | None = None
+    approval: dict[str, Any] | None = None
+    """The sign-off record: {state, by, at, history: [...]}. Absent means never
+    reviewed by a human; "draft" means explicitly sent back. History is
+    append-only - a rejected-then-approved run shows both, which is the point of
+    an approval trail."""
 
     @property
     def done(self) -> bool:
@@ -88,6 +98,7 @@ class Run:
             "sources": stats.get("sources"),
             "verdict": review.get("verdict") if isinstance(review, dict) else None,
             "usage": self.usage,
+            "approval": (self.approval or {}).get("state"),
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -96,6 +107,7 @@ class Run:
             "request": self.request,
             "result": self.result,
             "events": self.events,
+            "approval": self.approval,
         }
 
 
@@ -143,8 +155,22 @@ class RunStore:
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(SCHEMA)
+        self._migrate()
         self._db.commit()
         self._lock = threading.Lock()
+
+    def _migrate(self) -> None:
+        """Bring an older database forward. Additive only: a migration that
+        drops or rewrites a column destroys the history the store exists to
+        keep."""
+        version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version < 2:
+            # 1 -> 2: the approval column. On a fresh database the CREATE TABLE
+            # above already has it, hence the guard rather than a plain ALTER.
+            columns = {row[1] for row in self._db.execute("PRAGMA table_info(runs)")}
+            if "approval" not in columns:
+                self._db.execute("ALTER TABLE runs ADD COLUMN approval TEXT")
+            self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def close(self) -> None:
         with self._lock:
@@ -156,12 +182,13 @@ class RunStore:
         with self._lock:
             self._db.execute(
                 """INSERT INTO runs (id, created_at, finished_at, title, status, request,
-                                     result, error, events, usage)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                                     result, error, events, usage, approval)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(id) DO UPDATE SET
                      finished_at=excluded.finished_at, status=excluded.status,
                      result=excluded.result, error=excluded.error,
-                     events=excluded.events, usage=excluded.usage""",
+                     events=excluded.events, usage=excluded.usage,
+                     approval=excluded.approval""",
                 (
                     run.id,
                     run.created_at,
@@ -173,6 +200,7 @@ class RunStore:
                     run.error,
                     json.dumps(run.events),
                     json.dumps(run.usage) if run.usage is not None else None,
+                    json.dumps(run.approval) if run.approval is not None else None,
                 ),
             )
             self._db.commit()
@@ -223,8 +251,42 @@ class RunStore:
             await self.save(run)
         return len(stale)
 
+    def _purge_sync(self, days: int) -> list[str]:
+        cutoff = datetime.now(UTC).timestamp() - days * 86400
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, created_at, status FROM runs"
+            ).fetchall()
+            doomed = [
+                r["id"]
+                for r in rows
+                if r["status"] in ("ok", "failed", "cancelled")
+                and datetime.fromisoformat(r["created_at"]).timestamp() < cutoff
+            ]
+            for run_id in doomed:
+                self._db.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            self._db.commit()
+        return doomed
+
+    async def purge_older_than(self, days: int) -> list[str]:
+        """Delete finished runs older than ``days``. Returns the ids that went.
+
+        Only finished runs (ok/failed/cancelled) are eligible: purging a run
+        that is still going would orphan its checkpoints *and* lie about work
+        in progress. Called from the UI's start-up, not on a timer - this app
+        is not running most of the time, and boot is the moment the count is
+        worth logging.
+
+        The ids rather than a count, because a run is more than its row: the
+        caller owns the checkpoints on disk, and "how many went" is not enough
+        to erase them.
+        """
+        return await asyncio.to_thread(self._purge_sync, days)
+
 
 def _row_to_run(row: sqlite3.Row) -> Run:
+    # `in` on a Row checks values, not columns; the keys list is the schema.
+    approval = row["approval"] if "approval" in list(row.keys()) else None
     return Run(
         id=row["id"],
         title=row["title"],
@@ -236,4 +298,5 @@ def _row_to_run(row: sqlite3.Row) -> Run:
         error=row["error"],
         events=json.loads(row["events"] or "[]"),
         usage=json.loads(row["usage"]) if row["usage"] else None,
+        approval=json.loads(approval) if approval else None,
     )

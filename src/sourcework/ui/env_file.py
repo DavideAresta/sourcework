@@ -186,6 +186,16 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_SECURITY__API_KEY", "Shared secret", "Mesh", "password"),
     Field("SOURCEWORK_LOG_LEVEL", "Log level", "Mesh", "select",
           ("DEBUG", "INFO", "WARNING", "ERROR")),
+
+    # -- quality & history ---------------------------------------------------
+    Field("SOURCEWORK_QUALITY__EARS", "EARS syntax", "Quality", "bool",
+          help="Analyst writes requirements in EARS shapes (When/While/If-then/"
+               "Where/ubiquitous) and the critic flags statements that take none "
+               "of them. Off: phrasing is free."),
+    Field("SOURCEWORK_RUNS__RETENTION_DAYS", "Run retention (days)", "History", "number",
+          help="Finished runs older than this are deleted when the UI starts. "
+               "0 keeps everything. The store holds full source text, so a "
+               "retention policy belongs here."),
 )
 
 BY_KEY = {f.key: f for f in FIELDS}

@@ -289,6 +289,99 @@ async def test_the_summary_leaves_out_the_payloads(tmp_path: Path):
         store.close()
 
 
+async def test_approval_survives_a_reopen(tmp_path: Path):
+    store = RunStore(tmp_path / "runs.db")
+    await store.save(Run(
+        id="a1", title="T", status="ok", created_at=now_iso(), request={},
+        approval={"state": "approved", "by": "D", "at": now_iso(), "history": []},
+    ))
+    store.close()
+
+    reopened = RunStore(tmp_path / "runs.db")
+    try:
+        assert (await reopened.get("a1")).approval["by"] == "D"
+    finally:
+        reopened.close()
+
+
+async def test_an_old_database_gains_the_approval_column(tmp_path: Path):
+    """Databases written before approvals existed migrate in place."""
+    import sqlite3
+
+    db = tmp_path / "runs.db"
+    legacy = sqlite3.connect(db)
+    legacy.execute(
+        "CREATE TABLE runs (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, "
+        "finished_at TEXT, title TEXT NOT NULL, status TEXT NOT NULL, request TEXT NOT NULL, "
+        "result TEXT, error TEXT, events TEXT NOT NULL DEFAULT '[]', usage TEXT)"
+    )
+    legacy.execute("INSERT INTO runs (id, created_at, title, status, request) "
+                   "VALUES ('old', '2026-01-01T00:00:00+00:00', 'Legacy', 'ok', '{}')")
+    legacy.commit()
+    legacy.close()
+
+    store = RunStore(db)
+    try:
+        run = await store.get("old")
+        assert run is not None and run.approval is None
+        # And the migrated store accepts a new approval write.
+        run.approval = {"state": "approved", "by": "D", "at": now_iso(), "history": []}
+        await store.save(run)
+        assert (await store.get("old")).approval["state"] == "approved"
+    finally:
+        store.close()
+
+
+async def test_purge_removes_only_finished_runs_past_the_cutoff(tmp_path: Path):
+    store = RunStore(tmp_path / "runs.db")
+    try:
+        old = "2020-01-01T00:00:00+00:00"
+        await store.save(Run(id="old-ok", title="T", status="ok", created_at=old, request={}))
+        await store.save(Run(id="old-run", title="T", status="running", created_at=old, request={}))
+        await store.save(Run(id="new-ok", title="T", status="ok", created_at=now_iso(), request={}))
+
+        # The ids, not a count: the caller has checkpoints to erase too.
+        assert await store.purge_older_than(30) == ["old-ok"]
+        # A running run is never purged, however old: that would lie about
+        # work in progress.
+        assert await store.get("old-run") is not None
+        assert await store.get("new-ok") is not None
+        assert await store.get("old-ok") is None
+    finally:
+        store.close()
+
+
+def test_start_up_retention_erases_the_checkpoints_too(tmp_path: Path, monkeypatch):
+    """A run is its row *and* its checkpoints - both hold the full source text.
+
+    Deleting the row and leaving the checkpoint would make the retention
+    setting a half-truth: the history stops showing the run while the text it
+    was built from stays on disk.
+    """
+    from sourcework import checkpoint, config
+
+    monkeypatch.setattr(
+        "sourcework.ui.app.settings",
+        lambda: config.Settings(runs=config.RunsSettings(retention_days=30)),
+    )
+    monkeypatch.setattr(checkpoint.paths, "workspace", lambda *a, **k: tmp_path)
+    monkeypatch.setattr("sourcework.ui.app.RunManager", FakeManager)
+
+    store = RunStore(tmp_path / "sourcework-ui.db")
+    asyncio.run(store.save(Run(
+        id="ancient", title="T", status="ok", request={},
+        created_at="2020-01-01T00:00:00+00:00", finished_at="2020-01-01T00:00:00+00:00",
+    )))
+    store.close()
+    checkpoint.directory().mkdir(parents=True, exist_ok=True)
+    stale = checkpoint.directory() / "ancient.analyst.json"
+    stale.write_text("{}")
+
+    with TestClient(build_app(tmp_path), headers={"X-SourceWork-UI": "1"}) as purged_client:
+        assert purged_client.get("/api/runs/ancient").status_code == 404
+    assert not stale.exists()
+
+
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
@@ -400,6 +493,113 @@ def test_artifacts_download_with_sensible_filenames(client: TestClient):
     assert client.get(f"/api/runs/{run_id}/artifact/json").json() == {"title": "Invoice matching"}
     assert client.get(f"/api/runs/{run_id}/artifact/xhtml").text == "<p/>"
     assert client.get(f"/api/runs/{run_id}/artifact/nonsense").status_code == 404
+
+
+def test_the_audit_bundle_downloads_as_a_zip(client: TestClient):
+    response = client.post(
+        "/api/runs", data={"request": json.dumps({"title": "Audited", "notes": ["n"]})}
+    )
+    run_id = response.json()["id"]
+
+    audit = client.get(f"/api/runs/{run_id}/audit")
+    assert audit.status_code == 200
+    assert audit.headers["content-type"] == "application/zip"
+    assert "audited" in audit.headers["content-disposition"]
+    assert audit.content[:2] == b"PK"  # every zip starts with the PK magic
+    assert client.get("/api/runs/nonexistent/audit").status_code == 404
+
+
+def test_approval_is_recorded_with_its_history(client: TestClient):
+    response = client.post(
+        "/api/runs", data={"request": json.dumps({"title": "Signed off", "notes": ["n"]})}
+    )
+    run_id = response.json()["id"]
+
+    rejected = client.post(
+        f"/api/runs/{run_id}/approval", json={"state": "rejected", "by": "D", "note": "too thin"}
+    )
+    assert rejected.status_code == 200
+    approved = client.post(f"/api/runs/{run_id}/approval", json={"state": "approved", "by": "D"})
+
+    approval = approved.json()
+    assert approval["state"] == "approved"
+    # Append-only: a rejected-then-approved run shows both, which is the point
+    # of an approval trail.
+    assert [h["state"] for h in approval["history"]] == ["rejected", "approved"]
+
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert run["approval"]["state"] == "approved"
+    # The decision reaches the rendered document: the status the Confluence
+    # lozenge renders follows the approval.
+    assert run["result"]["prd"]["status"] == "approved"
+
+
+def test_signing_off_does_not_strip_the_review_from_the_document(
+    client: TestClient, tmp_path: Path
+):
+    """Approving re-renders the artifacts; the review has to survive that.
+
+    The pipeline re-renders after the last review round precisely so the
+    shipped Markdown carries its own verdict. Re-rendering here without the
+    stored review would delete that section at the moment somebody signs the
+    document - the quietest possible way to lose it.
+    """
+    run_id = _finished_run(client)
+    store = RunStore(tmp_path / "sourcework-ui.db")
+    try:
+        run = asyncio.run(store.get(run_id))
+        run.result = {
+            "prd": {"title": "Returns portal"},
+            "markdown": "# Returns portal\n\n## Automated review\n",
+            "confluence_storage": "<p/>",
+            "review": {
+                "summary": "Two findings.",
+                "verdict": "needs_revision",
+                "standards": "ISO/IEC/IEEE 29148 characteristics; EARS patterns off",
+                "findings": [{"severity": "minor", "category": "quality",
+                              "location": "REQ-001", "detail": "Escape clause: TBD."}],
+            },
+            "stats": {},
+        }
+        asyncio.run(store.save(run))
+    finally:
+        store.close()
+
+    client.post(f"/api/runs/{run_id}/approval", json={"state": "approved", "by": "D"})
+
+    result = client.get(f"/api/runs/{run_id}").json()["result"]
+    assert result["prd"]["status"] == "approved"
+    assert "## Automated review" in result["markdown"]
+    assert "needs_revision" in result["markdown"]
+    # Including the basis the quality rules were checked against - a verdict
+    # without its yardstick is just an adjective.
+    assert "29148" in result["markdown"]
+    assert "Escape clause" in result["confluence_storage"]
+
+
+def test_an_invalid_approval_state_is_rejected(client: TestClient):
+    response = client.post(
+        "/api/runs", data={"request": json.dumps({"title": "t", "notes": ["n"]})}
+    )
+    run_id = response.json()["id"]
+    assert client.post(f"/api/runs/{run_id}/approval", json={"state": "lgtm"}).status_code == 400
+    assert client.post("/api/runs/nonexistent/approval", json={"state": "approved"}).status_code == 404
+
+
+def test_deleting_a_run_returns_an_erasure_record(client: TestClient):
+    response = client.post(
+        "/api/runs",
+        data={"request": json.dumps({"title": "Erase me", "notes": ["n"]})},
+        files=[("files", ("spec.md", b"# Spec", "text/markdown"))],
+    )
+    run_id = response.json()["id"]
+
+    record = client.delete(f"/api/runs/{run_id}").json()
+    assert record["deleted"] is True
+    # Uploads are shared-workspace files: listed as left in place, not silently
+    # swept away under a "deleted" claim.
+    assert any("uploads" in entry for entry in record["left_in_place"])
+    assert client.get(f"/api/runs/{run_id}").status_code == 404
 
 
 def test_events_are_served_as_sse(client: TestClient):
