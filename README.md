@@ -9,6 +9,9 @@ it — and no model can invent a citation.**
 [![A2A v1.0](https://img.shields.io/badge/A2A-v1.0-4b32c3.svg)](https://a2a-protocol.org)
 [![No API key required](https://img.shields.io/badge/API%20key-optional-success.svg)](#an-api-key-is-optional)
 
+**[davidearesta.github.io/sourcework](https://davidearesta.github.io/sourcework/)**
+— the same argument in one page, with the output on it.
+
 Eight agents, each an independently deployable [A2A](https://a2a-protocol.org)
 service. Runs entirely on your own hardware if you want it to — your documents
 never have to leave the machine.
