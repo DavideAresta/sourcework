@@ -14,12 +14,20 @@ and the version on every agent card are the same string by construction.
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- The `docs/` directory is no longer part of the repository. What a user of the
-  web UI needs is now in the README itself — the five views, the per-run backend
-  override, and how Resume and Refine differ — so the front page answers the
+- The README now carries the web UI itself — the five views, the per-run backend
+  override, and how Resume and Refine differ — so the front page answers that
   question rather than forwarding it.
+
+### Removed
+
+- Documentation for things that were never built. `docs/multi-tenant.md` was a
+  design for a hosted service explicitly considered and not taken, and
+  `docs/desktop.md` carried a packaging plan (PyInstaller, signing, an order of
+  work) alongside the launcher that actually ships. What is left describes the
+  code as it is. `sourcework app --help` also stopped advertising a tray icon
+  that was removed before the first release.
 
 ## [0.1.0] — 2026-08-17
 

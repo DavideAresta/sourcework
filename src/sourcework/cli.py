@@ -396,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.set_defaults(func=cmd_backends)
 
-    p = sub.add_parser("app", help="run as a desktop app (tray icon + browser)")
+    p = sub.add_parser("app", help="run as a desktop app (mesh + UI + browser)")
     p.add_argument("--port", type=int)
     p.add_argument("--no-browser", action="store_true", help="do not open a browser")
     p.set_defaults(func=cmd_app)

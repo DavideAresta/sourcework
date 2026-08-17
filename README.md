@@ -157,6 +157,7 @@ sourced gets quietly demoted to `derived`.
 
 The UI binds `127.0.0.1` and has no authentication — see
 [Security](#security) before you change that.
+[docs/using-it.md](docs/using-it.md) is the longer version of this section.
 
 ## An API key is optional
 
@@ -179,8 +180,9 @@ sourcework backends          # what is usable on this machine
 Models are chosen per role — a cheap one for extraction, a strong one for the
 analyst, a *different family* for the critic so the review is adversarial rather
 than agreeable. Backends fail over when one hits a usage limit. Every knob —
-per-role models, failover order, narration — is documented inline in
-[`.env.example`](.env.example) and editable from the settings page.
+per-role models, failover order, narration — is in
+[docs/backends.md](docs/backends.md) and commented inline in
+[`.env.example`](.env.example).
 
 ## Or entirely on your own hardware
 
@@ -198,9 +200,10 @@ Schemas are grammar-constrained rather than described, so malformed JSON is
 impossible rather than unlikely. `scripts/llama-models.py` finds the GGUFs you
 already have, says which ones fit your card, and generates a
 [llama-swap](https://github.com/mostlygeek/llama-swap) config so roles can use
-different models behind one endpoint. Start with `scripts/llama-models.py
---help` and `sourcework doctor`, which reports what is configured against what
-is actually reachable.
+different models behind one endpoint. The four things that decide whether a
+local run works at all are written down in
+[docs/local-models.md](docs/local-models.md); `sourcework doctor` reports what
+is configured against what is actually reachable.
 
 ## The mesh
 
@@ -218,7 +221,8 @@ is actually reachable.
 Every agent serves `/.well-known/agent-card.json`, `/healthz` and `/docs`, so
 any A2A client can drive the mesh — the web UI is one such client, not a ninth
 agent. The card names the skills an agent will answer to, which is what the
-orchestrator dispatches on, and `/docs` is the live OpenAPI for the rest.
+orchestrator dispatches on. See [docs/a2a.md](docs/a2a.md) for the Python and
+raw JSON-RPC calls.
 
 Or in containers:
 
@@ -229,12 +233,21 @@ curl localhost:8000/.well-known/agent-card.json
 
 ## Documentation
 
+Everything here describes what the code does today. Design notes for things that
+were considered and not built are not in the repository, because a document
+written in the present tense about a system nobody can run reads as a promise.
+
 | | |
 |---|---|
+| [docs/using-it.md](docs/using-it.md) | The web UI, watching the model work, resuming an interrupted run, refining a PRD into its next version |
+| [docs/backends.md](docs/backends.md) | Every backend, per-role models, failover, narration, the full configuration reference |
+| [docs/local-models.md](docs/local-models.md) | Local inference end to end: context windows, constrained JSON, llama-swap, large inputs |
+| [docs/a2a.md](docs/a2a.md) | Driving the mesh as an A2A client |
+| [docs/extending.md](docs/extending.md) | Adding a publish destination, authentication or a run store from outside the repo |
+| [docs/desktop.md](docs/desktop.md) | Running it as a desktop app, and why not Electron |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Why it is shaped this way — the design rationale and the message flow |
-| [`.env.example`](.env.example) | Every setting, commented where the reason is not obvious |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Getting set up, where things live, what a good change looks like |
 | [SECURITY.md](SECURITY.md) | What this software assumes about the machine it runs on |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Getting set up, where things live, what a good change looks like |
 | [CHANGELOG.md](CHANGELOG.md) | What changed, and the pre-1.0 rule |
 | [THIRD_PARTY.md](THIRD_PARTY.md) | Vendored code, the tools it drives, and model-weight licences |
 
