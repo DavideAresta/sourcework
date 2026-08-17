@@ -38,6 +38,8 @@ const ROLE_LABEL = {
 
 // Backend-specific gotchas worth surfacing where the model is chosen.
 const HINTS = {
+  'llama-cpp': 'Runs directly against a local llama-server or llama-swap; it does not need a '
+    + 'LiteLLM proxy. Start llama-server, then choose one of the model ids it reports here.',
   'opencode-cli': 'opencode needs an explicit model: with none it fails outright with '
     + '"Unexpected server error".',
   'agy-cli': 'agy ids usually carry their own tier (-high/-medium/-low), and then the '
@@ -285,7 +287,9 @@ async function loadBackends() {
           el('span', { class: 'small muted' }, backend.vision ? 'vision' : 'text-only'),
           el('span', { style: 'flex:1' }),
           el('span', { class: 'small muted' },
-            backend.configured_model ? `model: ${backend.configured_model}` : 'backend default'),
+            backend.detail
+              ? backend.detail
+              : backend.configured_model ? `model: ${backend.configured_model}` : 'backend default'),
         ),
       );
     }

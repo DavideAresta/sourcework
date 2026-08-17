@@ -57,6 +57,50 @@ def build(backend_id: str, cfg: LLMSettings) -> LLMBackend:
         return LiteLLMBackend(
             api_base=cfg.api_base, api_key=cfg.api_key, num_retries=cfg.litellm_retries
         )
+    if wanted == "llama-cpp":
+        from shutil import which
+
+        from sourcework.backends.litellm_backend import LiteLLMBackend
+
+        class LlamaCppBackend(LiteLLMBackend):
+            """The local ``llama-server`` route, without requiring a LiteLLM proxy."""
+
+            def available(self) -> bool:
+                # Unlike a hosted API, this choice promises a local llama.cpp
+                # installation. Do not probe the server here: availability is
+                # deliberately a cheap, network-free check used on every page load.
+                return which("llama-server") is not None and super().available()
+
+            def unavailable_detail(self) -> str:
+                return "" if which("llama-server") else "llama-server is not installed or is not on PATH"
+
+            def list_models(self) -> list[str]:
+                # A running server is authoritative: llama-swap may serve
+                # models that are downloaded on demand and are not on disk yet.
+                served = super().list_models()
+                if served:
+                    return served
+
+                # When the server is down, still make the Settings picker useful
+                # by discovering the GGUFs the configured scanner will serve.
+                from sourcework.localmodels import discover, model_dirs
+
+                roots = model_dirs()
+                if not roots:
+                    return []
+                models, warnings = discover(roots)
+                for warning in warnings:
+                    logger.warning("llama.cpp model discovery: %s", warning)
+                # LiteLLM needs the openai/ provider prefix when routing this
+                # OpenAI-compatible request to the local endpoint.
+                return sorted(f"openai/{model.id}" for model in models)
+
+        return LlamaCppBackend(
+            api_base=cfg.llama_cpp_api_base or "http://127.0.0.1:8081/v1",
+            api_key=cfg.llama_cpp_api_key,
+            num_retries=cfg.litellm_retries,
+            backend_id="llama-cpp",
+        )
     if wanted == "claude-code":
         from sourcework.backends.claude_code import ClaudeCodeBackend
 
@@ -127,13 +171,14 @@ def probe(cfg: LLMSettings) -> list[dict[str, object]]:
             rows.append({"id": backend_id, "available": False, "detail": str(exc), "models": []})
             continue
         available = backend.available()
-        rows.append(
-            {
-                "id": backend_id,
-                "available": available,
-                "vision": backend.supports_vision,
-                "models": backend.list_models() if available else [],
-                "configured_model": cfg.model_for("default", backend_id),
-            }
-        )
+        row: dict[str, object] = {
+            "id": backend_id,
+            "available": available,
+            "vision": backend.supports_vision,
+            "models": backend.list_models() if available else [],
+            "configured_model": cfg.model_for("default", backend_id),
+        }
+        if not available and hasattr(backend, "unavailable_detail"):
+            row["detail"] = backend.unavailable_detail()
+        rows.append(row)
     return rows

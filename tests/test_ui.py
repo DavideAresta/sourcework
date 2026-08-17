@@ -1002,7 +1002,7 @@ def test_the_model_fields_carry_both_axes():
     assert all(f.backend and f.role for f in models)
 
     covered = {(f.backend, f.role) for f in models}
-    for backend in ("litellm", "claude-code", "opencode-cli", "copilot-cli",
+    for backend in ("litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli",
                     "codex-cli", "agy-cli"):
         for role in ("default", "reasoning", "vision"):
             assert (backend, role) in covered, f"no control for {backend}/{role}"
@@ -1024,6 +1024,12 @@ def test_the_batching_knobs_are_reachable_from_the_ui():
     assert "SOURCEWORK_LLM__ANALYSIS_BATCH_CHARS" in keys
 
 
+def test_local_model_directories_are_reachable_from_the_ui():
+    """The scanner cannot discover a model folder the settings page cannot save."""
+    keys = {f.key for f in env_file.FIELDS}
+    assert "SOURCEWORK_MODEL_DIRS" in keys
+
+
 def test_every_profile_covers_every_model_cell():
     """A profile that leaves a backend blank is a broken failover.
 
@@ -1031,7 +1037,13 @@ def test_every_profile_covers_every_model_cell():
     the failover target is exactly the one nobody remembers to configure - and
     on opencode an unset model is not a default, it is an outright failure.
     """
-    cells = {f.key for f in env_file.FIELDS if f.group == "Models"}
+    # llama.cpp serves whatever GGUFs the operator installed. A hosted preset
+    # cannot know their ids, so profiles must deliberately leave those cells
+    # alone rather than write a value guaranteed to fail.
+    cells = {
+        f.key for f in env_file.FIELDS
+        if f.group == "Models" and f.backend != "llama-cpp"
+    }
     for name, profile in env_file.PROFILES.items():
         assert set(profile["models"]) == cells, f"{name} does not cover every cell"
         assert all(profile["models"].values()), f"{name} has an empty value"

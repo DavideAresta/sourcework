@@ -1,15 +1,16 @@
 # Running SourceWork on your own hardware
 
-Every model can be local. The `litellm` backend speaks to any OpenAI-compatible
-server, so [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`
-is a configuration change, not a code change:
+Every model can be local. In Settings, choose **llama-cpp** and set its local
+server URL and per-role models. It connects directly to
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`; LiteLLM is
+used as an in-process client library, so no LiteLLM proxy is required:
 
 ```bash
-SOURCEWORK_LLM__BACKEND=litellm
-SOURCEWORK_LLM__API_BASE=http://127.0.0.1:8081/v1
-SOURCEWORK_LLM__API_KEY=local
-SOURCEWORK_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
-SOURCEWORK_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
+SOURCEWORK_LLM__BACKEND=llama-cpp
+SOURCEWORK_LLM__LLAMA_CPP_API_BASE=http://127.0.0.1:8081/v1
+SOURCEWORK_LLM__LLAMA_CPP_API_KEY=local
+SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT=openai/<model-id>
+SOURCEWORK_LLM__LLAMA_CPP_MODELS__REASONING=openai/<model-id>
 SOURCEWORK_LLM__TIMEOUT_S=1200                    # minutes per call, not seconds
 ```
 
@@ -104,4 +105,3 @@ characters, well under any prompt limit, while the requirement set covering them
 runs past the model's output ceiling. A short prompt is no guarantee of a short
 reply. Raise both for a model with a large context and fast output; lower them
 if analyst calls still run long.
-

@@ -20,11 +20,14 @@ from sourcework import paths
 ROLES = ("default", "reasoning", "vision", "fast", "critic")
 
 BACKEND_IDS = (
-    "litellm", "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli",
+    "litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli",
 )
-"""Every way of reaching a model. ``litellm`` is an HTTPS call against a hosted
-API and needs credentials; the other five drive a coding CLI that carries its
-own authentication."""
+"""Every way of reaching a model.
+
+``litellm`` reaches hosted APIs; ``llama-cpp`` reaches a local ``llama-server``
+directly through its OpenAI-compatible API. The remaining backends drive coding
+CLIs that carry their own authentication.
+"""
 
 
 def normalise_backend(backend: str) -> str:
@@ -39,6 +42,7 @@ def normalise_backend(backend: str) -> str:
 
 _MODEL_FIELDS = {
     "litellm": "litellm_models",
+    "llama-cpp": "llama_cpp_models",
     "claude-code": "claude_code_models",
     "opencode-cli": "opencode_models",
     "copilot-cli": "copilot_models",
@@ -102,6 +106,7 @@ class LLMSettings(BaseModel):
     # DEFAULT` into a dict-of-models, it tries to JSON-decode the leaf and fails.
     # Explicit fields also make the whole surface visible in .env.example.
     litellm_models: BackendModels = Field(default_factory=BackendModels)
+    llama_cpp_models: BackendModels = Field(default_factory=BackendModels)
     claude_code_models: BackendModels = Field(default_factory=BackendModels)
     opencode_models: BackendModels = Field(default_factory=BackendModels)
     copilot_models: BackendModels = Field(default_factory=BackendModels)
@@ -131,6 +136,11 @@ class LLMSettings(BaseModel):
     temperature: float = 0.2
     api_base: str | None = None
     api_key: str | None = None
+    llama_cpp_api_base: str = "http://127.0.0.1:8081/v1"
+    """OpenAI-compatible endpoint exposed by ``llama-server`` or llama-swap."""
+
+    llama_cpp_api_key: str | None = "local"
+    """Optional bearer token for a local server. ``llama-server`` accepts any value by default."""
     timeout_s: float = 180.0
     """Timeout for an API call. CLI backends use :attr:`cli_timeout_s`."""
 
@@ -268,7 +278,7 @@ class LLMSettings(BaseModel):
         return None
 
     def timeout_for(self, backend: str) -> float:
-        return self.timeout_s if normalise_backend(backend) == "litellm" else self.cli_timeout_s
+        return self.timeout_s if normalise_backend(backend) in {"litellm", "llama-cpp"} else self.cli_timeout_s
 
 
 class ConfluenceSettings(BaseModel):

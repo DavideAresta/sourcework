@@ -76,7 +76,9 @@ class LiteLLMBackend(LLMBackend):
         api_base: str | None = None,
         api_key: str | None = None,
         num_retries: int = 2,
+        backend_id: str = "litellm",
     ) -> None:
+        self.id = backend_id
         self.api_base = api_base
         self.api_key = api_key
         self.num_retries = num_retries
@@ -138,10 +140,8 @@ class LiteLLMBackend(LLMBackend):
 
         if not request.model:
             raise BackendError(
-                "the litellm backend needs an explicit model id - there is no provider "
-                "default to fall back to. Set SOURCEWORK_LLM__DEFAULT_MODEL (or the per-role "
-                "equivalent), or SOURCEWORK_LLM__BACKEND_MODELS__LITELLM__<ROLE> when litellm is "
-                "a failover target.",
+                f"the {self.id} backend needs an explicit model id - there is no provider "
+                "default to fall back to. Set the default model (or its per-role equivalent).",
                 backend=self.id,
             )
 
