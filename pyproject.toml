@@ -49,9 +49,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.com/LudusFaber/sourcework"
-Source = "https://gitlab.com/LudusFaber/sourcework"
-Issues = "https://gitlab.com/LudusFaber/sourcework/-/issues"
+Homepage = "https://github.com/DavideAresta/sourcework"
+Source = "https://github.com/DavideAresta/sourcework"
+Issues = "https://github.com/DavideAresta/sourcework/issues"
 
 [project.scripts]
 sourcework = "sourcework.cli:main"

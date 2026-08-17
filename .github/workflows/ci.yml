@@ -9,6 +9,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# On a public repository every fork's pull request runs this file. Nothing here
+# writes anything back, so the token it gets should not be able to either -
+# stated rather than inherited, because the default is a repository setting and
+# a repository setting can change without a commit.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

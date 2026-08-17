@@ -75,7 +75,7 @@ locator; requirements cite evidence ids; citations are validated in code. A
 change that lets a requirement assert something no source said breaks the one
 guarantee this project makes.
 
-## Before you open a merge request
+## Before you open a pull request
 
 - `make lint && make test` are green.
 - New configuration is in `.env.example` **and** in the settings page allow-list

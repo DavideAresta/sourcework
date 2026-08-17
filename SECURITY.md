@@ -2,9 +2,10 @@
 
 ## Reporting a vulnerability
 
-Please report privately rather than in a public issue: open a
-[confidential issue](https://gitlab.com/LudusFaber/sourcework/-/issues/new)
-(tick **This issue is confidential**). Expect an acknowledgement within a week.
+Please report privately rather than in a public issue: use GitHub's
+[private vulnerability reporting](https://github.com/DavideAresta/sourcework/security/advisories/new),
+which opens a draft advisory only you and the maintainer can read. Expect an
+acknowledgement within a week.
 
 ## What this software is, security-wise
 
