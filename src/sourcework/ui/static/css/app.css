@@ -248,15 +248,20 @@ aside .side-title {
 
 /* -- drop zone ------------------------------------------------------------ */
 
+/* This is the primary input on the page - a run without sources cannot start -
+   and at one text-field's height it read as a divider between two fields. */
 .drop {
-  border: 1.5px dashed var(--line);
+  border: 1.5px dashed var(--ink-3);
   border-radius: var(--radius);
-  padding: 18px;
+  padding: 26px 18px;
   text-align: center;
   color: var(--ink-2);
+  background: var(--panel-2);
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
+
+.drop strong { display: block; color: var(--ink); font-size: 15px; margin-bottom: 2px; }
 
 .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
 
@@ -393,6 +398,16 @@ details.adv { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 
 details.adv summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
 details.adv[open] summary { margin-bottom: 12px; }
 
+/* A whole card that folds. Its summary has to carry the weight of the heading it
+   replaces, and say enough about what is inside that folding it loses nothing. */
+details.card.fold > summary { cursor: pointer; font-weight: 550; color: var(--ink); }
+details.card.fold > summary:hover { color: var(--accent); }
+details.card.fold[open] > summary {
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
 /* -- live model output ----------------------------------------------------
    Same monospace family as the log, but reasoning is set apart: it is the
    model talking to itself, and reading it as if it were the answer is how a
@@ -472,9 +487,6 @@ input.suggested {
   background: var(--panel-2);
   padding: 14px 16px;
 }
-
-.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 
 .more { margin-top: 14px; }
 .more > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 4px 0; }

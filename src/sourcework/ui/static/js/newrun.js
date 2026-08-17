@@ -12,11 +12,13 @@ import * as notify from './notify.js';
 import { attachModelPicker } from './combo.js';
 
 const TEMPLATES = ['standard', 'lean', 'technical', 'discovery'];
+// Same four roles as the settings page, named the same way. "Extraction" and
+// "Analyst / writer" are what the code calls them; these are what they do.
 const ROLES = [
-  ['default', 'Extraction'],
-  ['reasoning', 'Analyst / writer'],
-  ['vision', 'Images'],
-  ['critic', 'Review'],
+  ['default', 'Everyday work', 'Ingestion, drafting, review'],
+  ['reasoning', 'Hard thinking', 'The analyst, which decides whether the PRD is any good'],
+  ['vision', 'Reading images', 'Screenshots, wireframes, diagrams'],
+  ['critic', 'Adversarial review', 'Best from another family'],
 ];
 
 export function newRunView(onStarted) {
@@ -25,7 +27,9 @@ export function newRunView(onStarted) {
 
   // -- inputs ------------------------------------------------------------
   const fileList = el('div');
-  const drop = el('div', { class: 'drop' }, 'Drop files here, or click to choose — PDF, DOCX, PPTX, XLSX, CSV, HTML, MD, VTT, SRT, PNG, JPG');
+  const drop = el('div', { class: 'drop' },
+    el('strong', {}, 'Drop your sources here'),
+    el('div', { class: 'small' }, 'or click to choose — PDF, DOCX, PPTX, XLSX, CSV, HTML, MD, VTT, SRT, PNG, JPG'));
   const picker = el('input', { type: 'file', multiple: true, style: 'display:none' });
 
   function addFiles(list) {
@@ -61,9 +65,9 @@ export function newRunView(onStarted) {
   drop.addEventListener('drop', (e) => addFiles(e.dataTransfer.files));
 
   const title = el('input', { type: 'text', placeholder: 'Invoice reconciliation' });
-  const uris = el('textarea', { placeholder: 'https://intranet/specs/matching.html\nconfluence://PRD/393220\n\nOne URI per line.' });
-  const notes = el('textarea', { placeholder: 'Must ship before year-end close.\n\nOne note per line — each becomes an inline source.' });
-  const cql = el('textarea', { placeholder: 'space = PRD AND text ~ "reconciliation"\n\nOne CQL query per line.' });
+  const uris = el('textarea', { placeholder: 'https://intranet/specs/matching.html\nconfluence://PRD/393220' });
+  const notes = el('textarea', { placeholder: 'Must ship before year-end close.' });
+  const cql = el('textarea', { placeholder: 'space = PRD AND text ~ "reconciliation"' });
 
   const audience = el('input', { type: 'text', value: 'engineering and product' });
   const template = el('select', {}, ...TEMPLATES.map((t) => el('option', { value: t }, t)));
@@ -83,10 +87,11 @@ export function newRunView(onStarted) {
   const modelInputs = {};
   const modelRow = el('div', { class: 'grid3' });
 
-  for (const [role, label] of ROLES) {
+  for (const [role, label, does] of ROLES) {
     const input = el('input', { type: 'text', placeholder: 'backend default' });
     modelInputs[role] = input;
-    modelRow.append(el('div', {}, el('label', {}, label), input));
+    modelRow.append(el('div', {}, el('label', {}, label), input,
+      el('div', { class: 'small muted', style: 'margin-top:4px' }, does)));
   }
 
   const backendHint = el('div', { class: 'small muted' });
@@ -189,14 +194,22 @@ export function newRunView(onStarted) {
       el('div', { style: 'height:12px' }),
       drop, picker, fileList,
       el('div', { class: 'grid2', style: 'margin-top:12px' },
-        el('div', {}, el('label', {}, 'URIs'), uris),
-        el('div', {}, el('label', {}, 'Inline notes'), notes),
+        el('div', {}, el('label', {}, 'URIs'), uris,
+          el('div', { class: 'small muted', style: 'margin-top:4px' }, 'One per line.')),
+        el('div', {}, el('label', {}, 'Inline notes'), notes,
+          el('div', { class: 'small muted', style: 'margin-top:4px' },
+            'One per line. Each becomes a source you can cite.')),
       ),
-      el('div', { style: 'margin-top:12px' }, el('label', {}, 'Confluence CQL'), cql),
+      el('div', { style: 'margin-top:12px' }, el('label', {}, 'Confluence CQL'), cql,
+        el('div', { class: 'small muted', style: 'margin-top:4px' }, 'One query per line.')),
     ),
 
-    el('div', { class: 'card' },
-      el('h3', { style: 'margin-top:0' }, 'Model'),
+    // Folded by default. A run needs a title and something to read; everything
+    // below answers a question most runs never ask, and open panels asking it
+    // anyway is what made this page look like a configuration screen.
+    el('details', { class: 'card fold' },
+      el('summary', {}, 'Model',
+        el('span', { class: 'muted small' }, ' — this run only, otherwise the configured default')),
       el('div', { class: 'grid3' },
         el('div', {}, el('label', {}, 'Backend'), backend),
         el('div', {}, el('label', {}, 'Reasoning effort'), effort),
@@ -207,8 +220,9 @@ export function newRunView(onStarted) {
       el('div', { style: 'height:8px' }), backendHint,
     ),
 
-    el('div', { class: 'card' },
-      el('h3', { style: 'margin-top:0' }, 'Shape'),
+    el('details', { class: 'card fold' },
+      el('summary', {}, 'Shape',
+        el('span', { class: 'muted small' }, ' — template, audience, review rounds, publishing')),
       el('div', { class: 'grid3' },
         el('div', {}, el('label', {}, 'Template'), template),
         el('div', {}, el('label', {}, 'Audience'), audience),

@@ -79,7 +79,7 @@ export function refineTab(run, onStarted) {
     placeholder: 'Returns from marketplace sellers are in scope for phase 1.\nThe handling fee is waived for loyalty members.\n\nOne per line — each becomes a new source.',
     rows: '5',
   });
-  const uris = el('textarea', { placeholder: 'https://intranet/specs/addendum.html\n\nOne URI per line.', rows: '2' });
+  const uris = el('textarea', { placeholder: 'https://intranet/specs/addendum.html', rows: '2' });
   const fileList = el('div');
   const drop = el('div', { class: 'drop' }, 'Drop new documents, transcripts or images here');
   const picker = el('input', { type: 'file', multiple: true, style: 'display:none' });

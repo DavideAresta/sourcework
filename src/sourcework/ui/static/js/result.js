@@ -17,7 +17,13 @@ export function runView(runId, { onChanged }) {
   const root = el('div');
   const header = el('div');
   const logBox = el('div', { class: 'log' });
-  const logCard = el('div', { class: 'card' }, el('h3', { style: 'margin-top:0' }, 'Progress'), logBox);
+  // Open while it works, because then it is the only thing to look at. Folded
+  // once it is over, because then the document is - and a 350px box of finished
+  // steps was pushing the PRD itself below the fold. Folding is per status
+  // change, so reopening it on a finished run stays reopened.
+  const logSummary = el('summary', {}, 'Progress');
+  const logCard = el('details', { class: 'card fold', open: true }, logSummary, logBox);
+  let shownFor = null;
   const narration = narrationPanel();
   const body = el('div');
   let seen = new Set();
@@ -83,6 +89,7 @@ export function runView(runId, { onChanged }) {
     }
 
     renderHeader(run);
+    foldLog(run);
     stopTicking();
     clear(logBox);
     // Not the narration: `load` runs again when the run finishes, and clearing
@@ -107,6 +114,17 @@ export function runView(runId, { onChanged }) {
       if (finished) notify.runFinished(finished);
       onChanged?.();
     }
+  }
+
+  function foldLog(run) {
+    if (run.status === shownFor) return;
+    shownFor = run.status;
+    const working = run.status === 'running' || run.status === 'queued';
+    logCard.open = working;
+    clear(logSummary).append(
+      'Progress',
+      working ? null : el('span', { class: 'muted small' }, ' — every step, if you want to check one'),
+    );
   }
 
   function renderHeader(run) {
@@ -148,6 +166,9 @@ export function runView(runId, { onChanged }) {
         actions.append(el('button', { onClick: () => publish(run) }, 'Publish to Confluence'));
       }
     }
+    // Pushed to the far end: it was one button away from "Publish to
+    // Confluence", and those two should not be neighbours.
+    actions.append(el('span', { style: 'flex:1' }));
     actions.append(el('button', {
       class: 'danger ghost',
       onClick: async () => {
