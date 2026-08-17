@@ -245,7 +245,54 @@ pre .k{color:#A99CF5}
   margin-top:2.5rem;font-family:var(--mono);font-size:.75rem;color:var(--muted);
 }
 
+/* ---------- figures ----------
+   Figure 1 is the argument, so its section breaks out past the text measure and
+   its plate sits on the desk colour inside the sheet. Figure 2 supports the mesh
+   table it sits under and stays quiet. */
+.wrap--wide{max-width:84rem}
+figure{margin:1.9rem 0 0}
+/* A grid item's automatic minimum is its content, so without this the figure's
+   own min-width widens the column and drags the whole page sideways on a phone. */
+.sheet > *{min-width:0}
+.figplate{overflow-x:auto;max-width:100%;background:var(--desk);border:1px solid var(--rule);padding:1.5rem 1.3rem}
+/* The lead figure bleeds to the edges of its sheet, past the margin column - it
+   is the one drawing on the page that has to be read, not glanced at. */
+.fig--lead{
+  margin-left:calc(-1 * (var(--gutter) + 1.5rem + 2.4rem));
+  margin-right:-2.4rem;
+}
+.fig--lead .figplate{border-left:0;border-right:0;padding:1.9rem 2.4rem}
+/* the caption returns to the text column the figure broke out of */
+.fig--lead figcaption{margin-left:calc(var(--gutter) + 1.5rem + 2.4rem);font-size:1rem}
+svg.f-fig{display:block;width:100%;min-width:60rem;height:auto}
+figcaption{margin-top:1.1rem;color:var(--muted);font-size:.96rem;max-width:74ch}
+figcaption b{color:var(--ink);font-weight:600}
+figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
+.fig--support{margin-top:2.2rem}
+.fig--support .figplate{padding:1.1rem}
+.fig--support svg.f-fig{min-width:54rem}
+.fig--support figcaption{font-size:.9rem}
+
+/* SVG vocabulary, namespaced so it cannot collide with the page's own classes */
+.f-box{fill:var(--sheet);stroke:var(--ink);stroke-width:1.2}
+.f-box-soft{fill:var(--desk);stroke:var(--rule);stroke-width:1.2}
+.f-box-gate{fill:#fff;stroke:var(--carbon);stroke-width:2}
+.f-t{font-family:var(--body);font-size:16px;fill:var(--ink)}
+.f-t-strong{font-family:var(--body);font-size:17px;font-weight:600;fill:var(--ink)}
+.f-t-mono{font-family:var(--mono);font-size:13px;fill:var(--muted)}
+.f-t-stage{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em;fill:var(--muted)}
+.f-t-edge{font-family:var(--mono);font-size:13px;fill:var(--muted)}
+.f-t-carbon{fill:var(--carbon)}
+.f-t-stamp{font-family:var(--mono);font-size:13px;fill:var(--stamp)}
+.f-wire{stroke:var(--ink);stroke-width:1.2;fill:none}
+.f-wire-thin{stroke:var(--muted);stroke-width:1;fill:none}
+.f-wire-carbon{stroke:var(--carbon);stroke-width:2;fill:none}
+.f-wire-stamp{stroke:var(--stamp);stroke-width:1.4;fill:none;stroke-dasharray:5 4}
+.f-rail{stroke:var(--carbon);stroke-width:3;fill:none}
+.f-hair{stroke:var(--rule);stroke-width:1;fill:none}
+
 /* motion */
+
 .rise{opacity:0;transform:translateY(14px)}
 .rise.in{opacity:1;transform:none;transition:opacity .6s cubic-bezier(.2,.7,.3,1),transform .6s cubic-bezier(.2,.7,.3,1)}
 .hero .rise{transition-delay:var(--d,0ms)}
@@ -258,6 +305,9 @@ pre .k{color:#A99CF5}
   :root{--gutter:0}
   .hide-sm{display:none}
   .sheet{grid-template-columns:1fr;padding:1.9rem 1.4rem}
+  .fig--lead{margin-left:-1.4rem;margin-right:-1.4rem}
+  .fig--lead .figplate{padding:1.2rem 1.4rem}
+  .fig--lead figcaption{margin-left:1.4rem}
   .sigla{padding-top:0;margin-bottom:1.1rem}
   .sigla b{display:inline;margin-right:.5rem}
   .ledger{grid-template-columns:1fr}
@@ -366,10 +416,175 @@ pre .k{color:#A99CF5}
     </div>
   </section>
 
+  <!-- ============ THE FIGURE ============ -->
+  <section class="wrap wrap--wide">
+    <div class="sheet rise">
+      <div class="sigla"><b>&#167;4</b> The shape</div>
+      <div>
+        <h2 class="h2">Two loops around one gate.</h2>
+        <p class="p">
+          Everything upstream of the analyst produces evidence, and the analyst is the only place
+          a citation can be created — or lost. Around it run two feedback loops on very different
+          clocks.
+        </p>
+        <figure class="fig--lead">
+          <div class="figplate">
+<svg class="f-fig" viewBox="0 0 1500 480" role="img"
+       aria-label="The SourceWork pipeline and its two feedback loops. Four agents turn documents, transcripts, images and Confluence pages into evidence; the requirements analyst resolves every citation against real evidence ids, stripping invented ones and forcing uncited requirements to derived; the writer drafts and the critic returns blocking findings for a bounded number of re-drafts. The outer loop runs on human time: a finished version's open questions are answered by the reader, and each answer re-enters as new evidence alongside the carried evidence, producing a new version rather than an edit.">
+    <defs>
+      <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#16171F"/>
+      </marker>
+      <marker id="a1c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#4634C4"/>
+      </marker>
+      <marker id="a1s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#C0311C"/>
+      </marker>
+    </defs>
+
+    <!-- the pipeline's real order, as stage labels -->
+    <text class="f-t-stage" x="24" y="38">WHAT YOU GIVE IT</text>
+    <text class="f-t-stage" x="214" y="38">ROUTE</text>
+    <text class="f-t-stage" x="440" y="38">INGEST · CONCURRENT</text>
+    <text class="f-t-stage" x="700" y="38">VALIDATE</text>
+    <text class="f-t-stage" x="1064" y="38">DRAFT · REVIEW</text>
+    <text class="f-t-stage" x="1250" y="38">OUT</text>
+    <line class="f-hair" x1="24" y1="50" x2="1396" y2="50"/>
+
+    <!-- inputs -->
+    <rect class="f-box-soft" x="24" y="96" width="150" height="46"/>
+    <text class="f-t" x="40" y="125">Documents</text>
+    <rect class="f-box-soft" x="24" y="150" width="150" height="46"/>
+    <text class="f-t" x="40" y="179">Transcripts</text>
+    <rect class="f-box-soft" x="24" y="204" width="150" height="46"/>
+    <text class="f-t" x="40" y="233">Images</text>
+    <rect class="f-box-soft" x="24" y="258" width="150" height="46"/>
+    <text class="f-t" x="40" y="287">Confluence</text>
+
+    <path class="f-wire-thin" d="M174,119 H194 V200"/>
+    <path class="f-wire-thin" d="M174,173 H194"/>
+    <path class="f-wire-thin" d="M174,227 H194"/>
+    <path class="f-wire-thin" d="M174,281 H194 V200"/>
+    <line class="f-wire" x1="194" y1="200" x2="210" y2="200" marker-end="url(#a1)"/>
+
+    <!-- orchestrator -->
+    <rect class="f-box" x="214" y="130" width="176" height="140"/>
+    <text class="f-t-strong" x="232" y="166">Orchestrator</text>
+    <text class="f-t-mono" x="232" y="188">:8000</text>
+    <text class="f-t-mono" x="232" y="220">reads agent cards</text>
+    <text class="f-t-mono" x="232" y="242">routes by modality</text>
+
+    <path class="f-wire-thin" d="M390,200 H414 V119 H436"/>
+    <path class="f-wire-thin" d="M414,173 H436"/>
+    <path class="f-wire-thin" d="M414,227 H436"/>
+    <path class="f-wire-thin" d="M414,200 V281 H436"/>
+
+    <!-- ingesting agents -->
+    <rect class="f-box" x="440" y="96" width="180" height="46"/>
+    <text class="f-t" x="456" y="119">Ingestion</text>
+    <text class="f-t-mono" x="456" y="135">:8001</text>
+    <rect class="f-box" x="440" y="150" width="180" height="46"/>
+    <text class="f-t" x="456" y="173">Transcript</text>
+    <text class="f-t-mono" x="456" y="189">:8003</text>
+    <rect class="f-box" x="440" y="204" width="180" height="46"/>
+    <text class="f-t" x="456" y="227">Vision</text>
+    <text class="f-t-mono" x="456" y="243">:8002</text>
+    <rect class="f-box" x="440" y="258" width="180" height="46"/>
+    <text class="f-t" x="456" y="281">Confluence</text>
+    <text class="f-t-mono" x="456" y="297">:8004</text>
+    <text class="f-t-edge" x="440" y="330">≤ 6 at a time</text>
+
+    <!-- evidence rail -->
+    <text class="f-t-mono f-t-carbon" x="656" y="78" text-anchor="middle">Evidence</text>
+    <text class="f-t-mono" x="656" y="96" text-anchor="middle">id · quote · locator</text>
+    <line class="f-rail" x1="656" y1="104" x2="656" y2="304"/>
+    <path class="f-wire-thin" d="M620,119 H656"/>
+    <path class="f-wire-thin" d="M620,173 H656"/>
+    <path class="f-wire-thin" d="M620,227 H656"/>
+    <path class="f-wire-thin" d="M620,281 H656"/>
+    <line class="f-wire-carbon" x1="656" y1="200" x2="694" y2="200" marker-end="url(#a1c)"/>
+
+    <!-- THE GATE -->
+    <rect class="f-box-gate" x="700" y="110" width="300" height="180"/>
+    <text class="f-t-strong" x="720" y="148">Requirements Analyst</text>
+    <text class="f-t-mono" x="720" y="170">:8005</text>
+    <line class="f-hair" x1="720" y1="186" x2="980" y2="186"/>
+    <text class="f-t-mono f-t-carbon" x="720" y="210">every source_ref checked</text>
+    <text class="f-t-mono f-t-carbon" x="720" y="228">against real evidence ids</text>
+    <text class="f-t-mono" x="720" y="256">cluster · de-dup · MoSCoW</text>
+    <text class="f-t-mono" x="720" y="274">conflicts · open questions</text>
+
+    <!-- what the gate throws out -->
+    <path class="f-wire-stamp" d="M760,292 V332" marker-end="url(#a1s)"/>
+    <text class="f-t-stamp" x="776" y="336">invented id → stripped</text>
+    <path class="f-wire-stamp" d="M760,332 V376" marker-end="url(#a1s)"/>
+    <text class="f-t-stamp" x="776" y="380">0 valid refs → derived</text>
+
+    <!-- gate -> writer -->
+    <line class="f-wire-carbon" x1="1000" y1="176" x2="1060" y2="176" marker-end="url(#a1c)"/>
+
+    <!-- writer + critic -->
+    <rect class="f-box" x="1064" y="140" width="150" height="72"/>
+    <text class="f-t-strong" x="1082" y="172">PRD Writer</text>
+    <text class="f-t-mono" x="1082" y="194">:8006</text>
+
+    <rect class="f-box" x="1064" y="268" width="150" height="72"/>
+    <text class="f-t-strong" x="1082" y="300">PRD Critic</text>
+    <text class="f-t-mono" x="1082" y="322">:8007</text>
+    <text class="f-t-stage" x="1064" y="358">INNER LOOP · MACHINE TIME</text>
+
+    <!-- inner loop: machine time -->
+    <line class="f-wire" x1="1180" y1="212" x2="1180" y2="264" marker-end="url(#a1)"/>
+    <text class="f-t-edge" x="1190" y="244">draft</text>
+    <line class="f-wire" x1="1098" y1="268" x2="1098" y2="216" marker-end="url(#a1)"/>
+    <text class="f-t-edge" x="1002" y="236">blocking</text>
+    <text class="f-t-edge" x="1002" y="252">findings</text>
+    <text class="f-t-edge" x="1064" y="380">a different model family · re-draft,</text>
+    <text class="f-t-edge" x="1064" y="398">bounded, exits when nothing blocks</text>
+
+    <!-- out -->
+    <line class="f-wire" x1="1214" y1="176" x2="1246" y2="176" marker-end="url(#a1)"/>
+    <rect class="f-box-soft" x="1250" y="140" width="146" height="72"/>
+    <text class="f-t" x="1266" y="170">PRD</text>
+    <text class="f-t-mono" x="1266" y="192">md xhtml json</text>
+
+    <line class="f-wire" x1="1323" y1="212" x2="1323" y2="264" marker-end="url(#a1)"/>
+    <rect class="f-box-soft" x="1250" y="268" width="146" height="72"/>
+    <text class="f-t" x="1266" y="298">Publish</text>
+    <text class="f-t-mono" x="1266" y="320">Confluence</text>
+    <text class="f-t-mono" x="1266" y="336">or a plugin</text>
+
+    <!-- outer loop: human time. It returns to the evidence rail, because that is
+         literally what a refine answer becomes. -->
+    <path class="f-wire-carbon" style="stroke-dasharray:7 5"
+          d="M1396,176 H1444 V456 H656 V312" marker-end="url(#a1c)"/>
+    <text class="f-t-stage f-t-carbon" x="700" y="418">OUTER LOOP · HUMAN TIME</text>
+    <text class="f-t-mono" x="700" y="440">a finished version answers its own open questions, and each answer re-enters as evidence</text>
+  </svg>
+          </div>
+          <figcaption>
+            <b>The inner loop runs on machine time.</b> The critic reads the draft and returns
+            findings; the ones that block are folded into the writer's next prompt and it re-drafts.
+            The loop is bounded, and exits the moment nothing blocking remains — so a review that
+            finds nothing costs one pass, not a fixed budget of them.
+            <br><br>
+            <b>The outer loop runs on human time, and closes back on the evidence.</b> A PRD ends by
+            saying what it could not determine. Answer one of those open questions and your answer is
+            ingested as a new source — so the requirement it settles can <i>cite</i> it like anything
+            else, while the previous version's evidence is carried rather than re-read. That produces
+            a new version rather than an edit: <code>REQ-</code> ids survive the rewording, and
+            untouched requirements keep the citations they already had.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ WHAT GOES IN ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§4</b> The input</div>
+      <div class="sigla"><b>§5</b> The input</div>
       <div>
         <h2 class="h2">Nothing enters the pipeline except evidence with a locator.</h2>
         <p class="p p--muted">
@@ -395,7 +610,7 @@ pre .k{color:#A99CF5}
   <!-- ============ NO API KEY ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§5</b> What it costs</div>
+      <div class="sigla"><b>§6</b> What it costs</div>
       <div>
         <h2 class="h2">It does not need your API key.</h2>
         <p class="p">
@@ -425,7 +640,7 @@ pre .k{color:#A99CF5}
   <!-- ============ THE MESH ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§6</b> The mesh</div>
+      <div class="sigla"><b>§7</b> The mesh</div>
       <div>
         <h2 class="h2">Eight agents, each one an independently deployable service.</h2>
         <p class="p p--muted">
@@ -448,6 +663,89 @@ pre .k{color:#A99CF5}
             </tbody>
           </table>
         </div>
+        <figure class="fig--support">
+          <div class="figplate">
+<svg class="f-fig" viewBox="0 0 1420 330" role="img"
+       aria-label="Callers reach the eight agents only through published agent cards over A2A JSON-RPC, and every agent reaches a model only through one structured-output call, so both the caller and the backend are replaceable without touching an agent.">
+    <defs>
+      <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#16171F"/>
+      </marker>
+    </defs>
+
+    <text class="f-t-stage" x="24" y="34">CALLERS</text>
+    <text class="f-t-stage" x="314" y="34">ONE PROTOCOL</text>
+    <text class="f-t-stage" x="640" y="34">EIGHT SERVICES</text>
+    <text class="f-t-stage" x="940" y="34">ONE MODEL CALL</text>
+    <line class="f-hair" x1="24" y1="46" x2="1396" y2="46"/>
+
+    <!-- callers -->
+    <rect class="f-box-soft" x="24" y="76" width="200" height="46"/>
+    <text class="f-t" x="40" y="99">Web UI</text>
+    <text class="f-t-mono" x="40" y="115">:8080 · loopback</text>
+    <rect class="f-box-soft" x="24" y="134" width="200" height="46"/>
+    <text class="f-t" x="40" y="157">CLI</text>
+    <text class="f-t-mono" x="40" y="173">sourcework generate</text>
+    <rect class="f-box-soft" x="24" y="192" width="200" height="46"/>
+    <text class="f-t" x="40" y="215">Any A2A client</text>
+    <text class="f-t-mono" x="40" y="231">yours</text>
+    <text class="f-t-edge" x="24" y="266">none of them is a ninth agent</text>
+
+    <path class="f-wire-thin" d="M224,99 H252 V157"/>
+    <path class="f-wire-thin" d="M224,157 H252"/>
+    <path class="f-wire-thin" d="M224,215 H252 V157"/>
+    <line class="f-wire" x1="252" y1="157" x2="290" y2="157" marker-end="url(#a2)"/>
+
+    <!-- the protocol -->
+    <rect class="f-box" x="294" y="76" width="286" height="162"/>
+    <text class="f-t-strong" x="312" y="108">A2A v1.0 · JSON-RPC</text>
+    <text class="f-t-mono" x="312" y="132">/.well-known/agent-card.json</text>
+    <text class="f-t-mono" x="312" y="150">/healthz · /docs</text>
+    <line class="f-hair" x1="312" y1="166" x2="562" y2="166"/>
+    <text class="f-t-mono" x="312" y="190">the card names the skills</text>
+    <text class="f-t-mono" x="312" y="208">an agent answers to, and</text>
+    <text class="f-t-mono" x="312" y="226">dispatch is by skill id</text>
+
+    <line class="f-wire" x1="580" y1="157" x2="618" y2="157" marker-end="url(#a2)"/>
+
+    <!-- the eight -->
+    <rect class="f-box" x="622" y="76" width="140" height="38"/><text class="f-t-mono" x="636" y="100">orchestrator</text>
+    <rect class="f-box" x="622" y="122" width="140" height="38"/><text class="f-t-mono" x="636" y="146">ingestion</text>
+    <rect class="f-box" x="622" y="168" width="140" height="38"/><text class="f-t-mono" x="636" y="192">vision</text>
+    <rect class="f-box" x="622" y="214" width="140" height="38"/><text class="f-t-mono" x="636" y="238">transcript</text>
+    <rect class="f-box" x="770" y="76" width="140" height="38"/><text class="f-t-mono" x="784" y="100">confluence</text>
+    <rect class="f-box" x="770" y="122" width="140" height="38"/><text class="f-t-mono" x="784" y="146">requirements</text>
+    <rect class="f-box" x="770" y="168" width="140" height="38"/><text class="f-t-mono" x="784" y="192">writer</text>
+    <rect class="f-box" x="770" y="214" width="140" height="38"/><text class="f-t-mono" x="784" y="238">critic</text>
+    <text class="f-t-edge" x="622" y="278">eight processes, or eight threads in one</text>
+
+    <line class="f-wire" x1="910" y1="157" x2="948" y2="157" marker-end="url(#a2)"/>
+
+    <!-- the model call -->
+    <rect class="f-box-gate" x="952" y="106" width="190" height="102"/>
+    <text class="f-t-strong" x="970" y="140">llm.structured()</text>
+    <text class="f-t-mono" x="970" y="164">schema enforced,</text>
+    <text class="f-t-mono" x="970" y="182">not described</text>
+    <text class="f-t-mono f-t-carbon" x="970" y="200">per-role model</text>
+
+    <line class="f-wire" x1="1142" y1="157" x2="1180" y2="157" marker-end="url(#a2)"/>
+
+    <rect class="f-box-soft" x="1184" y="76" width="180" height="32"/><text class="f-t-mono" x="1198" y="97">claude-code</text>
+    <rect class="f-box-soft" x="1184" y="114" width="180" height="32"/><text class="f-t-mono" x="1198" y="135">codex · copilot</text>
+    <rect class="f-box-soft" x="1184" y="152" width="180" height="32"/><text class="f-t-mono" x="1198" y="173">opencode · agy</text>
+    <rect class="f-box-soft" x="1184" y="190" width="180" height="32"/><text class="f-t-mono" x="1198" y="211">litellm → hosted</text>
+    <rect class="f-box-soft" x="1184" y="228" width="180" height="32"/><text class="f-t-mono" x="1198" y="249">llama.cpp → local</text>
+    <path class="f-wire-thin" d="M1364,92 H1384 V244 H1364"/>
+    <text class="f-t-edge" x="1184" y="286">fail over on a usage limit</text>
+  </svg>
+          </div>
+          <figcaption>
+            <b>Both ends are replaceable.</b> Callers reach the mesh only through published agent
+            cards, so the web UI has no privilege the CLI lacks. Agents reach models only through one
+            structured call, so a role can be pointed at a different backend — or at hardware in the
+            same room — without an agent changing.
+          </figcaption>
+        </figure>
       </div>
     </div>
   </section>
@@ -455,7 +753,7 @@ pre .k{color:#A99CF5}
   <!-- ============ THE LIMIT ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§7</b> The limit</div>
+      <div class="sigla"><b>§8</b> The limit</div>
       <div>
         <h2 class="h2">Be precise about what that guarantees.</h2>
         <p class="p">
@@ -486,7 +784,7 @@ pre .k{color:#A99CF5}
   <!-- ============ START ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§8</b> Start</div>
+      <div class="sigla"><b>§9</b> Start</div>
       <div>
         <h2 class="h2">See the whole thing work before giving it credentials.</h2>
         <p class="p p--muted">
