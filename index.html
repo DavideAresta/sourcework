@@ -268,10 +268,6 @@ svg.f-fig{display:block;width:100%;min-width:60rem;height:auto}
 figcaption{margin-top:1.1rem;color:var(--muted);font-size:.96rem;max-width:74ch}
 figcaption b{color:var(--ink);font-weight:600}
 figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
-.fig--support{margin-top:2.2rem}
-.fig--support .figplate{padding:1.1rem}
-.fig--support svg.f-fig{min-width:54rem}
-.fig--support figcaption{font-size:.9rem}
 
 /* SVG vocabulary, namespaced so it cannot collide with the page's own classes */
 .f-box{fill:var(--sheet);stroke:var(--ink);stroke-width:1.2}
@@ -496,8 +492,8 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
     <text class="f-t-edge" x="440" y="330">≤ 6 at a time</text>
 
     <!-- evidence rail -->
-    <text class="f-t-mono f-t-carbon" x="656" y="78" text-anchor="middle">Evidence</text>
-    <text class="f-t-mono" x="656" y="96" text-anchor="middle">id · quote · locator</text>
+    <text class="f-t-mono f-t-carbon" x="668" y="76">Evidence</text>
+    <text class="f-t-mono" x="668" y="94">id · quote · locator</text>
     <line class="f-rail" x1="656" y1="104" x2="656" y2="304"/>
     <path class="f-wire-thin" d="M620,119 H656"/>
     <path class="f-wire-thin" d="M620,173 H656"/>
@@ -663,7 +659,22 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
             </tbody>
           </table>
         </div>
-        <figure class="fig--support">
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE MESH, DRAWN ============ -->
+  <section class="wrap wrap--wide">
+    <div class="sheet rise">
+      <div class="sigla"><b>&#167;8</b> Both ends</div>
+      <div>
+        <h2 class="h2">Replaceable at both ends.</h2>
+        <p class="p">
+          The mesh is reached from outside only through published agent cards, and it reaches
+          models from inside only through one structured call. Neither end knows more about the
+          other than it has to.
+        </p>
+        <figure class="fig--lead">
           <div class="figplate">
 <svg class="f-fig" viewBox="0 0 1420 330" role="img"
        aria-label="Callers reach the eight agents only through published agent cards over A2A JSON-RPC, and every agent reaches a model only through one structured-output call, so both the caller and the backend are replaceable without touching an agent.">
@@ -740,10 +751,12 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
   </svg>
           </div>
           <figcaption>
-            <b>Both ends are replaceable.</b> Callers reach the mesh only through published agent
-            cards, so the web UI has no privilege the CLI lacks. Agents reach models only through one
-            structured call, so a role can be pointed at a different backend — or at hardware in the
-            same room — without an agent changing.
+            <b>Callers have no privileges.</b> The web UI is an A2A client like any other — it can
+            ask for nothing the CLI cannot ask for, and the orchestrator hardcodes nobody's
+            abilities: it reads the cards at start-up and dispatches by skill id. <b>Models are a
+            per-role choice.</b> Because every agent goes through the same structured call, a role
+            can be pointed at a different backend — or at hardware in the same room — without an
+            agent changing, and a backend that hits a usage limit fails over to the next.
           </figcaption>
         </figure>
       </div>
@@ -753,7 +766,7 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
   <!-- ============ THE LIMIT ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§8</b> The limit</div>
+      <div class="sigla"><b>§9</b> The limit</div>
       <div>
         <h2 class="h2">Be precise about what that guarantees.</h2>
         <p class="p">
@@ -784,7 +797,7 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
   <!-- ============ START ============ -->
   <section class="wrap">
     <div class="sheet rise">
-      <div class="sigla"><b>§9</b> Start</div>
+      <div class="sigla"><b>§10</b> Start</div>
       <div>
         <h2 class="h2">See the whole thing work before giving it credentials.</h2>
         <p class="p p--muted">
