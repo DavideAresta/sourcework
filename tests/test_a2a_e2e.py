@@ -293,3 +293,62 @@ async def test_nothing_is_narrated_to_a_caller_that_did_not_ask(narrating_agent)
     # No sink installed means the CLI backends never pay for streaming either.
     assert result["summary"] == "unwatched"
     assert heard == []
+
+
+# ---------------------------------------------------------------------------
+# The restart route: how a settings save makes a running agent re-read config
+# ---------------------------------------------------------------------------
+
+
+def test_a_restart_request_re_execs_the_process_with_its_original_argv(monkeypatch):
+    """POST /api/restart must swap in a fresh process image, not merely answer.
+
+    Agents read their configuration once at start-up, so the only honest way
+    for a settings save to take effect is a re-exec of this very process with
+    the argv it was launched with. If that regresses to a polite 200 and a
+    shrug, every saved setting quietly stays dead until someone notices the
+    mesh never restarted.
+    """
+    import os
+    import sys
+    import time
+
+    from fastapi.testclient import TestClient
+    from pydantic import BaseModel
+
+    from sourcework.a2a_common import SkillExecutor, build_app, build_card, skill
+
+    class Nothing(BaseModel):
+        ok: bool = True
+
+    class Quiet(SkillExecutor):
+        def __init__(self) -> None:
+            self.skills = {"noop": self.noop}
+            super().__init__()
+
+        async def noop(self, payload: dict) -> Nothing:
+            return Nothing()
+
+    app = build_app(
+        build_card(name="Probe", description="d", url="http://x", skills=[skill("noop", "Noop", "d")]),
+        Quiet(),
+    )
+    argv = sys.argv[:]
+    execs: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(os, "execv", lambda exe, args: execs.append((exe, args)))
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+
+    with TestClient(app) as client:
+        response = client.post("/api/restart")
+        assert response.status_code == 200
+        assert response.json() == {"status": "restarting"}
+
+    # The relaunch thread fires as soon as sleep is a no-op; the response was
+    # already sent, which is the whole point of the delay.
+    deadline = time.monotonic() + 2
+    while not execs and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert execs, "the relaunch thread never ran"
+    executable, args = execs[0]
+    assert executable == sys.executable
+    assert args[1:] == argv, "re-exec must keep the original command line"

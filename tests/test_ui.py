@@ -628,6 +628,96 @@ def test_the_settings_endpoint_masks_and_allow_lists(client: TestClient):
     assert result["changed"] == []
 
 
+def test_a_restart_requiring_save_restarts_the_mesh(client: TestClient, tmp_path: Path, monkeypatch):
+    """Saving a restart-flagged setting must actually restart the mesh.
+
+    The agents read their configuration once, at start-up, so the save is only
+    worth anything once every peer has been asked to re-exec itself. If that
+    call disappears, the page reports success for a change nothing running
+    will ever see.
+    """
+    import sourcework.ui.app as ui_app
+    from sourcework.config import Settings
+
+    env = tmp_path / "env"
+    env.write_text("SOURCEWORK_LLM__BACKEND=litellm\n", encoding="utf-8")
+    monkeypatch.setattr(ui_app, "settings", lambda: Settings(env_file=str(env)))
+
+    restarted: list[str] = []
+
+    async def fake_restart_mesh() -> list[str]:
+        restarted.append("called")
+        return ["orchestrator", "writer"]
+
+    monkeypatch.setattr(ui_app, "_restart_mesh", fake_restart_mesh)
+
+    result = client.put("/api/settings", json={"SOURCEWORK_LLM__BACKEND": "llama-cpp"}).json()
+    assert restarted == ["called"]
+    assert result["restart_required"] is True
+    assert "restarting" in result["message"]
+
+
+async def _no_peers_reached() -> list[str]:
+    return []
+
+
+def test_a_save_with_no_mesh_reachable_keeps_the_manual_message(
+    client: TestClient, tmp_path: Path, monkeypatch
+):
+    """An install with no running mesh must not claim one was restarted."""
+    import sourcework.ui.app as ui_app
+    from sourcework.config import Settings
+
+    env = tmp_path / "env"
+    env.write_text("SOURCEWORK_LLM__BACKEND=litellm\n", encoding="utf-8")
+    monkeypatch.setattr(ui_app, "settings", lambda: Settings(env_file=str(env)))
+    monkeypatch.setattr(ui_app, "_restart_mesh", _no_peers_reached)
+
+    result = client.put("/api/settings", json={"SOURCEWORK_LLM__BACKEND": "llama-cpp"}).json()
+    assert result["restart_required"] is True
+    assert "restart" not in result["message"]
+
+
+async def test_restart_mesh_asks_every_peer_and_skips_the_down_ones(monkeypatch):
+    """One dead agent must not stop the others being told to restart."""
+    import httpx
+
+    import sourcework.ui.app as ui_app
+    from sourcework.config import Settings
+
+    called: list[str] = []
+
+    class FakeHTTP:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+        async def post(self, url: str):
+            called.append(url)
+            if ":8007" in url:
+                raise httpx.ConnectError("no such peer")
+
+    fake = FakeHTTP()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: fake)
+    monkeypatch.setattr(
+        ui_app,
+        "settings",
+        lambda: Settings(peers={
+            "orchestrator": "http://127.0.0.1:8000",
+            "critic": "http://127.0.0.1:8007",
+        }),
+    )
+
+    reached = await ui_app._restart_mesh()
+    assert "http://127.0.0.1:8000/api/restart" in called
+    assert "http://127.0.0.1:8007/api/restart" in called
+    assert len(reached) == len(called) - 1
+    assert "critic" not in reached
+    assert "orchestrator" in reached
+
+
 def test_the_page_and_static_assets_are_served(client: TestClient):
     assert "PRD" in client.get("/").text
     assert client.get("/settings").status_code == 200

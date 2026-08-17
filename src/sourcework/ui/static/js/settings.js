@@ -311,6 +311,9 @@ saveButton.addEventListener('click', async () => {
     toast(result.message, result.restart_required ? '' : 'ok');
     if (result.restart_required) {
       document.getElementById('restart-note').style.display = '';
+      // The agents re-exec themselves a moment after answering; this page's
+      // own probes would race the restart, so let the mesh come back first.
+      setTimeout(() => location.reload(), 2500);
     }
     await load();
     await suggestModels();

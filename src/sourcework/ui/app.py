@@ -134,6 +134,30 @@ def _bound_beyond_loopback() -> bool:
     return bool(host) and host not in ("127.0.0.1", "localhost", "::1")
 
 
+async def _restart_mesh() -> list[str]:
+    """Ask every configured agent to re-exec itself, returning those that heard.
+
+    The agents restart in place (``os.execv``), so there is no supervisor to
+    tell - this works identically under ``serve-all``, the desktop app, a plain
+    terminal and compose. A peer that does not answer (no mesh running, or the
+    UI-only install) is logged and skipped; the caller decides how much of a
+    restart counts as one.
+    """
+    import httpx
+
+    sec = settings().security
+    headers = {sec.header: sec.api_key} if sec.enforce else {}
+    reached: list[str] = []
+    async with httpx.AsyncClient(timeout=2.0, headers=headers) as http:
+        for name, url in settings().peers.as_map().items():
+            try:
+                await http.post(f"{url.rstrip('/')}/api/restart")
+                reached.append(name)
+            except Exception as exc:  # noqa: BLE001 - a down peer is not a failed save
+                logger.warning("could not restart agent %s: %s", name, exc)
+    return reached
+
+
 def build_app(
     workspace: Path | None = None,
     on_shutdown: Callable[[], None] | None = None,
@@ -734,14 +758,20 @@ def build_app(
     async def write_settings(body: dict[str, str]) -> dict[str, Any]:
         changed = env_file.write(_env_path(), body)
         needs_restart = any(env_file.BY_KEY[k].restart for k in changed if k in env_file.BY_KEY)
+        restarted: list[str] = []
+        if needs_restart:
+            # The agents read their config once, at start-up; a save is only
+            # worth something once every peer has re-exec'd itself. Peers that
+            # are down are logged and left alone - the save is not a failure,
+            # just an unfinished one.
+            restarted = await _restart_mesh()
         return {
             "changed": changed,
-            # Honest rather than convenient: the eight agents read their config
-            # once, at start-up. Nothing here reaches a running agent.
             "restart_required": needs_restart,
             "message": (
-                f"Saved {len(changed)} setting(s). Restart the mesh for them to take effect."
-                if needs_restart
+                f"Saved {len(changed)} setting(s). The mesh is restarting "
+                "to pick them up - it will be back in a moment."
+                if restarted
                 else f"Saved {len(changed)} setting(s)."
             )
             if changed
