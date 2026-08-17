@@ -22,3 +22,6 @@ scripts/llama-swap.d/
 # Editor/agent scratch
 .claude/
 .DS_Store
+
+# Documentation is kept out of the published repository.
+docs/

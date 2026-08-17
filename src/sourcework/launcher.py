@@ -71,8 +71,8 @@ def install(*, quiet: bool = False) -> int:
     if sys.platform != "linux":
         print(
             f"Desktop entries are a Linux thing; this is {sys.platform}.\n"
-            "On macOS and Windows a launcher needs a real app bundle - see "
-            "docs/desktop.md, step 5.",
+            "On macOS and Windows a launcher needs a real app bundle; run "
+            "`sourcework app` and bookmark it instead.",
             file=sys.stderr,
         )
         return 2

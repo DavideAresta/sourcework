@@ -16,7 +16,9 @@ by `tests/conftest.py`), so the suite is fast and offline. `python scripts/demo.
 drives all eight agents over real A2A JSON-RPC against that same fake, which is
 the cheapest way to catch a wiring mistake.
 
-To run against real models, see [docs/local-models.md](docs/local-models.md).
+To run against real models, work from [`.env.example`](.env.example) and check
+the result with `sourcework doctor`, which reports what is configured against
+what is actually reachable.
 
 `SOURCEWORK_LLM__STUB=1` replaces every model call with a deterministic fake
 derived from the requested schema. The whole pipeline still runs — real HTTP,

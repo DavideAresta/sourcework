@@ -14,6 +14,13 @@ and the version on every agent card are the same string by construction.
 
 ## [Unreleased]
 
+### Changed
+
+- The `docs/` directory is no longer part of the repository. What a user of the
+  web UI needs is now in the README itself — the five views, the per-run backend
+  override, and how Resume and Refine differ — so the front page answers the
+  question rather than forwarding it.
+
 ## [0.1.0] — 2026-08-17
 
 First public release. Everything below already worked; this is the version that
@@ -55,9 +62,9 @@ puts a number on it.
 
 ### Extending it
 
-Three seams, documented in [docs/extending.md](docs/extending.md): publishers
-and authenticators arrive as entry points, and the run store arrives as a
-constructor argument. A publisher that will not load is skipped; an
+Three seams: publishers arrive as `sourcework.publishers` entry points,
+authenticators as `sourcework.auth` entry points, and the run store as a
+`build_app(store=...)` argument. A publisher that will not load is skipped; an
 authenticator that will not load raises — the same decision made twice in
 opposite directions, because one costs a destination and the other costs the
 lock on the door.
