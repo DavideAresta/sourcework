@@ -255,6 +255,7 @@ async def _generate(args: argparse.Namespace) -> int:
         template=args.template,
         review_rounds=args.review_rounds,
         extra_instructions=args.instructions,
+        estimate=args.estimate,
         run_id=run_id,
         resume=resuming,
     )
@@ -396,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.set_defaults(func=cmd_backends)
 
-    p = sub.add_parser("app", help="run as a desktop app (tray icon + browser)")
+    p = sub.add_parser("app", help="run as a desktop app (mesh + UI + browser)")
     p.add_argument("--port", type=int)
     p.add_argument("--no-browser", action="store_true", help="do not open a browser")
     p.set_defaults(func=cmd_app)
@@ -430,6 +431,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--template", default="standard", choices=["standard", "lean", "technical", "discovery"])
     p.add_argument("--review-rounds", type=int, default=1)
     p.add_argument("--instructions", help="extra steer for the analyst and writer")
+    p.add_argument("--estimate", action="store_true",
+                   help="ask the analyst for a T-shirt effort estimate (S/M/L/XL) per "
+                        "requirement; rendered marked as model inference")
     p.add_argument(
         "--resume", nargs="?", const="", metavar="RUN_ID",
         help="continue an interrupted run instead of starting over, reusing the stages it "

@@ -115,6 +115,12 @@ class AnalyseRequest(BaseModel):
     """Reuse slices saved by an earlier attempt at ``run_id``. Same rule as
     everywhere else: saving is unconditional, reusing is asked for."""
 
+    estimate: bool = False
+    """Ask for a T-shirt effort estimate per requirement. Part of the request
+    rather than the environment because it changes what the analyst is asked to
+    produce - and the analyse-stage fingerprint, so a run resumed with the flag
+    flipped recomputes rather than mixing estimated and unestimated slices."""
+
     @classmethod
     def from_extractions(
         cls, title: str, extractions: list[ExtractionResult], **kw: object

@@ -18,15 +18,25 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from sourcework import quality
 from sourcework.a2a_common import Progress, SkillExecutor, build_card, public_url, skill
 from sourcework.agents.schemas import ReviewRequest, ReviewResponse
-from sourcework.llm import LLM, register_stub
+from sourcework.config import settingsfrom sourcework.llm import LLM, register_stub
 from sourcework.models import PRDDocument, ReviewFinding, ReviewReport, Severity
 from sourcework.render import to_markdown
 
 logger = logging.getLogger(__name__)
 
 PORT = 8007
+
+MAX_PROMPT_FINDINGS = 200
+"""How many deterministic findings are shown to the model.
+
+They are in the prompt for one reason - so the model does not spend its answer
+repeating them - and the wording rules can fire several times per requirement,
+so on a large PRD the list grows without bound inside a prompt every other part
+of which is capped. Every finding stays in the report either way; only this
+copy is trimmed, and never quietly."""
 
 VAGUE = re.compile(
     r"\b(fast|slow|easy|simple|intuitive|robust|scalable|user-friendly|seamless|"
@@ -93,10 +103,16 @@ class CriticExecutor(SkillExecutor):
 
         markdown = req.markdown or to_markdown(prd)
         system = SYSTEM + (f"\n\nAdditional rubric from the requester:\n{req.rubric}" if req.rubric else "")
+        shown = findings[:MAX_PROMPT_FINDINGS]
+        if len(findings) > len(shown):
+            await progress(
+                f"{len(findings) - len(shown)} deterministic finding(s) left out of the "
+                f"review prompt (showing {len(shown)}); all of them stay in the report"
+            )
         user = (
             f"PRD under review:\n\n{markdown[:60000]}\n\n"
             "---\nDETERMINISTIC FINDINGS ALREADY RECORDED (do not repeat):\n"
-            + ("\n".join(f"- [{f.severity.value}] {f.location}: {f.detail}" for f in findings) or "none")
+            + ("\n".join(f"- [{f.severity.value}] {f.location}: {f.detail}" for f in shown) or "none")
             + "\n\n---\nEVIDENCE AVAILABLE TO THE WRITER:\n"
             + "\n".join(f"- {e.id} [{e.kind}] {e.text}" for e in prd.evidence[:250])
         )
@@ -109,6 +125,7 @@ class CriticExecutor(SkillExecutor):
             findings=findings,
             coverage=coverage,
             verdict=_verdict(findings, draft.verdict),
+            standards=quality.standards_line(ears=settings().quality.ears),
         )
         return ReviewResponse(
             report=report,
@@ -231,6 +248,16 @@ def structural_findings(prd: PRDDocument) -> list[ReviewFinding]:
                 suggested_fix="Add at least one measurable outcome.",
             )
         )
+
+    # The wording rules (ISO 29148 / INCOSE, optionally EARS) live in their own
+    # module so they can be tested without booting an agent.
+    out.extend(
+        quality.rule_findings(
+            prd.requirements.requirements,
+            prd.requirements.glossary,
+            ears=settings().quality.ears,
+        )
+    )
     return out
 
 
@@ -238,12 +265,20 @@ def coverage_stats(prd: PRDDocument) -> dict[str, float]:
     reqs = prd.requirements.requirements
     total = len(reqs) or 1
     used_evidence = {ref.evidence_id for r in reqs for ref in r.source_refs}
+    # The quality score is computed over the wording findings only, so a
+    # degrading *writing* pipeline is visible separately from a degrading
+    # *citation* pipeline - they fail for different reasons and are fixed in
+    # different places.
+    wording = quality.rule_findings(
+        reqs, prd.requirements.glossary, ears=settings().quality.ears
+    )
     return {
         "requirements": float(len(reqs)),
         "cited_requirements": sum(1 for r in reqs if r.source_refs) / total,
         "with_acceptance_criteria": sum(1 for r in reqs if r.acceptance_criteria) / total,
         "derived_share": sum(1 for r in reqs if r.derived) / total,
         "evidence_used": len(used_evidence) / (len(prd.evidence) or 1),
+        "quality_clean": quality.quality_score(reqs, wording),
     }
 
 

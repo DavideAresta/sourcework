@@ -20,11 +20,14 @@ from sourcework import paths
 ROLES = ("default", "reasoning", "vision", "fast", "critic")
 
 BACKEND_IDS = (
-    "litellm", "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli",
+    "litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli",
 )
-"""Every way of reaching a model. ``litellm`` is an HTTPS call against a hosted
-API and needs credentials; the other five drive a coding CLI that carries its
-own authentication."""
+"""Every way of reaching a model.
+
+``litellm`` reaches hosted APIs; ``llama-cpp`` reaches a local ``llama-server``
+directly through its OpenAI-compatible API. The remaining backends drive coding
+CLIs that carry their own authentication.
+"""
 
 
 def normalise_backend(backend: str) -> str:
@@ -39,6 +42,7 @@ def normalise_backend(backend: str) -> str:
 
 _MODEL_FIELDS = {
     "litellm": "litellm_models",
+    "llama-cpp": "llama_cpp_models",
     "claude-code": "claude_code_models",
     "opencode-cli": "opencode_models",
     "copilot-cli": "copilot_models",
@@ -102,6 +106,7 @@ class LLMSettings(BaseModel):
     # DEFAULT` into a dict-of-models, it tries to JSON-decode the leaf and fails.
     # Explicit fields also make the whole surface visible in .env.example.
     litellm_models: BackendModels = Field(default_factory=BackendModels)
+    llama_cpp_models: BackendModels = Field(default_factory=BackendModels)
     claude_code_models: BackendModels = Field(default_factory=BackendModels)
     opencode_models: BackendModels = Field(default_factory=BackendModels)
     copilot_models: BackendModels = Field(default_factory=BackendModels)
@@ -131,6 +136,11 @@ class LLMSettings(BaseModel):
     temperature: float = 0.2
     api_base: str | None = None
     api_key: str | None = None
+    llama_cpp_api_base: str = "http://127.0.0.1:8081/v1"
+    """OpenAI-compatible endpoint exposed by ``llama-server`` or llama-swap."""
+
+    llama_cpp_api_key: str | None = "local"
+    """Optional bearer token for a local server. ``llama-server`` accepts any value by default."""
     timeout_s: float = 180.0
     """Timeout for an API call. CLI backends use :attr:`cli_timeout_s`."""
 
@@ -268,7 +278,7 @@ class LLMSettings(BaseModel):
         return None
 
     def timeout_for(self, backend: str) -> float:
-        return self.timeout_s if normalise_backend(backend) == "litellm" else self.cli_timeout_s
+        return self.timeout_s if normalise_backend(backend) in {"litellm", "llama-cpp"} else self.cli_timeout_s
 
 
 class ConfluenceSettings(BaseModel):
@@ -299,6 +309,32 @@ class PeerSettings(BaseModel):
 
     def as_map(self) -> dict[str, str]:
         return self.model_dump()
+
+
+class RunsSettings(BaseModel):
+    """The UI's run history."""
+
+    retention_days: int = 0
+    """Delete finished runs older than this, on UI start-up.
+
+    0 (the default) keeps everything. The run store holds the full text of
+    every ingested source and the complete PRDs built from them, so an
+    installation with a data-retention policy needs a number here, not a
+    reminder to come back and delete things by hand. Only finished runs are
+    touched; anything in flight is left alone."""
+
+
+class QualitySettings(BaseModel):
+    """The requirements-quality rule pack (``sourcework.quality``)."""
+
+    ears: bool = False
+    """Write and check requirements in EARS patterns (WHEN/WHILE/IF-THEN/
+    WHERE/ubiquitous).
+
+    Off by default: conforming phrasing is a team choice, not a defect, and
+    turning it on changes what the analyst is asked to write, not just what the
+    critic flags. On, the analyst's prompt asks for EARS-shaped statements and
+    the critic flags statements that do not take one of the five shapes."""
 
 
 DEFAULT_MESH_KEY = "dev-local-shared-secret"
@@ -428,6 +464,8 @@ class Settings(BaseSettings):
     confluence: ConfluenceSettings = Field(default_factory=ConfluenceSettings)
     peers: PeerSettings = Field(default_factory=PeerSettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)
+    quality: QualitySettings = Field(default_factory=QualitySettings)
+    runs: RunsSettings = Field(default_factory=RunsSettings)
 
     max_concurrent_runs: int = 2
     """Runs executing at once; the rest queue.

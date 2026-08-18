@@ -259,6 +259,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         # below the granularity this checkpoint works at.
         run_id=request.run_id,
         resume=request.resume,
+        estimate=request.estimate,
     )
     # The whole request, so a changed audience or instruction invalidates the
     # stored requirements as surely as changed evidence would - minus the two
@@ -350,6 +351,22 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         )
 
     assert written is not None  # noqa: S101 - loop always runs at least once
+
+    if review is not None:
+        # The writer renders before the review exists, so the artifacts it
+        # returned carry no review section. Re-render with it attached: the
+        # renderers are pure functions of the prd + review, and a shipped PRD
+        # should carry its own verdict - including which standards the quality
+        # rules were checked against.
+        from sourcework.confluence.storage import render_prd
+        from sourcework.render import to_markdown
+
+        written = WriteResult(
+            prd=written.prd,
+            markdown=to_markdown(written.prd, review.report),
+            confluence_storage=render_prd(written.prd, review.report),
+            summary=written.summary,
+        )
 
     # -- 5. publish --------------------------------------------------------
     published_url = None

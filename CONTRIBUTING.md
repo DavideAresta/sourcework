@@ -16,7 +16,8 @@ by `tests/conftest.py`), so the suite is fast and offline. `python scripts/demo.
 drives all eight agents over real A2A JSON-RPC against that same fake, which is
 the cheapest way to catch a wiring mistake.
 
-To run against real models, see [docs/local-models.md](docs/local-models.md).
+To run against real models, see [docs/local-models.md](docs/local-models.md),
+and check the result with `sourcework doctor`.
 
 `SOURCEWORK_LLM__STUB=1` replaces every model call with a deterministic fake
 derived from the requested schema. The whole pipeline still runs — real HTTP,
@@ -45,6 +46,8 @@ src/sourcework/
   ingest/              fetch + document parsers + transcript parsers
   confluence/          REST client + storage-format renderer/reader
   render/              Markdown renderer
+  quality.py           deterministic requirements-quality rules (ISO 29148/INCOSE)
+  audit.py             the per-run audit bundle (zip + digests)
   agents/<name>/       agent.py (card + executor) and __main__.py per agent
   ui/                  the web UI: FastAPI (REST + SSE), SQLite run store,
                        .env editor, and static/ — plain ES modules, no build
@@ -75,7 +78,7 @@ locator; requirements cite evidence ids; citations are validated in code. A
 change that lets a requirement assert something no source said breaks the one
 guarantee this project makes.
 
-## Before you open a merge request
+## Before you open a pull request
 
 - `make lint && make test` are green.
 - New configuration is in `.env.example` **and** in the settings page allow-list

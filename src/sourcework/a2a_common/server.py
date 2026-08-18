@@ -63,6 +63,33 @@ def build_app(
     async def healthz() -> dict[str, str]:
         return {"status": "ok", "agent": card.name, "version": card.version}
 
+    @app.post("/api/restart", tags=["ops"])
+    async def restart() -> dict[str, str]:
+        """Re-exec this process so it re-reads its configuration.
+
+        Agents read their config once, at start-up, so a settings change is a
+        dead letter until the process restarts. Re-exec rather than exit:
+        whatever supervises this process - a terminal, ``nohup``, a compose
+        restart policy - keeps it alive without having to notice anything, and
+        under docker the container's PID 1 is replaced in place rather than
+        waiting out a restart backoff.
+
+        The response is sent before the exec: uvicorn's event loop cannot flush
+        it once the process image is gone, so the swap happens in a thread that
+        first gives the loop a moment to finish.
+        """
+        import os
+        import sys
+        import threading
+        import time
+
+        def _relaunch() -> None:
+            time.sleep(0.5)
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+
+        threading.Thread(target=_relaunch, daemon=True).start()
+        return {"status": "restarting"}
+
     add_a2a_routes_to_fastapi(
         app,
         agent_card_routes=create_agent_card_routes(card),

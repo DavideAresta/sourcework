@@ -24,8 +24,7 @@ from pydantic import BaseModel, Field
 from sourcework import checkpoint
 from sourcework.a2a_common import Progress, SkillError, SkillExecutor, build_card, public_url, skill
 from sourcework.agents.schemas import AnalyseRequest
-from sourcework.config import effective_llm
-from sourcework.llm import LLM, register_stub
+from sourcework.config import effective_llm, settingsfrom sourcework.llm import LLM, register_stub
 from sourcework.models import (
     Conflict,
     Evidence,
@@ -102,6 +101,31 @@ one.
 """
 
 
+ESTIMATE = """
+=== EFFORT ESTIMATION IS ON ===
+
+For each requirement, set `effort` to a T-shirt size - S, M, L or XL - and
+`effort_rationale` to one line explaining the size. Estimate implementation
+effort, not importance: a MUST can be an S. An estimate is always your
+inference, never something a source stated - the renderers mark it as derived,
+so do not pad the rationale with false authority.
+"""
+
+EARS = """
+=== EARS SYNTAX IS ON ===
+
+Write every requirement statement in one of the EARS shapes:
+
+- Ubiquitous:    "The system shall <response>."
+- Event-driven:  "When <trigger>, the system shall <response>."
+- State-driven:  "While <state>, the system shall <response>."
+- Unwanted:      "If <undesired condition>, then the system shall <response>."
+- Optional:      "Where <feature is present>, the system shall <response>."
+
+The critic checks the shapes deterministically, and a statement that takes
+none of them comes back as a finding.
+"""
+
 SLICE = """
 === THIS IS ONE SLICE OF THE EVIDENCE ===
 
@@ -164,6 +188,9 @@ class DraftRequirement(BaseModel):
     tags: list[str] = Field(default_factory=list)
     confidence: float = 0.8
     derived: bool = False
+    effort: str | None = None
+    """S, M, L or XL. Only when the request asked for estimates."""
+    effort_rationale: str | None = None
     existing_id: str | None = Field(
         default=None,
         description=(
@@ -254,9 +281,15 @@ class RequirementsExecutor(SkillExecutor):
         instructions = f"\n\nAdditional instruction from the requester: {req.instructions}" if req.instructions else ""
 
         system = SYSTEM
+        # EARS is part of the prompt, not just the review: the analyst is asked
+        # to write in the shapes the critic will then check for.
+        if settings().quality.ears:
+            system += EARS
+        if req.estimate:
+            system += ESTIMATE
         previous = ""
         if req.prior and req.prior.requirements:
-            system = SYSTEM + REFINEMENT
+            system = system + REFINEMENT
             previous = f"\n\n<<<PREVIOUS VERSION>>>\n{_render_prior(req.prior)}"
             await progress(
                 f"Refining {len(req.prior.requirements)} existing requirement(s) "
@@ -603,6 +636,10 @@ def _apply_merge(
             combined.tags += [t for t in other.tags if t not in combined.tags]
             combined.priority = _stronger(combined.priority, other.priority)
             combined.confidence = max(combined.confidence, other.confidence)
+            # The merged requirement is the union of its parts, so its estimate
+            # is the larger part's, never the smaller's.
+            combined.effort = _bigger_effort(combined.effort, other.effort)
+            combined.effort_rationale = combined.effort_rationale or other.effort_rationale
             # Sourced beats inferred: if any pass found real evidence for this
             # need, the merged requirement is not an inference.
             combined.derived = combined.derived and other.derived
@@ -643,6 +680,39 @@ def _apply_merge(
         open_questions=decision.open_questions,
         glossary=glossary,
     )
+
+
+_TSHIRT_ORDER = ["S", "M", "L", "XL"]
+
+
+def _tshirt(value: str | None) -> str | None:
+    """Normalise an estimate to S/M/L/XL, or None for anything else.
+
+    A model that answers "medium" gets its M; one that answers "quick" gets
+    nothing, because rendering "quick" as a size would be a claim the schema
+    never made.
+    """
+    if not value:
+        return None
+    normalised = value.strip().upper()
+    if normalised.startswith("M"):  # "M", "medium"
+        return "M"
+    for size in _TSHIRT_ORDER:
+        if normalised.startswith(size):
+            return size
+    return None
+
+
+def _bigger_effort(left: str | None, right: str | None) -> str | None:
+    """The larger of two T-shirt sizes. A merged requirement is the union of
+    its parts, and the union is never smaller than the largest part - taking
+    the smaller estimate would be the model arithmetic error this rule exists
+    to prevent."""
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left if _TSHIRT_ORDER.index(left) >= _TSHIRT_ORDER.index(right) else right
 
 
 _PRIORITY_ORDER = ["wont", "could", "should", "must"]
@@ -707,6 +777,7 @@ def _materialise(
     known = {r.id for r in (prior.requirements if prior else [])}
     prior_refs = {r.id: r.source_refs for r in (prior.requirements if prior else [])}
     prior_statements = {r.id: r.statement for r in (prior.requirements if prior else [])}
+    prior_effort = {r.id: (r.effort, r.effort_rationale) for r in (prior.requirements if prior else [])}
     taken: set[str] = set()
     next_free = max((_id_number(r) for r in known), default=0) + 1
 
@@ -768,6 +839,14 @@ def _materialise(
                     "inheriting evidence for the previous wording", req_id
                 )
 
+        effort = _tshirt(item.effort)
+        effort_rationale = (item.effort_rationale or "").strip() or None
+        # Same inheritance rule as citations: an untouched requirement keeps
+        # its estimate. A *rewritten* one does not - the old size says nothing
+        # about the new claim, and keeping it would be the quiet kind of wrong.
+        if effort is None and _same_claim(item.statement, prior_statements.get(req_id, "")):
+            effort, prior_rationale = prior_effort.get(req_id, (None, None))
+            effort_rationale = effort_rationale or prior_rationale
         requirements.append(
             Requirement(
                 id=req_id,
@@ -781,6 +860,8 @@ def _materialise(
                 tags=item.tags,
                 confidence=min(item.confidence, 0.5) if not refs else item.confidence,
                 derived=item.derived or not refs,
+                effort=effort,
+                effort_rationale=effort_rationale if effort else None,
             )
         )
 
@@ -904,6 +985,10 @@ def _render_prior(prior: RequirementSet) -> str:
     lines: list[str] = []
     for r in prior.requirements:
         head = f"{r.id} [{r.priority.value}/{r.kind.value}] {r.title}"
+        # Existing estimates are shown so the model can carry them forward;
+        # without them in view, a refinement quietly loses every size it had.
+        if r.effort:
+            head += f" (effort: {r.effort})"
         lines.append(f"{head}\n  {r.statement}")
         for criterion in r.acceptance_criteria:
             lines.append(f"  - {criterion}")

@@ -110,3 +110,48 @@ changed and why. Three things it gets right:
 Answered questions drop off, resolved conflicts get applied, and anything still
 open stays open.
 
+## Requirements quality
+
+The critic runs a deterministic rule pack before the model review — the rules
+follow ISO/IEC/IEEE 29148's characteristics of well-formed requirements and the
+INCOSE writing guide: escape clauses ("as appropriate", "TBD"), open-ended
+lists ("such as"), absolutes ("never", "100%"), compound statements, a priority
+that disagrees with its own modal verb, requirements with nothing measurable
+anywhere, and terms used but never defined. Findings flow through the normal
+revision loop, and the review's coverage stats carry a `quality_clean` score —
+the share of requirements no rule fired on. The review section of the PRD
+states what it was checked against.
+
+**EARS syntax** is opt-in (`SOURCEWORK_QUALITY__EARS=1`, or the settings page):
+the analyst then writes requirements in the five EARS shapes (ubiquitous,
+When…, While…, If…then…, Where…) and the critic flags statements that take
+none of them. Off by default — conforming phrasing is a team choice, not a
+defect.
+
+**Effort estimation** is opt-in per run (the checkbox on the run form,
+`estimate: true` on the request, `--estimate` on the CLI): each requirement
+gets a T-shirt size and a one-line rationale, rendered with `≈` because an
+estimate is model inference, never something a source said. Milestone rollups
+are counted in code. Off by default, because a consumer that re-estimates —
+a codegen pipeline, JIRA with story points — should not pay for numbers it
+will recompute.
+
+## Signing off, auditing, forgetting
+
+A finished run can be **approved or rejected** from its view. The record is
+kept, not enforced — this is single-operator software — and the history is
+append-only: a rejected-then-approved run shows both. The decision becomes the
+PRD's status, so the Confluence lozenge says what was decided.
+
+The **audit bundle** (the button on the run view, or
+`GET /api/runs/{id}/audit`) packs one run into a zip: the request, the result,
+evidence, sources, every progress event, and a manifest naming the backend,
+models, version and standards basis — with a SHA-256 per member and a
+whole-bundle digest, so an edited bundle no longer matches its own manifest.
+
+**Retention** is `SOURCEWORK_RUNS__RETENTION_DAYS` (settings, "History"):
+finished runs older than the limit are deleted when the UI starts. Deleting a
+run by hand returns an erasure record naming what was removed and what was
+left — uploaded files stay in the shared workspace, and the record says so
+rather than claiming otherwise.
+

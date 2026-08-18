@@ -6,6 +6,15 @@
   <title>Dashboard · SourceWork</title>
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    /* Applied before first paint. This has to be a blocking classic script: the
+       page's module runs after parse, which is late enough to show one frame of
+       the wrong theme. */
+    try {
+      var t = localStorage.getItem("sourcework.theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="top">
@@ -13,6 +22,7 @@
     <div class="spacer"></div>
     <a href="/"><button class="ghost">Runs</button></a>
     <button id="refresh" class="ghost">Refresh</button>
+    <button id="theme" class="ghost">Auto</button>
     <a href="/settings"><button class="ghost">Settings</button></a>
   </header>
 
@@ -24,10 +34,11 @@
       conflict is unresolved.
     </p>
 
-    <div id="totals" class="grid3" style="margin:18px 0 24px"></div>
+    <div id="totals" class="grid4" style="margin:18px 0 24px"></div>
     <div id="board"></div>
   </main>
 
+  <script type="module" src="/static/js/theme.js"></script>
   <script type="module" src="/static/js/dashboard.js"></script>
 </body>
 </html>

@@ -283,11 +283,11 @@ Two requirements cannot be implemented as written without decisions that sit out
 
 | ID | Title | Type | Location |
 |---|---|---|---|
-| `src-af40245e7fd2` | 01-business-requirements.pdf | document | `file:///mnt/mx500/projects/prd-forge/examples/demo_pack/01-business-requirements.pdf` |
-| `src-1f9fd3afcaa3` | 02-it-architecture-constraints.pdf | document | `file:///mnt/mx500/projects/prd-forge/examples/demo_pack/02-it-architecture-constraints.pdf` |
-| `src-467a83ee9f97` | 03-kickoff-meeting.vtt | transcript | `file:///mnt/mx500/projects/prd-forge/examples/demo_pack/03-kickoff-meeting.vtt` |
-| `src-03015e5aef51` | 04-refinement-notes.md | document | `file:///mnt/mx500/projects/prd-forge/examples/demo_pack/04-refinement-notes.md` |
-| `src-27fdd49dce84` | 05-returns-screen-wireframe.png | image | `file:///mnt/mx500/projects/prd-forge/examples/demo_pack/05-returns-screen-wireframe.png` |
+| `src-af40245e7fd2` | 01-business-requirements.pdf | document | `file:///home/user/sourcework/examples/demo_pack/01-business-requirements.pdf` |
+| `src-1f9fd3afcaa3` | 02-it-architecture-constraints.pdf | document | `file:///home/user/sourcework/examples/demo_pack/02-it-architecture-constraints.pdf` |
+| `src-467a83ee9f97` | 03-kickoff-meeting.vtt | transcript | `file:///home/user/sourcework/examples/demo_pack/03-kickoff-meeting.vtt` |
+| `src-03015e5aef51` | 04-refinement-notes.md | document | `file:///home/user/sourcework/examples/demo_pack/04-refinement-notes.md` |
+| `src-27fdd49dce84` | 05-returns-screen-wireframe.png | image | `file:///home/user/sourcework/examples/demo_pack/05-returns-screen-wireframe.png` |
 
 ## Traceability
 

@@ -59,7 +59,7 @@ class Field:
 FIELDS: tuple[Field, ...] = (
     # -- routing -----------------------------------------------------------
     Field("SOURCEWORK_LLM__BACKEND", "Default backend", "Routing", "select",
-          ("litellm", "claude-code", "opencode-cli", "copilot-cli", "codex-cli",
+          ("litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli", "codex-cli",
            "agy-cli", "stub"),
           help="What a run uses when it does not choose for itself."),
     Field("SOURCEWORK_LLM__FAILOVER_ORDER", "Failover order", "Routing",
@@ -80,6 +80,15 @@ FIELDS: tuple[Field, ...] = (
           backend="litellm", role="vision"),
     Field("SOURCEWORK_LLM__CRITIC_MODEL", "critic", "Models",
           backend="litellm", role="critic"),
+
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT", "default", "Models",
+          backend="llama-cpp", role="default"),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__REASONING", "reasoning", "Models",
+          backend="llama-cpp", role="reasoning"),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__VISION", "vision", "Models",
+          backend="llama-cpp", role="vision"),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__CRITIC", "critic", "Models",
+          backend="llama-cpp", role="critic"),
 
     Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__DEFAULT", "default", "Models",
           backend="claude-code", role="default"),
@@ -165,6 +174,15 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_LLM__API_BASE", "LLM gateway base URL", "Credentials",
           placeholder="https://llm-gateway.internal/v1"),
     Field("SOURCEWORK_LLM__API_KEY", "LLM gateway key", "Credentials", "password"),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_API_BASE", "llama.cpp server URL", "Credentials",
+          placeholder="http://127.0.0.1:8081/v1",
+          help="The OpenAI-compatible endpoint from llama-server or llama-swap."),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_API_KEY", "llama.cpp server key", "Credentials", "password",
+          help="Optional. llama-server accepts any value unless you enable its API key."),
+    Field("SOURCEWORK_MODEL_DIRS", "Local model directories", "Credentials",
+          placeholder="/home/you/.lmstudio/models:/srv/models",
+          help="Colon-separated folders to scan recursively for GGUF models. Used by "
+               "scripts/llama-models.py and llama-swap."),
     Field("SOURCEWORK_LLM__CODEX_HOME", "CODEX_HOME", "Credentials",
           help="A dedicated Codex config dir, so runs get a clean session. Note that "
                "an OPENAI_API_KEY in your environment makes Codex bill the API instead "
@@ -186,6 +204,16 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_SECURITY__API_KEY", "Shared secret", "Mesh", "password"),
     Field("SOURCEWORK_LOG_LEVEL", "Log level", "Mesh", "select",
           ("DEBUG", "INFO", "WARNING", "ERROR")),
+
+    # -- quality & history ---------------------------------------------------
+    Field("SOURCEWORK_QUALITY__EARS", "EARS syntax", "Quality", "bool",
+          help="Analyst writes requirements in EARS shapes (When/While/If-then/"
+               "Where/ubiquitous) and the critic flags statements that take none "
+               "of them. Off: phrasing is free."),
+    Field("SOURCEWORK_RUNS__RETENTION_DAYS", "Run retention (days)", "History", "number",
+          help="Finished runs older than this are deleted when the UI starts. "
+               "0 keeps everything. The store holds full source text, so a "
+               "retention policy belongs here."),
 )
 
 BY_KEY = {f.key: f for f in FIELDS}
@@ -356,10 +384,10 @@ def _suggestion(field: Field, current: dict[str, str]) -> str:
     A cell that stays empty and offers the endpoint's real models from the
     picker is the honest alternative.
 
-    Only ``litellm`` is affected - the CLI backends authenticate themselves and
-    their suggestions are as valid as they ever were.
+    Local llama.cpp model ids are discovered from the selected server, so never
+    pre-fill a hosted profile id into those cells.
     """
-    if field.backend == "litellm" and _points_at_a_private_endpoint(current):
+    if field.backend == "llama-cpp" or (field.backend == "litellm" and _points_at_a_private_endpoint(current)):
         return ""
     return PROFILES[DEFAULT_PROFILE]["models"].get(field.key, "")
 
@@ -377,12 +405,14 @@ def profiles_for(path: Path) -> dict[str, dict[str, Any]]:
     if not _points_at_a_private_endpoint(read(path)):
         return PROFILES
 
+    local_keys = {f.key for f in FIELDS if f.backend == "llama-cpp"}
     litellm_keys = {f.key for f in FIELDS if f.backend == "litellm"}
+    excluded = local_keys | (litellm_keys if _points_at_a_private_endpoint(read(path)) else set())
     return {
         name: {
             **profile,
-            "models": {k: v for k, v in profile["models"].items() if k not in litellm_keys},
-            "detail": profile["detail"] + " Leaves your local endpoint's models alone.",
+            "models": {k: v for k, v in profile["models"].items() if k not in excluded},
+            "detail": profile["detail"] + " Leaves local endpoint models alone.",
         }
         for name, profile in PROFILES.items()
     }

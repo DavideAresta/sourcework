@@ -2806,7 +2806,7 @@
   "sources": [
     {
       "id": "src-af40245e7fd2",
-      "uri": "file:///mnt/mx500/projects/prd-forge/examples/demo_pack/01-business-requirements.pdf",
+      "uri": "file:///home/user/sourcework/examples/demo_pack/01-business-requirements.pdf",
       "title": "01-business-requirements.pdf",
       "modality": "document",
       "media_type": "application/pdf",
@@ -2817,7 +2817,7 @@
     },
     {
       "id": "src-1f9fd3afcaa3",
-      "uri": "file:///mnt/mx500/projects/prd-forge/examples/demo_pack/02-it-architecture-constraints.pdf",
+      "uri": "file:///home/user/sourcework/examples/demo_pack/02-it-architecture-constraints.pdf",
       "title": "02-it-architecture-constraints.pdf",
       "modality": "document",
       "media_type": "application/pdf",
@@ -2828,7 +2828,7 @@
     },
     {
       "id": "src-467a83ee9f97",
-      "uri": "file:///mnt/mx500/projects/prd-forge/examples/demo_pack/03-kickoff-meeting.vtt",
+      "uri": "file:///home/user/sourcework/examples/demo_pack/03-kickoff-meeting.vtt",
       "title": "03-kickoff-meeting.vtt",
       "modality": "transcript",
       "media_type": "text/vtt",
@@ -2848,7 +2848,7 @@
     },
     {
       "id": "src-03015e5aef51",
-      "uri": "file:///mnt/mx500/projects/prd-forge/examples/demo_pack/04-refinement-notes.md",
+      "uri": "file:///home/user/sourcework/examples/demo_pack/04-refinement-notes.md",
       "title": "04-refinement-notes.md",
       "modality": "document",
       "media_type": "text/markdown",
@@ -2859,7 +2859,7 @@
     },
     {
       "id": "src-27fdd49dce84",
-      "uri": "file:///mnt/mx500/projects/prd-forge/examples/demo_pack/05-returns-screen-wireframe.png",
+      "uri": "file:///home/user/sourcework/examples/demo_pack/05-returns-screen-wireframe.png",
       "title": "05-returns-screen-wireframe.png",
       "modality": "image",
       "media_type": "image/png",

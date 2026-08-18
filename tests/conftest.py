@@ -18,6 +18,19 @@ from sourcework.models import (  # noqa: E402
 )
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch):
+    """No developer .env may leak into the suite. Importing litellm calls
+    ``load_dotenv()``, which seeds os.environ with the checkout's real .env,
+    and pydantic-settings prefers env vars over dotenv files - so a Settings
+    built from a tmp .env silently reads the developer's values. Scrub every
+    SOURCEWORK_* key before each test, then re-apply the suite's own two."""
+    for key in [k for k in os.environ if k.startswith("SOURCEWORK_")]:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SOURCEWORK_LLM__STUB", "1")
+    monkeypatch.setenv("SOURCEWORK_LOG_LEVEL", "WARNING")
+
+
 @pytest.fixture
 def source() -> SourceDocument:
     return SourceDocument(

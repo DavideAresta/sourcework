@@ -6,11 +6,21 @@
   <title>Settings · SourceWork</title>
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    /* Applied before first paint. This has to be a blocking classic script: the
+       page's module runs after parse, which is late enough to show one frame of
+       the wrong theme. */
+    try {
+      var t = localStorage.getItem("sourcework.theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
 </head>
 <body>
   <header class="top">
     <div class="brand">Source<b>Work</b></div>
     <div class="spacer"></div>
+    <button id="theme" class="ghost">Auto</button>
     <a href="/dashboard"><button class="ghost">Dashboard</button></a>
     <a href="/"><button class="ghost">← Back</button></a>
   </header>
@@ -23,8 +33,8 @@
     </p>
 
     <div id="restart-note" class="card" style="display:none;border-left:3px solid var(--accent)">
-      <b>Restart the mesh to apply.</b>
-      <span class="muted">The agents read their configuration once, at start-up — nothing here reaches a process that is already running.</span>
+      <b>The mesh is restarting.</b>
+      <span class="muted">The agents read their configuration once, at start-up, so this page asked each one to restart itself. It will reload when they are back.</span>
     </div>
 
     <div class="card">
@@ -40,6 +50,7 @@
     </div>
   </main>
 
+  <script type="module" src="/static/js/theme.js"></script>
   <script type="module" src="/static/js/settings.js"></script>
 </body>
 </html>

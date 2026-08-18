@@ -717,7 +717,50 @@ def test_per_backend_models_fall_back_to_that_backend_default_role():
 def test_cli_backends_get_the_longer_timeout():
     cfg = LLMSettings(timeout_s=180, cli_timeout_s=600)
     assert cfg.timeout_for("litellm") == 180
+    assert cfg.timeout_for("llama-cpp") == 180
     assert cfg.timeout_for("opencode-cli") == 600
+
+
+def test_llama_cpp_is_a_local_backend_with_its_own_endpoint_and_models(monkeypatch):
+    """Picking llama.cpp must not reuse a hosted gateway's credentials or models."""
+    import shutil
+
+    from sourcework.backends import build
+
+    monkeypatch.setattr(shutil, "which", lambda command: "/usr/bin/llama-server")
+    cfg = LLMSettings(
+        backend="llama-cpp",
+        api_base="https://hosted-gateway.example/v1",
+        llama_cpp_api_base="http://127.0.0.1:8081/v1",
+        llama_cpp_models={"default": "openai/local"},
+    )
+
+    backend = build("llama-cpp", cfg)
+    assert backend.id == "llama-cpp"
+    assert backend.api_base == "http://127.0.0.1:8081/v1"
+    assert backend.available()
+    assert cfg.model_for("default") == "openai/local"
+
+
+def test_llama_cpp_lists_local_ggufs_when_the_server_is_not_running(monkeypatch, tmp_path):
+    """The Settings picker still works before llama-server has been launched."""
+    import shutil
+
+    import httpx
+
+    from sourcework.backends import build
+
+    model = tmp_path / "Qwen3.5-9B-Q4_K_M.gguf"
+    model.write_bytes(b"gguf")
+    (tmp_path / "mmproj-Qwen3.5-9B-BF16.gguf").write_bytes(b"projector")
+    monkeypatch.setenv("SOURCEWORK_MODEL_DIRS", str(tmp_path))
+    monkeypatch.setattr(shutil, "which", lambda command: "/usr/bin/llama-server")
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: (_ for _ in ()).throw(
+        httpx.ConnectError("server is down")
+    ))
+
+    cfg = LLMSettings(backend="llama-cpp", llama_cpp_api_base="http://127.0.0.1:8081/v1")
+    assert build("llama-cpp", cfg).list_models() == ["openai/qwen3.5-9b"]
 
 
 # ---------------------------------------------------------------------------

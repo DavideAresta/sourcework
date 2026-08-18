@@ -1,6 +1,9 @@
 [project]
 name = "sourcework"
-version = "0.1.0"
+# One version, in the package, read at build time. It was written out twice and
+# hand-kept in step, which is a bug waiting for the release where somebody bumps
+# one of them.
+dynamic = ["version"]
 description = "Agentic PRD generation over the A2A protocol: documents, transcripts, images and Confluence in -> a traceable PRD out."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -49,9 +52,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://gitlab.com/LudusFaber/sourcework"
-Source = "https://gitlab.com/LudusFaber/sourcework"
-Issues = "https://gitlab.com/LudusFaber/sourcework/-/issues"
+Homepage = "https://github.com/DavideAresta/sourcework"
+Source = "https://github.com/DavideAresta/sourcework"
+Issues = "https://github.com/DavideAresta/sourcework/issues"
 
 [project.scripts]
 sourcework = "sourcework.cli:main"
@@ -59,6 +62,9 @@ sourcework = "sourcework.cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/sourcework/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sourcework"]

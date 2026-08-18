@@ -129,6 +129,14 @@ class Requirement(BaseModel):
     derived: bool = False
     """True when the requirement was inferred rather than stated. Surfaced in
     the PRD so a reader knows what the model invented versus what was said."""
+    effort: str | None = None
+    """T-shirt size: S, M, L or XL. Present only when the run asked for
+    estimates (``PRDRequest.estimate``).
+
+    An estimate is always model arithmetic, never something a source said - it
+    renders with the same honesty marker as ``derived`` content, and the critic
+    never flags it as unsupported."""
+    effort_rationale: str | None = None
 
 
 class Conflict(BaseModel):
@@ -199,7 +207,7 @@ class PRDDocument(BaseModel):
     id: str = Field(default_factory=lambda: new_id("prd"))
     title: str
     status: str = "draft"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     generated_at: datetime = Field(default_factory=_now)
     authors: list[str] = Field(default_factory=list)
 
@@ -250,6 +258,11 @@ class ReviewReport(BaseModel):
     coverage: dict[str, float] = Field(default_factory=dict)
     verdict: str = "needs_revision"
     """approved | needs_revision | reject"""
+    standards: str = ""
+    """What the deterministic quality rules were checked against (e.g.
+    ISO/IEC/IEEE 29148 + INCOSE GtWR, EARS on or off). Rendered in the PRD's
+    review section, because a quality claim without its yardstick is just an
+    adjective."""
 
     @property
     def blocking(self) -> list[ReviewFinding]:
@@ -320,6 +333,15 @@ class PRDRequest(BaseModel):
     """Model settings for this run only, overriding each agent's environment.
     Lets a caller pick the backend and per-role models without restarting the
     mesh - see :class:`sourcework.config.LLMOverrides`."""
+
+    estimate: bool = False
+    """Ask the analyst for a T-shirt effort estimate (S/M/L/XL + rationale) per
+    requirement.
+
+    Off by default: the estimate is a planning hint, and a consumer that
+    re-estimates anyway (a codegen pipeline, JIRA with existing story points)
+    should not pay for numbers it will recompute. On, every requirement carries
+    one, and rollups per milestone are computed in code at render time."""
 
     baseline: PRDBaseline | None = None
     """Refine an existing PRD rather than starting from nothing: its evidence

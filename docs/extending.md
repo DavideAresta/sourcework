@@ -107,6 +107,15 @@ app = build_app(store=PostgresStore(dsn))
 
 It is a structural protocol, so nothing needs to inherit from anything.
 
+**Retention is an optional seventh method.** If a store defines
+`purge_older_than(days) -> list[str]`, the UI calls it at start-up whenever
+`SOURCEWORK_RUNS__RETENTION_DAYS` is set, and erases the checkpoints of every id
+it returns. It is deliberately off the protocol: a store backed by something
+other than a clock may have no notion of "old", and a protocol wider than its
+use is a promise every implementation has to keep. A store without it is not
+broken — retention is simply announced as unavailable in the log rather than
+silently doing nothing.
+
 **Deliberately no notion of an owner.** SQLite with one writer and no user
 column is the right shape for a single-user application, and speculatively
 adding a tenancy column to core would be carrying a schema nothing reads. An

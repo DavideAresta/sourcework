@@ -36,6 +36,7 @@ export const api = {
   cancelRun: (id) => request(`/api/runs/${id}/cancel`, { method: 'POST' }),
   resumeRun: (id) => request(`/api/runs/${id}/resume`, { method: 'POST' }),
   publish: (id, body) => request(`/api/runs/${id}/publish`, { method: 'POST', ...json(body) }),
+  setApproval: (id, body) => request(`/api/runs/${id}/approval`, { method: 'POST', ...json(body) }),
 
   mesh: () => request('/api/mesh'),
   health: () => request('/healthz'),
@@ -63,6 +64,7 @@ export const api = {
   },
 
   artifactUrl: (id, kind) => `/api/runs/${id}/artifact/${kind}`,
+  auditUrl: (id) => `/api/runs/${id}/audit`,
 
   // Resolves when the run ends; `onEvent` fires for every progress line.
   streamRun(id, onEvent) {

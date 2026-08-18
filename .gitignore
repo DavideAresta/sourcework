@@ -22,3 +22,8 @@ scripts/llama-swap.d/
 # Editor/agent scratch
 .claude/
 .DS_Store
+
+# A design plan for a system nobody can run. In a public repository a document
+# that describes a service in the present tense reads as a promise, and this one
+# was explicitly considered and not taken.
+docs/multi-tenant.md

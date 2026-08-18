@@ -7,13 +7,23 @@ it — and no model can invent a citation.**
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![A2A v1.0](https://img.shields.io/badge/A2A-v1.0-4b32c3.svg)](https://a2a-protocol.org)
-[![No API key required](https://img.shields.io/badge/API%20key-optional-success.svg)](docs/backends.md)
+[![No API key required](https://img.shields.io/badge/API%20key-optional-success.svg)](#an-api-key-is-optional)
+
+**[davidearesta.github.io/sourcework](https://davidearesta.github.io/sourcework/)**
+— the same argument in one page, with the output on it.
 
 Eight agents, each an independently deployable [A2A](https://a2a-protocol.org)
 service. Runs entirely on your own hardware if you want it to — your documents
 never have to leave the machine.
 
-<!-- DEMO GIF: a run streaming in the web UI. Record with the demo pack. -->
+![A finished run: the progress log shows 23 requirements from 3 sources, the
+critic reporting 100% of requirements cited, then six blocking findings sending
+the draft back for one revision round.](docs/img/ui-run.png)
+
+*Three sources through the whole pipeline in 2m 41s, on a laptop, with no API
+key — an 8B model served locally by Ollama did the reading, the analysis and the
+drafting. The log is the guarantee stating itself, and then the critic sending
+six blocking findings back for a re-draft.*
 
 ## The one idea worth knowing
 
@@ -96,7 +106,73 @@ sourcework generate "Invoice reconciliation" \
 
 A run takes minutes, so it is interruptible: Ctrl-C stops the work rather than
 orphaning it, everything finished is checkpointed, and `--resume` picks up where
-it left off. See [docs/using-it.md](docs/using-it.md).
+it left off. See [Resume and Refine](#resume-and-refine).
+
+## The web UI
+
+```bash
+sourcework ui                # the front end alone, on :8080
+sourcework app               # the mesh and the front end in one process
+```
+
+It is an A2A client, not a ninth agent — the mesh runs without it, and anything
+it does can be done over JSON-RPC instead.
+
+| View | What it is for |
+|---|---|
+| **New run** | Drag files in, add URIs, notes and a CQL query; progress streams live while it works |
+| **Model output** | The reasoning and the prose as the model produces them, in their own panel below the progress log |
+| **Result** | The PRD rendered; a Requirements view putting each requirement beside the evidence that licenses it, flagging the ones with none; the evidence table; the critic's findings; per-backend token and cost totals. Approve/Reject signs off (append-only record), and the audit bundle downloads the whole run as one digest-verified zip |
+| **History** | Past runs, kept in SQLite, with downloads and Confluence publishing. `SOURCEWORK_RUNS__RETENTION_DAYS` purges finished runs past a limit on start-up |
+| **Settings** | A form over `.env`, with the backends this machine can actually use probed live |
+
+**The backend is a per-run choice.** The model controls on the run form become
+an override that travels inside the A2A request to every agent, so one run can
+go to `claude-code` and the next to `opencode-cli` with nothing restarted — and
+the run records what produced it. Leaving a control on *configured default*
+omits it, so the environment still decides.
+
+Saved settings work differently. Agents read their configuration once, at
+start-up, so the settings page says **restart the mesh** rather than pretending
+otherwise. Secrets render masked, and a masked value is never written back — so
+opening the page cannot leak a token, and saving it cannot blank one.
+
+It follows your system theme, and the control in the header pins it to light or
+dark when you would rather it did not. Three states rather than a switch,
+because a two-way toggle makes *follow the system* unreachable the moment you
+click it once.
+
+### Resume and Refine
+
+A run that dies — a timeout, a cancel, an app restart — keeps whatever it had
+already finished. **Resume** starts from the last completed stage instead of
+re-reading every document and re-analysing every piece of evidence; any stage
+whose inputs changed since, a different backend or an edited source file, is
+recomputed regardless. It is never automatic, because cancelling a run usually
+means the configuration was wrong, and quietly reusing what that configuration
+produced would hand back the document you had just rejected. Resuming works
+below the stage level too: the analyst saves each slice of evidence as it
+finishes, so an interruption costs the slices still in flight rather than all of
+them. On the command line the same thing is `--resume`.
+
+A finished run has nothing to resume — that one wants **Refine**. A PRD ends by
+telling you what it could not determine, and the Refine tab is where you answer
+it: open questions get an answer box each, and your answer becomes a new source,
+so the requirement it justifies can *cite* it like any other evidence. New
+requirements, decisions and follow-up documents go in the same way.
+
+Refining produces a **new run**, not an edit, and the old PRD stays exactly as
+it was. Three things it gets right: `REQ-` ids survive rewording, because the id
+identifies the need rather than the sentence, and new ids are numbered above the
+highest ever issued so a ticket quoting `REQ-014` never silently repoints;
+evidence is carried rather than re-read, because re-ingesting would cost the
+tokens again and mint new evidence ids, breaking every citation in the document
+you already have; and untouched requirements keep their citations, so nothing
+sourced gets quietly demoted to `derived`.
+
+The UI binds `127.0.0.1` and has no authentication — see
+[Security](#security) before you change that.
+[docs/using-it.md](docs/using-it.md) is the longer version of this section.
 
 ## An API key is optional
 
@@ -118,8 +194,10 @@ sourcework backends          # what is usable on this machine
 
 Models are chosen per role — a cheap one for extraction, a strong one for the
 analyst, a *different family* for the critic so the review is adversarial rather
-than agreeable. Backends fail over when one hits a usage limit.
-See [docs/backends.md](docs/backends.md).
+than agreeable. Backends fail over when one hits a usage limit. Every knob —
+per-role models, failover order, narration — is in
+[docs/backends.md](docs/backends.md) and commented inline in
+[`.env.example`](.env.example).
 
 ## Or entirely on your own hardware
 
@@ -139,7 +217,8 @@ already have, says which ones fit your card, and generates a
 [llama-swap](https://github.com/mostlygeek/llama-swap) config so roles can use
 different models behind one endpoint. The four things that decide whether a
 local run works at all are written down in
-[docs/local-models.md](docs/local-models.md).
+[docs/local-models.md](docs/local-models.md); `sourcework doctor` reports what
+is configured against what is actually reachable.
 
 ## The mesh
 
@@ -152,11 +231,13 @@ local run works at all are written down in
 | **Confluence Connector** | 8004 | CQL search, page + attachment read, idempotent publish |
 | **Requirements Analyst** | 8005 | Cluster, de-dup, MoSCoW, conflicts, open questions |
 | **PRD Writer** | 8006 | Narrative + Markdown + Confluence storage XHTML |
-| **PRD Critic** | 8007 | Deterministic traceability checks, then adversarial review |
+| **PRD Critic** | 8007 | Deterministic traceability + quality checks (ISO/IEC/IEEE 29148, INCOSE), then adversarial review |
 
 Every agent serves `/.well-known/agent-card.json`, `/healthz` and `/docs`, so
 any A2A client can drive the mesh — the web UI is one such client, not a ninth
-agent. See [docs/a2a.md](docs/a2a.md) for the Python and raw JSON-RPC calls.
+agent. The card names the skills an agent will answer to, which is what the
+orchestrator dispatches on. See [docs/a2a.md](docs/a2a.md) for the Python and
+raw JSON-RPC calls.
 
 Or in containers:
 
@@ -167,6 +248,10 @@ curl localhost:8000/.well-known/agent-card.json
 
 ## Documentation
 
+Everything here describes what the code does today. Design notes for things that
+were considered and not built are not in the repository, because a document
+written in the present tense about a system nobody can run reads as a promise.
+
 | | |
 |---|---|
 | [docs/using-it.md](docs/using-it.md) | The web UI, watching the model work, resuming an interrupted run, refining a PRD into its next version |
@@ -174,9 +259,12 @@ curl localhost:8000/.well-known/agent-card.json
 | [docs/local-models.md](docs/local-models.md) | Local inference end to end: context windows, constrained JSON, llama-swap, large inputs |
 | [docs/a2a.md](docs/a2a.md) | Driving the mesh as an A2A client |
 | [docs/extending.md](docs/extending.md) | Adding a publish destination, authentication or a run store from outside the repo |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Why it is shaped this way — the design rationale and message flow |
-| [docs/desktop.md](docs/desktop.md) | Running as a local desktop app, and why not Electron |
-| [docs/multi-tenant.md](docs/multi-tenant.md) | What a hosted service would take. Considered and not taken |
+| [docs/desktop.md](docs/desktop.md) | Running it as a desktop app, and why not Electron |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Why it is shaped this way — the design rationale and the message flow |
+| [SECURITY.md](SECURITY.md) | What this software assumes about the machine it runs on |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Getting set up, where things live, what a good change looks like |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, and the pre-1.0 rule |
+| [THIRD_PARTY.md](THIRD_PARTY.md) | Vendored code, the tools it drives, and model-weight licences |
 
 ## Security
 

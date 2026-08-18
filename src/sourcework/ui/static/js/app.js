@@ -46,6 +46,11 @@ async function refreshSidebar() {
           run.requirements !== null && run.requirements !== undefined
             ? el('span', {}, `· ${run.requirements} reqs`) : null,
           run.parent_id ? el('span', { title: 'refines an earlier version' }, '· \u21b3') : null,
+          run.approval === 'approved'
+            ? el('span', { title: 'signed off' }, '· \u2713 approved')
+            : run.approval === 'rejected'
+              ? el('span', { title: 'sent back' }, '· \u2717 rejected')
+              : null,
           // A draft is invisible otherwise: you'd have to open the run and
           // click through to Refine to discover you left work there.
           !drafts.isEmpty(drafts.load(run.id))

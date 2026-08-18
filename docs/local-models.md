@@ -10,6 +10,17 @@ SOURCEWORK_LLM__API_BASE=http://127.0.0.1:8081/v1
 SOURCEWORK_LLM__API_KEY=local
 SOURCEWORK_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
 SOURCEWORK_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
+Every model can be local. In Settings, choose **llama-cpp** and set its local
+server URL and per-role models. It connects directly to
+[llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`; LiteLLM is
+used as an in-process client library, so no LiteLLM proxy is required:
+
+```bash
+SOURCEWORK_LLM__BACKEND=llama-cpp
+SOURCEWORK_LLM__LLAMA_CPP_API_BASE=http://127.0.0.1:8081/v1
+SOURCEWORK_LLM__LLAMA_CPP_API_KEY=local
+SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT=openai/<model-id>
+SOURCEWORK_LLM__LLAMA_CPP_MODELS__REASONING=openai/<model-id>
 SOURCEWORK_LLM__TIMEOUT_S=1200                    # minutes per call, not seconds
 ```
 

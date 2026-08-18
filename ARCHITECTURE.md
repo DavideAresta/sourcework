@@ -3,7 +3,9 @@
 **Scope:** one job. Take heterogeneous requirement material — documents,
 meeting transcriptions, images, Confluence pages, loose notes — and turn it
 into a Product Requirements Document that a reader can audit line by line. It
-does not manage backlogs, estimate, plan sprints, or write code.
+does not manage backlogs, plan sprints, or write code. It will put a T-shirt
+size on each requirement when a run asks for one, marked throughout as model
+inference — a planning hint attached to the document, not a plan.
 
 ---
 
@@ -244,15 +246,35 @@ wrong run in Python first:
 - empty summary / problem statement / goals
 - unresolved conflicts, or blocking open questions → automatic `blocker`
 
+Alongside those, a rule pack in `quality.py` checks how each requirement is
+*written*, against published standards rather than taste — the ISO/IEC/IEEE
+29148 characteristics and the INCOSE writing rules: escape clauses, open-ended
+lists, absolutes, two obligations under one id, a priority that disagrees with
+its own modal verb, nothing measurable anywhere, terms used but never defined.
+EARS conformance joins them when `SOURCEWORK_QUALITY__EARS=1`, which also
+changes what the analyst is asked to write — checking a shape nobody was asked
+for would be a rule pack picking a fight with its own pipeline. These findings
+are `minor` at worst: they exist to be fixed in the revision loop, not to block
+a document over a semicolon. The basis is recorded on the report
+(`standards`) and rendered with the review, because a quality claim without its
+yardstick is just an adjective.
+
 Only then does the model run, with the deterministic findings supplied as
 "already recorded, do not repeat", scoped to the judgement calls: unsupported
 narrative claims, contradictions, ambiguity, missing considerations, scope
 creep. The final verdict is computed, not asked for — any blocker or major
 forces `needs_revision` regardless of what the model said.
 
-Coverage statistics (`cited_requirements`, `derived_share`, `evidence_used`)
-ride along in the report, so a degrading pipeline is visible as a number rather
-than a vibe.
+Coverage statistics (`cited_requirements`, `derived_share`, `evidence_used`,
+`quality_clean`) ride along in the report, so a degrading pipeline is visible as
+a number rather than a vibe. Wording and citation are scored separately: they
+fail for different reasons and are fixed in different places, and one number
+covering both would read as each and mean neither.
+
+The writer runs before any of this, so the artifacts it returns carry no review
+section. After the last round the orchestrator re-renders both — the renderers
+are pure functions of (prd, review) — so the document that ships carries its own
+verdict.
 
 ## 7. Confluence
 
@@ -598,6 +620,25 @@ What it adds is what a browser needs and a protocol does not:
   endpoint that writes any key is an environment-injection endpoint and the
   environment is where the API keys live. Secrets go out masked and a masked
   value coming back means "unchanged".
+- **Sign-off.** A finished run can be approved or rejected. Recorded, not
+  enforced: single-operator software, so the name is what the operator typed
+  and the point is the trail, not a gate. The history is append-only — a
+  rejected-then-approved run shows both — and the decision becomes the
+  document's `status`, which is why approving re-renders the artifacts (with
+  the stored review, or signing a document would quietly delete its review
+  section).
+- **The audit bundle.** The store already holds everything an auditor asks
+  about, but as a SQLite row on one machine. `audit.py` packs a run into one
+  zip — request, result, evidence, sources, events, and a manifest naming the
+  backend, models, version and standards basis — with a SHA-256 per member and
+  one over the set. Tamper-evidence, not tamper-proofing: the bundle makes the
+  claim, the digests let anyone check it.
+- **Retention.** `SOURCEWORK_RUNS__RETENTION_DAYS` deletes finished runs past a
+  limit at start-up, checkpoints included — both hold the full source text, and
+  erasing one while keeping the other would make the setting a half-truth. Runs
+  in flight are never touched, and a purge is logged rather than silent. The
+  capability is not on the `Store` protocol: a custom store may have no
+  clock-based notion of "old", so an absent one is announced, not skipped.
 
 The front end is plain ES modules with no build step: `make install` stays the
 only setup, the Docker image gains nothing, and there is no lockfile to keep

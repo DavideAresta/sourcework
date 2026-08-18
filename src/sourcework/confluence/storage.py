@@ -29,6 +29,9 @@ _SEVERITY_COLOUR = {
     Severity.NIT: "Grey",
 }
 
+# The document's own status, which a sign-off in the UI writes.
+_STATUS_COLOUR = {"approved": "Green", "rejected": "Red", "draft": "Yellow"}
+
 
 def esc(text: str | None) -> str:
     return escape(text or "", {'"': "&quot;"})
@@ -146,7 +149,10 @@ def render_prd(prd: PRDDocument, review: ReviewReport | None = None) -> str:
         panel(
             "Generated document",
             "<p>"
-            + status_lozenge(prd.status.upper(), "Yellow")
+            # The colour follows the decision, not just the word: a page that
+            # has been signed off and one that was sent back read differently
+            # from across the room, which is the only way a lozenge is read.
+            + status_lozenge(prd.status.upper(), _STATUS_COLOUR.get(prd.status, "Yellow"))
             + f" Version {esc(prd.version)} &#183; generated "
             + f"{esc(prd.generated_at.strftime('%Y-%m-%d %H:%M UTC'))} by SourceWork from "
             + f"{len(prd.sources)} source(s) and {len(prd.evidence)} evidence item(s)."
@@ -188,15 +194,28 @@ def render_prd(prd: PRDDocument, review: ReviewReport | None = None) -> str:
         )
 
     out.append("<h2>Requirements</h2>")
+    # Estimates render only when the run asked for them, and always marked as
+    # what they are: model inference, never something a source stated.
+    any_effort = any(r.effort for r in prd.requirements.requirements)
+    if any_effort:
+        out.append(
+            "<p><em>Effort estimates (≈) are T-shirt sizes inferred by the model, "
+            "not stated in any source. Treat them as planning hints.</em></p>"
+        )
     for kind in ("functional", "non_functional", "constraint", "assumption", "out_of_scope"):
         group = [r for r in prd.requirements.requirements if r.kind.value == kind]
         if not group:
             continue
         out.append(f"<h3>{esc(kind.replace('_', ' ').title())}</h3>")
+        headers = ["ID", "Priority"] + (["Effort"] if any_effort else []) + [
+            "Requirement",
+            "Acceptance criteria",
+            "Sources",
+        ]
         out.append(
             table(
-                ["ID", "Priority", "Requirement", "Acceptance criteria", "Sources"],
-                [_requirement_row(r, ev, src) for r in group],
+                headers,
+                [_requirement_row(r, ev, src, any_effort) for r in group],
             )
         )
 
@@ -250,14 +269,18 @@ def render_prd(prd: PRDDocument, review: ReviewReport | None = None) -> str:
 
     if prd.milestones:
         out.append("<h2>Milestones</h2>")
+        # The size rollup is counted here, in code: the model is never trusted
+        # to count, and "2S 3M 1XL" is arithmetic over data it already emitted.
+        effort_by_id = {r.id: r.effort for r in prd.requirements.requirements if r.effort}
         out.append(
             table(
-                ["Milestone", "Description", "Requirements", "Target"],
+                ["Milestone", "Description", "Requirements", "Effort", "Target"],
                 [
                     [
                         esc(m.name),
                         esc(m.description or ""),
                         esc(", ".join(m.requirement_ids)),
+                        esc(_effort_rollup(m.requirement_ids, effort_by_id)),
                         esc(m.target or "-"),
                     ]
                     for m in prd.milestones
@@ -300,7 +323,20 @@ def render_prd(prd: PRDDocument, review: ReviewReport | None = None) -> str:
     return "".join(out)
 
 
-def _requirement_row(r: Requirement, ev: dict, src: dict) -> list[str]:
+def _effort_rollup(req_ids: list[str], effort_by_id: dict[str, str]) -> str:
+    """A milestone's sizes, counted in code: `2S 3M 1XL`. "-" when nothing was
+    estimated."""
+    counts: dict[str, int] = {}
+    for req_id in req_ids:
+        size = effort_by_id.get(req_id)
+        if size:
+            counts[size] = counts.get(size, 0) + 1
+    if not counts:
+        return "-"
+    return " ".join(f"{counts[s]}{s}" for s in ("S", "M", "L", "XL") if s in counts)
+
+
+def _requirement_row(r: Requirement, ev: dict, src: dict, with_effort: bool = False) -> list[str]:
     refs = []
     for ref in r.source_refs:
         source = src.get(ref.source_id)
@@ -308,9 +344,17 @@ def _requirement_row(r: Requirement, ev: dict, src: dict) -> list[str]:
         loc = ref.locator or (ev[ref.evidence_id].locator if ref.evidence_id in ev else "")
         refs.append(esc(f"{label} ({loc})" if loc else label))
     marker = " " + status_lozenge("derived", "Blue") if r.derived else ""
-    return [
+    row = [
         esc(r.id),
         status_lozenge(r.priority.value.upper(), _PRIORITY_COLOUR[r.priority]),
+    ]
+    if with_effort:
+        # ≈ marks it as inferred; a bare letter would read as sourced data.
+        effort = f"≈{esc(r.effort)}" if r.effort else "-"
+        if r.effort and r.effort_rationale:
+            effort += f"<br/><em>{esc(r.effort_rationale)}</em>"
+        row.append(effort)
+    return row + [
         f"<p><strong>{esc(r.title)}</strong>{marker}</p><p>{esc(r.statement)}</p>"
         + (f"<p><em>{esc(r.rationale)}</em></p>" if r.rationale else ""),
         "<ul>" + "".join(f"<li><p>{esc(a)}</p></li>" for a in r.acceptance_criteria) + "</ul>"
@@ -342,6 +386,8 @@ def _traceability(prd: PRDDocument, ev: dict, src: dict) -> str:
 def _review_block(review: ReviewReport) -> str:
     verdict_colour = {"approved": "Green", "needs_revision": "Yellow", "reject": "Red"}
     head = f"<p>Verdict: {status_lozenge(review.verdict, verdict_colour.get(review.verdict, 'Grey'))}</p>"
+    if review.standards:
+        head += f"<p><em>Quality rules checked: {esc(review.standards)}</em></p>"
     if not review.findings:
         return head + "<p>No findings.</p>"
     rows = [
