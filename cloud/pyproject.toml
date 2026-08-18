@@ -4,6 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sourcework-cloud"
+version = "0.0.0"
 description = "SourceWork, as a hosted service: OIDC login, org tenancy, per-tenant settings."
 readme = { text = "The hosted distribution of SourceWork. Web-only - deliberately no CLI.", content-type = "text/plain" }
 requires-python = ">=3.11"

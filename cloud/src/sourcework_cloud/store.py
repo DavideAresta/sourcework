@@ -177,12 +177,15 @@ class PostgresStore:
         """
 
         def sweep(conn) -> int:
+            # `IN (...)` expanded per status, not `IN %s`: Postgres will not
+            # bind a parameter tuple into an IN-list.
+            placeholders = ", ".join("%s" for _ in IN_FLIGHT)
             cur = conn.execute(
-                """UPDATE runs SET status = 'failed',
+                f"""UPDATE runs SET status = 'failed',
                           error = 'The service restarted while this run was in flight.',
                           finished_at = now()
-                   WHERE tenant_id = %s AND status IN %s""",
-                (_tenant.get(), tuple(IN_FLIGHT)),
+                   WHERE tenant_id = %s AND status IN ({placeholders})""",
+                (_tenant.get(), *IN_FLIGHT),
             )
             return cur.rowcount
 
