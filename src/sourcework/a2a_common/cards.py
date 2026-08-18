@@ -20,9 +20,68 @@ from a2a.types import (
     StringList,
 )
 
+from sourcework import __version__
+from sourcework.config import settings
+
+PROTOCOL_VERSION = "1.0"
+JSON_MODE = "application/json"
+TEXT_MODE = "text/plain"
+
+API_KEY_SCHEME_NAME = "sourceworkApiKey"
+
+
+def api_key_scheme() -> SecurityScheme:
+    cfg = settings().security
+    return SecurityScheme(
+        api_key_security_scheme=APIKeySecurityScheme(
+            description="Shared secret for intra-mesh calls. Rotate per environment.",
+            location="header",
+            name=cfg.header,
+        )
+    )
+
+
+def skill(
+    skill_id: str,
+    name: str,
+    description: str,
+    *,
+    tags: list[str] | None = None,
+    examples: list[str] | None = None,
+    input_modes: list[str] | None = None,
+    output_modes: list[str] | None = None,
+) -> AgentSkill:
+    return AgentSkill(
+        id=skill_id,
+        name=name,
+        description=description,
+        tags=tags or ["prd"],
+        examples=examples or [],
+        input_modes=input_modes or [JSON_MODE],
+        output_modes=output_modes or [JSON_MODE],
+    )
+
+
+def build_card(
+    *,
+    name: str,
+    description: str,
+    url: str,
+    skills: list[AgentSkill],
+    version: str = __version__,
+    streaming: bool = True,
+    default_input_modes: list[str] | None = None,
+    default_output_modes: list[str] | None = None,
+) -> AgentCard:
+    cfg = settings()
+    card = AgentCard(
+        name=name,
+        description=description,
+        version=version,
         provider=AgentProvider(
             organization="SourceWork", url="https://github.com/DavideAresta/sourcework"
-        ),        capabilities=AgentCapabilities(streaming=streaming, push_notifications=False),
+        ),
+        capabilities=AgentCapabilities(streaming=streaming, push_notifications=False),
         default_input_modes=default_input_modes or [JSON_MODE, TEXT_MODE],
         default_output_modes=default_output_modes or [JSON_MODE, TEXT_MODE],
         supported_interfaces=[

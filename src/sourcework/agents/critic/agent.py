@@ -21,7 +21,8 @@ from pydantic import BaseModel, Field
 from sourcework import quality
 from sourcework.a2a_common import Progress, SkillExecutor, build_card, public_url, skill
 from sourcework.agents.schemas import ReviewRequest, ReviewResponse
-from sourcework.config import settingsfrom sourcework.llm import LLM, register_stub
+from sourcework.config import settings
+from sourcework.llm import LLM, register_stub
 from sourcework.models import PRDDocument, ReviewFinding, ReviewReport, Severity
 from sourcework.render import to_markdown
 

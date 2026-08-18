@@ -24,7 +24,8 @@ from pydantic import BaseModel, Field
 from sourcework import checkpoint
 from sourcework.a2a_common import Progress, SkillError, SkillExecutor, build_card, public_url, skill
 from sourcework.agents.schemas import AnalyseRequest
-from sourcework.config import effective_llm, settingsfrom sourcework.llm import LLM, register_stub
+from sourcework.config import effective_llm, settings
+from sourcework.llm import LLM, register_stub
 from sourcework.models import (
     Conflict,
     Evidence,
