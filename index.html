@@ -836,6 +836,29 @@ git clone https://github.com/DavideAresta/sourcework
     </div>
   </section>
 
+  <!-- ============ THE HOSTED DISTRIBUTION ============ -->
+  <section class="wrap">
+    <div class="sheet rise">
+      <div class="sigla"><b>&#167;11</b> The hosted distribution</div>
+      <div>
+        <h2 class="h2">The same UI, served as a service.</h2>
+        <p class="p">
+          A sibling package, <code>sourcework-cloud</code>, mounts this exact web UI over
+          Postgres instead of the laptop's SQLite file — tenant-scoped from the first row,
+          and behind a sign-in from the first request.
+        </p>
+        <p class="p p--muted">
+          It is a shell today, deliberately behavior-identical to the local app: one tenant,
+          a development token for sign-in, and runs that finish in this process. Identity
+          (Google and GitHub), per-tenant settings and worker infrastructure land on top
+          without the routes moving. It is web-only by construction — no CLI — and
+          <code>python -m sourcework_cloud serve</code> is the only way it starts. Nothing
+          in it is wired into the laptop distribution, and nothing here requires one.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ FOOTER: the page cites itself ============ -->
   <footer class="wrap foot">
     <p class="foot__title">Traceability matrix — for this page</p>
@@ -868,11 +891,16 @@ git clone https://github.com/DavideAresta/sourcework
             <td><a href="https://github.com/DavideAresta/sourcework/blob/main/SECURITY.md">SECURITY.md</a></td>
             <td class="loc">read it first</td>
           </tr>
+          <tr>
+            <td>The hosted distribution is the same UI, tenant-scoped and signed-in</td>
+            <td><a href="https://github.com/DavideAresta/sourcework/blob/phase-0-cloud-shell/cloud/src/sourcework_cloud/app.py">cloud/src/sourcework_cloud/app.py</a></td>
+            <td class="loc">Phase 0 shell</td>
+          </tr>
         </tbody>
       </table>
     </div>
     <div class="colophon">
-      <span>MIT · v0.1.0 · pre-1.0, so a minor bump may break things</span>
+      <span>MIT · v0.2.0 · pre-1.0, so a minor bump may break things</span>
       <span><a href="https://github.com/DavideAresta/sourcework">github.com/DavideAresta/sourcework</a></span>
     </div>
   </footer>
