@@ -20,6 +20,18 @@ and the version on every agent card are the same string by construction.
   `__version__` the build reads, served by `/healthz` — so the label cannot
   drift from the code it labels.
 
+### Fixed
+
+- **The claude-code model picker lists the account's models live instead of a
+  hand-maintained list.** With `ANTHROPIC_API_KEY` set, the suggestions come
+  from Anthropic's models endpoint, so a model released yesterday is offered
+  tomorrow; without one (the CLI's stored login), it falls back to the aliases
+  that resolve to each tier's latest build plus the current pinned generation.
+  The settings profiles, `.env.example` and the litellm role defaults moved
+  from the retired 4.x ids to the 5.x ids the live `opencode models` catalogue
+  serves. The agy presets keep claude 4.6 ids because that is what agy still
+  serves; its picker stays live.
+
 ## [0.2.0] — 2026-08-18
 
 ### Added

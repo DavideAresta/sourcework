@@ -32,6 +32,8 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
+import re
 
 from sourcework.backends import process
 from sourcework.backends.base import (
@@ -55,6 +57,17 @@ _DEFAULT_OUTPUT_CAP = 32_000
 """Claude Code's own default output ceiling. Raised per call when the request
 asks for more, so a long PRD narrative is not silently cut at 32k."""
 
+_ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
+_ANTHROPIC_VERSION = "2023-06-01"
+
+_CURATED_PINNED = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+"""The fallback pinned generation, offered only when the account's live list
+cannot be read. Alias entries always come first and resolve to each tier's
+latest build inside the CLI, so even the fallback tracks freshness for the
+common choices."""
+
+_MODEL_ALIASES = ["default", "opus", "sonnet", "haiku"]
+
 
 class ClaudeCodeBackend(LLMBackend):
     id = "claude-code"
@@ -64,21 +77,20 @@ class ClaudeCodeBackend(LLMBackend):
         return process.which("claude") is not None
 
     def list_models(self) -> list[str]:
-        """Curated, because the CLI has no model-listing command.
+        """Aliases first, then the account's live model list when it is readable.
 
-        Aliases first - they resolve to the latest build of that tier - then
-        pinned ids for a run that must not move underneath you. A model missing
-        here is still usable, it just is not offered as a suggestion.
+        The CLI has no model-listing command and exposes no registry, so the
+        models a stored login may use cannot be enumerated. With
+        ``ANTHROPIC_API_KEY`` set - the same key the CLI would bill against -
+        the account's real list comes from the models endpoint, and a model
+        released yesterday is offered tomorrow. Without a key the picker falls
+        back to the aliases plus the current pinned generation: both still
+        work, the fallback just cannot promise freshness.
         """
-        return [
-            "default",
-            "opus",
-            "sonnet",
-            "haiku",
-            "claude-opus-4-6",
-            "claude-sonnet-4-5",
-            "claude-haiku-4-5",
-        ]
+        live = _api_models()
+        if live:
+            return _MODEL_ALIASES + live
+        return _MODEL_ALIASES + _CURATED_PINNED
 
     async def generate(self, request: BackendRequest) -> BackendResult:
         has_media = bool(request.images)
@@ -200,6 +212,46 @@ class ClaudeCodeBackend(LLMBackend):
                 "claude-code returned an empty result field", backend=self.id, usage=usage
             )
         return BackendResult(text=str(text), usage=usage, model=node.get("model"))
+
+
+def _api_models() -> list[str]:
+    """The account's models from Anthropic's endpoint, or ``[]`` on any failure.
+
+    Best-effort by contract - the model list is a convenience in the UI, and a
+    settings page must still render when the endpoint is down or the key is
+    rejected. Failures are logged rather than hidden: the fallback list hides
+    the loss silently, and the warning is the only trace that a live list was
+    attempted at all.
+    """
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return []
+    try:
+        import httpx
+
+        response = httpx.get(
+            _ANTHROPIC_MODELS_URL,
+            headers={"x-api-key": key, "anthropic-version": _ANTHROPIC_VERSION},
+            timeout=3.0,
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "anthropic models list failed (HTTP %d): %s",
+                response.status_code,
+                (response.text or "")[:200],
+            )
+            return []
+        ids: list[str] = []
+        for node in response.json().get("data") or []:
+            model_id = str((node or {}).get("id") or "")
+            # Dated ids (claude-3-5-haiku-20241022) are the same model as their
+            # dateless twin; offering both would clutter the picker.
+            if model_id.startswith("claude-") and not re.search(r"-\d{8}$", model_id) and model_id not in ids:
+                ids.append(model_id)
+        return ids
+    except Exception as exc:  # noqa: BLE001 - any transport or parse failure is offline behaviour
+        logger.warning("anthropic models list unavailable: %s", exc)
+        return []
 
 
 def _usage_from(node: dict) -> LLMUsage | None:

@@ -94,6 +94,77 @@ def _claude_json(result="hello", **extra):
     return json.dumps({"is_error": False, "result": result, **extra})
 
 
+def test_claude_code_offers_aliases_then_the_curated_fallback(monkeypatch):
+    # With no API key there is no listing source - the CLI has no models
+    # command and exposes no registry - so the fallback must be the aliases
+    # (which resolve to each tier's latest build inside the CLI) plus the
+    # current pinned generation. A list that pins a retired generation would
+    # hand the user a suggestion that fails, which is the failure the
+    # docstring says it avoids.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    models = ClaudeCodeBackend().list_models()
+    assert models[:4] == ["default", "opus", "sonnet", "haiku"]
+    assert "claude-opus-5" in models
+    assert "claude-sonnet-5" in models
+    assert "claude-haiku-4-5" in models
+    assert "claude-opus-4-6" not in models
+    assert "claude-sonnet-4-5" not in models
+
+
+def test_claude_code_lists_the_account_models_live_when_a_key_is_set(monkeypatch):
+    # With ANTHROPIC_API_KEY - the key the CLI itself would bill against - the
+    # picker must reflect the account's real catalogue, so a model released
+    # yesterday is offered tomorrow instead of waiting for a curated refresh.
+    import httpx
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    seen: dict = {}
+
+    def fake_get(url, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        seen["url"] = url
+        seen["headers"] = kwargs.get("headers")
+        seen["timeout"] = kwargs.get("timeout")
+        return SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: {"data": [
+                {"id": "claude-opus-5"},
+                {"id": "claude-sonnet-5"},
+                {"id": "claude-haiku-4-5"},
+                {"id": "claude-fable-5"},
+                {"id": "claude-3-5-haiku-20241022"},
+            ]},
+        )
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    models = ClaudeCodeBackend().list_models()
+
+    assert seen["url"] == "https://api.anthropic.com/v1/models"
+    assert seen["headers"]["x-api-key"] == "sk-ant-test"
+    assert seen["timeout"] == 3.0
+    # The dated twin of haiku-4-5 is the same model; offering both would
+    # clutter the picker.
+    assert models == ["default", "opus", "sonnet", "haiku",
+                      "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5", "claude-fable-5"]
+
+
+def test_claude_code_falls_back_and_logs_when_the_models_endpoint_fails(monkeypatch, caplog):
+    # A rejected key must not hang or crash the settings page, and the loss of
+    # the live list must be reported: quiet degradation is treated as a defect.
+    import httpx
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-bad")
+
+    def refuse(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        return SimpleNamespace(status_code=401, text="authentication_error", json=lambda: {})
+
+    monkeypatch.setattr(httpx, "get", refuse)
+    models = ClaudeCodeBackend().list_models()
+    assert models == ["default", "opus", "sonnet", "haiku",
+                      "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+    assert any("models list failed (HTTP 401)" in r.message for r in caplog.records)
+
+
 async def test_claude_code_plain_generation_disables_tools_and_mcp(cli):
     cli.script(_claude_json())
     out = await ClaudeCodeBackend().generate(request(model="haiku", effort="low"))

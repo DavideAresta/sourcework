@@ -21,6 +21,12 @@ SOURCEWORK_LLM__CLAUDE_CODE_MODELS__DEFAULT=haiku
 SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
 ```
 
+The claude-code model picker is live when it can be: with `ANTHROPIC_API_KEY`
+set, the settings page lists the account's models from Anthropic's models
+endpoint, so a model released yesterday is offered tomorrow. Without a key it
+falls back to the aliases (`default`/`opus`/`sonnet`/`haiku`, which resolve to
+each tier's latest build inside the CLI) plus the current pinned generation.
+
 ```bash
 sourcework backends          # what is usable here
 sourcework backends --check  # actually call each one (spends real quota)
@@ -90,10 +96,10 @@ per backend because a model id from one backend is nonsense to another:
 
 ```bash
 # litellm — any LiteLLM provider: openai/…, azure/…, bedrock/…, vertex_ai/…, ollama/…
-SOURCEWORK_LLM__REASONING_MODEL=anthropic/claude-opus-4-6      # analyst, writer
-SOURCEWORK_LLM__DEFAULT_MODEL=anthropic/claude-sonnet-4-5      # extraction
-SOURCEWORK_LLM__VISION_MODEL=anthropic/claude-sonnet-4-5       # images
-SOURCEWORK_LLM__CRITIC_MODEL=anthropic/claude-opus-4-6         # the adversarial review
+SOURCEWORK_LLM__REASONING_MODEL=anthropic/claude-opus-5      # analyst, writer
+SOURCEWORK_LLM__DEFAULT_MODEL=anthropic/claude-sonnet-5      # extraction
+SOURCEWORK_LLM__VISION_MODEL=anthropic/claude-sonnet-5       # images
+SOURCEWORK_LLM__CRITIC_MODEL=anthropic/claude-opus-5         # the adversarial review
 SOURCEWORK_LLM__FAST_MODEL=anthropic/claude-haiku-4-5
 
 # per CLI backend

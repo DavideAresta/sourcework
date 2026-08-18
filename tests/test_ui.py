@@ -1153,11 +1153,12 @@ def test_the_default_profile_is_what_gets_pre_filled():
 
 
 def test_the_profiles_encode_what_was_measured():
-    # Not decoration: opus-4-6 is the opencode model that reasons well, and
-    # gpt-5.4 is the Copilot model that returns readable reasoning rather than
-    # an encrypted blob. Both were established by running them.
+    # Not decoration: opus-5/sonnet-5 are the current generation in the live
+    # `opencode models` catalogue (opus-4-6 was the model that reasoned well
+    # when the profiles were first written), and gpt-5.4 is the Copilot model
+    # that returns readable reasoning rather than an encrypted blob.
     balanced = env_file.PROFILES["balanced"]["models"]
-    assert balanced["SOURCEWORK_LLM__OPENCODE_MODELS__REASONING"] == "opencode/claude-opus-4-6"
+    assert balanced["SOURCEWORK_LLM__OPENCODE_MODELS__REASONING"] == "opencode/claude-opus-5"
     assert balanced["SOURCEWORK_LLM__COPILOT_MODELS__REASONING"] == "gpt-5.4"
 
 

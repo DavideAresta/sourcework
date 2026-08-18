@@ -246,8 +246,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "label": "Cheap",
         "detail": "The small model everywhere. Fine for a first pass over clean material.",
         "models": _models(
-            ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-4-5",
-             "anthropic/claude-sonnet-4-5"),
+            ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-5", "anthropic/claude-haiku-4-5",
+             "anthropic/claude-sonnet-5"),
             ("haiku", "sonnet", "haiku", "sonnet"),
             ("opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5",
              "opencode/claude-haiku-4-5"),
@@ -265,11 +265,11 @@ PROFILES: dict[str, dict[str, Any]] = {
         "detail": "The big model only where it earns its keep - the analyst, which is the "
                   "call that decides whether the PRD is any good.",
         "models": _models(
-            ("anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4-5",
-             "anthropic/claude-opus-4-6"),
+            ("anthropic/claude-sonnet-5", "anthropic/claude-opus-5", "anthropic/claude-sonnet-5",
+             "anthropic/claude-opus-5"),
             ("sonnet", "opus", "sonnet", "opus"),
-            ("opencode/claude-haiku-4-5", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5",
-             "opencode/claude-opus-4-6"),
+            ("opencode/claude-haiku-4-5", "opencode/claude-opus-5", "opencode/claude-sonnet-5",
+             "opencode/claude-opus-5"),
             # gpt-5.4 rather than auto: it is the Copilot model that returns
             # readable reasoning, which is what the run view shows you live.
             ("auto", "gpt-5.4", "auto", "gpt-5.4"),
@@ -283,11 +283,11 @@ PROFILES: dict[str, dict[str, Any]] = {
         "detail": "The big model everywhere. Slower and dearer; worth it on messy, "
                   "contradictory source material.",
         "models": _models(
-            ("anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6", "anthropic/claude-opus-4-6",
-             "anthropic/claude-opus-4-6"),
+            ("anthropic/claude-opus-5", "anthropic/claude-opus-5", "anthropic/claude-opus-5",
+             "anthropic/claude-opus-5"),
             ("opus", "opus", "opus", "opus"),
-            ("opencode/claude-opus-4-6", "opencode/claude-opus-4-6", "opencode/claude-sonnet-4-5",
-             "opencode/claude-opus-4-6"),
+            ("opencode/claude-opus-5", "opencode/claude-opus-5", "opencode/claude-sonnet-5",
+             "opencode/claude-opus-5"),
             ("gpt-5.4", "gpt-5.4", "gpt-5.4", "gpt-5.4"),
             ("gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex", "gpt-5.4-codex"),
             ("gemini-3.1-pro-high", "gemini-3.1-pro-high",
@@ -296,7 +296,7 @@ PROFILES: dict[str, dict[str, Any]] = {
     },
 }
 """Curated model sets, so nobody has to know from memory that
-``opencode/claude-opus-4-6`` is the one that reasons well and that an unset
+``opencode/claude-opus-5`` is the one that reasons well and that an unset
 opencode model fails outright. Every profile covers every backend, not just the
 active one: a failover target with no model is a failover that does not work."""
 
@@ -379,7 +379,7 @@ def _suggestion(field: Field, current: dict[str, str]) -> str:
 
     The profiles are lists of hosted model ids, which is right for the common
     case and actively wrong for a local install: pre-filling
-    ``anthropic/claude-opus-4-6`` into an empty cell means Save writes a model
+    ``anthropic/claude-opus-5`` into an empty cell means Save writes a model
     the operator has no key for, and the run fails on a value they never chose.
     A cell that stays empty and offers the endpoint's real models from the
     picker is the honest alternative.

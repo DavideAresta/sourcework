@@ -116,9 +116,9 @@ class LLMSettings(BaseModel):
     # LiteLLM role models. Kept as top-level fields rather than folded into
     # backend_models because they predate multi-backend support and are what
     # every existing .env sets.
-    default_model: str = "anthropic/claude-sonnet-4-5"
-    reasoning_model: str = "anthropic/claude-opus-4-6"
-    vision_model: str = "anthropic/claude-sonnet-4-5"
+    default_model: str = "anthropic/claude-sonnet-5"
+    reasoning_model: str = "anthropic/claude-opus-5"
+    vision_model: str = "anthropic/claude-sonnet-5"
     fast_model: str = "anthropic/claude-haiku-4-5"
 
     critic_model: str | None = None
