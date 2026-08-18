@@ -8,13 +8,14 @@
 // page says "restart" rather than implying it took effect.
 //
 // The models section is shaped around one observation: you run one backend at a
-// time. Twenty of the twenty-four model controls are therefore about backends
-// that will not be used tonight, so the active one gets the card and the rest get a
-// disclosure. Profiles sit on top because the useful knowledge here — that
+// time. Each backend is therefore its own card holding its four role cells and
+// the credentials only it reads, the active one open and the rest collapsed;
+// the genuinely shared keys (the gateway, Anthropic's, OpenAI's) sit in their
+// own card. Profiles sit on top because the useful knowledge here — that
 // `opencode/claude-opus-4-6` reasons well, and that an unset opencode model
 // fails outright — belongs in the app rather than in your memory.
 
-import { el, clear, mount, toast, field } from './dom.js';
+import { el, clear, toast, field } from './dom.js';
 import { api } from './api.js';
 import { attachModelPicker } from './combo.js';
 import { roleLabel, roleHelp } from './roles.js';
@@ -28,17 +29,25 @@ const controls = new Map();
 
 // Backend-specific gotchas worth surfacing where the model is chosen.
 const HINTS = {
+  'litellm': 'The gateway reaches any LiteLLM-supported provider (anthropic/, openai/, '
+    + 'ollama/…). Its keys — Anthropic, OpenAI and the gateway's own — live in Shared credentials.',
   'llama-cpp': 'Runs directly against a local llama-server or llama-swap; it does not need a '
-    + 'LiteLLM proxy. Start llama-server, then choose one of the model ids it reports here.',
-  'azure': 'The model id is your Azure deployment: `azure/<deployment>`. Set the key, endpoint '
-    + 'and API version in Credentials.',
-  'bedrock': 'Model ids are AWS names: `bedrock/anthropic.claude-sonnet-5-v1`. Set the region '
-    + 'and keys in Credentials; a session token is only needed for temporary credentials.',
+    + 'LiteLLM proxy. The server URL, key and model directories are right here: start '
+    + 'llama-server, then choose one of the model ids it reports.',
+  'azure': 'The model id is your Azure deployment: `azure/<deployment>`. The key, endpoint '
+    + 'and API version are right below.',
+  'bedrock': 'Model ids are AWS names: `bedrock/anthropic.claude-sonnet-5-v1`. The region '
+    + 'and keys are right below; a session token is only needed for temporary credentials.',
   'vertex-ai': 'Model ids are Google names: `vertex_ai/gemini-3.1-pro`. Credentials come from '
-    + 'GOOGLE_APPLICATION_CREDENTIALS (or default application credentials), plus project and region.',
-  'openai': 'Plain platform ids: `openai/gpt-5.4`. Needs OPENAI_API_KEY.',
+    + 'the service-account file below (or default application credentials), plus project and region.',
+  'openai': 'Plain platform ids: `openai/gpt-5.4`. Needs OPENAI_API_KEY — that one is shared, '
+    + 'in Shared credentials.',
+  'claude-code': 'Authenticates as you via the `claude` login — no key is needed here. Its '
+    + 'model picker also reads the shared Anthropic key.',
   'opencode-cli': 'opencode needs an explicit model: with none it fails outright with '
     + '"Unexpected server error".',
+  'copilot-cli': 'Authenticates as you via the `copilot` login — no key is needed here. '
+    + 'COPILOT_HOME is right below.',
   'agy-cli': 'agy ids usually carry their own tier (-high/-medium/-low), and then the '
     + 'reasoning-effort setting is left alone. It cannot read images, so the vision '
     + 'role falls through to another backend.',
@@ -93,11 +102,32 @@ async function load() {
     groups.get(field.group).push(field);
   }
 
+  // A group whose every field names a backend is one backend's card: its four
+  // role cells and the credentials only it reads, together. The shared keys
+  // (gateway, Anthropic, OpenAI) are deliberately not backend-tagged, so they
+  // fall out as a plain card. The profiles apply to every backend at once, so
+  // they sit above the cards, and the cards follow FIELDS order — the backend
+  // groups are contiguous there, which is what makes one profiles block cover
+  // them all.
+  const cells = new Map();
+  let backendBlock = null;
   for (const [group, fields] of groups) {
-    const isModels = fields.every((f) => f.backend && f.role);
-    const body = isModels ? modelSection(fields, data.profiles ?? {}) : plainGrid(fields);
-    form.append(el('div', { class: 'card' }, el('h3', { style: 'margin-top:0' }, group), body));
+    const isBackend = fields.every((f) => f.backend);
+    if (isBackend) {
+      if (!backendBlock) {
+        backendBlock = el('div', {}, profileRow(data.profiles ?? {}, cells));
+        form.append(backendBlock);
+      }
+      backendBlock.append(backendSection(group, fields, cells));
+    } else {
+      backendBlock = null;
+      form.append(el('div', { class: 'card' }, el('h3', { style: 'margin-top:0' }, group), plainGrid(fields)));
+    }
   }
+
+  document.querySelector('[data-key="SOURCEWORK_LLM__BACKEND"]')
+    ?.addEventListener('change', syncActive);
+  syncActive();
 }
 
 function plainGrid(fields) {
@@ -115,93 +145,75 @@ function plainGrid(fields) {
   return grid;
 }
 
-function modelSection(fields, profiles) {
-  const backends = [...new Set(fields.map((f) => f.backend))];
+function backendSection(group, fields, cells) {
+  // One backend per group — the data guarantees it — and the card is keyed by
+  // it, so the active/collapsed toggle and the model picker can find it.
+  const backend = fields[0].backend;
+  const roles = [...new Set(fields.filter((f) => f.role).map((f) => f.role))];
+  const creds = fields.filter((f) => !f.role);
 
-  // The roles the server sent, in the order it sent them - never a list
-  // written out again here. Reading them off the fields is also what keeps a
-  // browser holding a newer bundle than the process it is talking to - exactly
-  // what a restart-less deploy or a cached tab produces - from dereferencing a
-  // cell that does not exist: one throw in here takes down every section below
-  // it, and Models, Limits, Credentials and Confluence all vanish over one
-  // missing input.
-  const roles = [...new Set(fields.map((f) => f.role))];
-
-  // Built once and re-parented rather than re-rendered, so switching the active
-  // backend cannot silently discard something half-typed.
-  const cells = new Map();
+  // Cells are built once and stay in the DOM; opening another card never
+  // re-renders them, so nothing half-typed is discarded. Reading the roles off
+  // the fields is also what keeps a browser holding a newer bundle than the
+  // process it is talking to — exactly what a restart-less deploy or a cached
+  // tab produces — from dereferencing a cell that does not exist.
+  const modelGrid = el('div', { class: 'grid4' });
   for (const field of fields) {
+    if (!field.role) continue;
     const made = control(field);
     controls.set(field.key, made.read);
     made.node.title = field.key;
-    made.node.dataset.backend = field.backend;
-    cells.set(`${field.backend} ${field.role}`, { field, input: made.node });
+    made.node.dataset.backend = backend;
+    cells.set(field.key, { field, input: made.node });
+    modelGrid.append(el('div', {},
+      el('label', { title: field.key }, roleLabel(field.role)),
+      made.node,
+      el('div', { class: 'small muted', style: 'margin-top:3px' }, roleHelp(field.role))));
   }
 
-  const featured = el('div', { class: 'backend-card' });
-  const rest = el('div');
-  const details = el('details', { class: 'more' }, el('summary', {}, 'Other backends'), rest);
-
-  function paint() {
-    const active = activeBackend(backends);
-
-    clear(featured);
-    // `mount`, not native append: the last child is absent for every backend
-    // but opencode, and `.append(null)` renders the literal text "null".
-    mount(featured,
-      el('div', { class: 'row', style: 'gap:8px' },
-        el('span', { class: 'mono', style: 'font-size:15px' }, active),
-        el('span', { class: 'pill ok' }, 'active'),
-      ),
-      el('div', { class: 'small muted', style: 'margin:2px 0 14px' },
-        'Everything runs here unless a run chooses otherwise.'),
-      el('div', { class: 'grid4' },
-        ...roles.map((role) => {
-          const cell = cells.get(`${active} ${role}`);
-          return el('div', {},
-            el('label', { title: cell.field.key }, roleLabel(role)),
-            cell.input,
-            el('div', { class: 'small muted', style: 'margin-top:3px' }, roleHelp(role)));
-        }),
-      ),
-      HINTS[active]
-        ? el('div', { class: 'small muted', style: 'margin-top:12px' }, HINTS[active])
-        : null,
-    );
-
-    clear(rest);
-    const others = backends.filter((b) => b !== active);
-    for (const backend of others) {
-      rest.append(
-        el('div', { class: 'other-backend' },
-          el('div', { class: 'mono small', style: 'margin-bottom:6px' }, backend),
-          el('div', { class: 'grid4' },
-            ...roles.map((role) => {
-              const cell = cells.get(`${backend} ${role}`);
-              return el('div', {},
-                el('label', { class: 'small', title: cell.field.key }, roleLabel(role)),
-                cell.input);
-            })),
-        ),
-      );
-    }
-    details.querySelector('summary').textContent =
-      `Models for the other ${others.length} backends`;
+  const credsGrid = el('div', { class: 'grid2' });
+  for (const spec of creds) {
+    const made = control(spec);
+    controls.set(spec.key, made.read);
+    // A checkbox brings its own wrapping label, which already associates it;
+    // everything else gets one attached by `field`.
+    credsGrid.append(made.labelled
+      ? el('div', {}, made.node,
+          spec.help ? el('div', { class: 'small muted hint' }, spec.help) : null)
+      : field(spec.label, made.node, spec.help, spec.key));
   }
 
-  document.querySelector('[data-key="SOURCEWORK_LLM__BACKEND"]')
-    ?.addEventListener('change', paint);
-
-  const section = el('div', {}, profileRow(profiles, cells), featured, details);
-  paint();
-  return section;
+  return el('details', { class: 'backend-card', dataset: { backend } },
+    el('summary', {},
+      el('span', { class: 'mono', style: 'font-size:15px' }, group),
+      el('span', { class: 'pill ok active-pill' }, 'active')),
+    el('div', { class: 'small muted', style: 'margin:2px 0 14px' },
+      'Everything runs here unless a run chooses otherwise.'),
+    creds.length ? credsGrid : null,
+    modelGrid,
+    HINTS[backend]
+      ? el('div', { class: 'small muted', style: 'margin-top:12px' }, HINTS[backend])
+      : null);
 }
 
-// The active backend, read live from the Routing control, so the card follows
-// what you just picked rather than what was last saved.
-function activeBackend(backends) {
+// Open exactly the active backend's card, read live from the Routing control,
+// so the page follows what you just picked rather than what was last saved.
+function syncActive() {
+  const active = activeBackend();
+  for (const card of document.querySelectorAll('details.backend-card')) {
+    const open = card.dataset.backend === active;
+    card.open = open;
+    card.classList.toggle('active', open);
+  }
+}
+
+// The active backend: the Routing selection when it is one of the cards on
+// this page (hosted offers a subset), else the first card — "stub" has no card.
+function activeBackend() {
+  const offered = [...document.querySelectorAll('details.backend-card')]
+    .map((card) => card.dataset.backend);
   const chosen = document.querySelector('[data-key="SOURCEWORK_LLM__BACKEND"]')?.value;
-  return backends.includes(chosen) ? chosen : backends[0];
+  return offered.includes(chosen) ? chosen : offered[0];
 }
 
 function profileRow(profiles, cells) {

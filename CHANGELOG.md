@@ -17,6 +17,18 @@ change belongs to.
 
 ## [Unreleased]
 
+### Added
+
+- **Settings grouped per backend.** The settings page draws one card per backend
+  holding that backend's four model cells *and* the credentials only it reads
+  (Azure's keys, AWS's, Vertex's, llama.cpp's server, the CLI home dirs), with
+  the active backend's card open and the rest collapsed. The genuinely shared
+  keys — the gateway, Anthropic's and OpenAI's — live in a "Shared credentials"
+  card instead of a flat list. The grouping comes from the field data, so the
+  hosted install gets the same cards (just fewer of them), and the backend
+  filter now also drops a CLI backend's exclusive keys along with its model
+  cells.
+
 ## [0.3.0] — 2026-08-18
 
 The release is the distribution split: the local install keeps everything —

@@ -1157,13 +1157,15 @@ def test_narration_is_kept_out_of_the_log(caplog):
 def test_the_model_fields_carry_both_axes():
     """A model choice is two-dimensional: which backend, which role.
 
-    The settings page draws that as a grid, and it decides to do so by checking
-    that every field in the group carries both. A field added without them
-    silently drops the whole group back to a flat list, so pin it here.
+    The settings page draws that as a grid inside each backend's card, and it
+    decides the card holds a grid by checking the fields carry `role`. A field
+    added without it silently drops the group back to a flat list, so pin it
+    here.
     """
-    models = [f for f in env_file.FIELDS if f.group == "Models"]
+    models = [f for f in env_file.FIELDS if f.role]
     assert models
-    assert all(f.backend and f.role for f in models)
+    assert all(f.backend for f in models)
+    assert all(f.group == env_file.BACKEND_GROUPS[f.backend] for f in models)
 
     covered = {(f.backend, f.role) for f in models}
     for backend in ("litellm", "azure", "bedrock", "vertex-ai", "openai",
@@ -1174,12 +1176,33 @@ def test_the_model_fields_carry_both_axes():
 
 
 def test_every_field_belongs_to_a_named_group():
-    assert all(f.group for f in env_file.FIELDS)
-    # One flat group of sixteen controls was the thing being fixed.
+    """No backend's settings escape into a flat list.
+
+    The page's grouping is per backend: one card per backend holding its model
+    cells and its own credentials, plus a card for the keys everyone shares. A
+    flat "Models" grid or a flat "Credentials" list is exactly the thing being
+    fixed, so neither name may come back.
+    """
     from collections import Counter
 
-    biggest = Counter(f.group for f in env_file.FIELDS).most_common(1)[0]
-    assert biggest[0] == "Models", "the grid group may be large; a flat list may not"
+    assert all(f.group for f in env_file.FIELDS)
+    assert "Models" not in {f.group for f in env_file.FIELDS}
+    assert "Credentials" not in {f.group for f in env_file.FIELDS}
+
+    # Every backend the config knows is a card, and every card's fields all
+    # name that backend - the test the page uses to draw the card.
+    for backend, label in env_file.BACKEND_GROUPS.items():
+        fields = [f for f in env_file.FIELDS if f.group == label]
+        assert fields, f"no card for {backend}"
+        assert all(f.backend == backend for f in fields), f"{label} mixes backends"
+
+    # A card is small (four model cells plus that backend's own credentials), so
+    # no backend card may be the biggest group on the page - a giant backend
+    # group means settings drifted back into a flat list.
+    biggest = Counter(f.group for f in env_file.FIELDS).most_common(1)[0][0]
+    assert biggest not in set(env_file.BACKEND_GROUPS.values()), (
+        f"the biggest group is {biggest!r}; a backend card must stay small"
+    )
 
 
 def test_the_batching_knobs_are_reachable_from_the_ui():
@@ -1209,7 +1232,7 @@ def test_every_profile_covers_every_model_cell():
     # which is exactly why it is in the profiles.)
     cells = {
         f.key for f in env_file.FIELDS
-        if f.group == "Models"
+        if f.role
         and f.backend not in {"llama-cpp", "azure", "bedrock", "vertex-ai"}
     }
     for name, profile in env_file.PROFILES.items():
@@ -1239,8 +1262,43 @@ def test_suggestions_are_confined_to_the_model_cells():
     # Elsewhere "unset" is the right answer: the code has a default, and writing
     # a redundant copy of it into .env just pins a value nobody chose.
     fields = env_file.describe(Path("/nonexistent.env"))
-    stray = [f["key"] for f in fields if f["suggested"] and f["group"] != "Models"]
+    stray = [f["key"] for f in fields if f["suggested"] and not f["role"]]
     assert not stray
+
+
+def test_each_backend_owns_the_credentials_only_it_reads():
+    """A credential belongs to the provider that bills it.
+
+    Exclusive keys (Azure's, AWS's, Vertex's, llama.cpp's, the CLI home dirs)
+    are grouped with their backend's card, so the operator finds them next to
+    the models that need them; the keys more than one backend reads stay in the
+    shared card, and no backend may claim them.
+    """
+    exclusive = {
+        "AZURE_API_KEY": "azure", "AZURE_API_BASE": "azure", "AZURE_API_VERSION": "azure",
+        "AWS_REGION_NAME": "bedrock", "AWS_ACCESS_KEY_ID": "bedrock",
+        "AWS_SECRET_ACCESS_KEY": "bedrock", "AWS_SESSION_TOKEN": "bedrock",
+        "GOOGLE_APPLICATION_CREDENTIALS": "vertex-ai",
+        "SOURCEWORK_LLM__VERTEX_PROJECT": "vertex-ai",
+        "SOURCEWORK_LLM__VERTEX_LOCATION": "vertex-ai",
+        "SOURCEWORK_LLM__OPENAI_API_BASE": "openai",
+        "SOURCEWORK_LLM__LLAMA_CPP_API_BASE": "llama-cpp",
+        "SOURCEWORK_LLM__LLAMA_CPP_API_KEY": "llama-cpp",
+        "SOURCEWORK_MODEL_DIRS": "llama-cpp",
+        "SOURCEWORK_LLM__CODEX_HOME": "codex-cli",
+        "SOURCEWORK_LLM__COPILOT_HOME": "copilot-cli",
+    }
+    for key, backend in exclusive.items():
+        field = env_file.BY_KEY[key]
+        assert field.backend == backend, f"{key} should live in {backend}"
+        assert field.group == env_file.BACKEND_GROUPS[backend]
+
+    shared = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+              "SOURCEWORK_LLM__API_BASE", "SOURCEWORK_LLM__API_KEY"}
+    for key in shared:
+        field = env_file.BY_KEY[key]
+        assert not field.backend, f"{key} is read by more than one backend"
+        assert field.group == "Shared credentials"
 
 
 def test_a_limit_shows_the_default_it_would_otherwise_use(tmp_path: Path):

@@ -67,6 +67,30 @@ class Field:
         return self.kind == "password"
 
 
+BACKEND_GROUPS: dict[str, str] = {
+    "litellm": "litellm",
+    "azure": "Azure",
+    "bedrock": "Bedrock",
+    "vertex-ai": "Vertex AI",
+    "openai": "OpenAI",
+    "llama-cpp": "llama.cpp",
+    "claude-code": "Claude Code",
+    "opencode-cli": "OpenCode CLI",
+    "copilot-cli": "Copilot CLI",
+    "codex-cli": "Codex CLI",
+    "agy-cli": "AGY CLI",
+}
+"""The settings-page card each backend's fields live under.
+
+A model id belongs to a backend and means nothing to another, and a credential
+belongs to the provider that bills it, so the page groups by backend rather
+than keeping one flat "models" grid and one flat "credentials" list. The keys
+of this map are the backend ids (:data:`~sourcework.config.BACKEND_IDS`); the
+values are the card headings. The genuinely shared keys (the gateway, and
+Anthropic's/OpenAI's, which more than one backend reads) deliberately have no
+entry and live in the "Shared credentials" card instead."""
+
+
 FIELDS: tuple[Field, ...] = (
     # -- routing -----------------------------------------------------------
     Field("SOURCEWORK_LLM__BACKEND", "Default backend", "Routing", "select",
@@ -81,107 +105,182 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_LLM__STUB", "Stub mode", "Routing", "bool",
           help="Deterministic fake responses. No network, no keys, no CLI."),
 
-    # -- models, as a backend x role grid -----------------------------------
-    # A model id belongs to a backend and means nothing to another one, so the
-    # grid is the honest shape: leaving a cell empty is "let that backend pick".
-    Field("SOURCEWORK_LLM__DEFAULT_MODEL", "default", "Models",
+    # -- per backend: one card per backend ----------------------------------
+    # Each backend's four role cells and its own credentials live in the same
+    # group - the card the page draws. A model choice is still two-dimensional
+    # (which backend, which role); the cells carry it as `backend`/`role` so the
+    # page can render the grid, and the group is just the card's heading.
+    Field("SOURCEWORK_LLM__DEFAULT_MODEL", "default", BACKEND_GROUPS["litellm"],
           backend="litellm", role="default"),
-    Field("SOURCEWORK_LLM__REASONING_MODEL", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__REASONING_MODEL", "reasoning", BACKEND_GROUPS["litellm"],
           backend="litellm", role="reasoning"),
-    Field("SOURCEWORK_LLM__VISION_MODEL", "vision", "Models",
+    Field("SOURCEWORK_LLM__VISION_MODEL", "vision", BACKEND_GROUPS["litellm"],
           backend="litellm", role="vision"),
-    Field("SOURCEWORK_LLM__CRITIC_MODEL", "critic", "Models",
+    Field("SOURCEWORK_LLM__CRITIC_MODEL", "critic", BACKEND_GROUPS["litellm"],
           backend="litellm", role="critic"),
 
-    Field("SOURCEWORK_LLM__AZURE_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__AZURE_MODELS__DEFAULT", "default", BACKEND_GROUPS["azure"],
           backend="azure", role="default"),
-    Field("SOURCEWORK_LLM__AZURE_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__AZURE_MODELS__REASONING", "reasoning", BACKEND_GROUPS["azure"],
           backend="azure", role="reasoning"),
-    Field("SOURCEWORK_LLM__AZURE_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__AZURE_MODELS__VISION", "vision", BACKEND_GROUPS["azure"],
           backend="azure", role="vision"),
-    Field("SOURCEWORK_LLM__AZURE_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__AZURE_MODELS__CRITIC", "critic", BACKEND_GROUPS["azure"],
           backend="azure", role="critic"),
+    Field("AZURE_API_KEY", "API key", BACKEND_GROUPS["azure"], "password",
+          backend="azure"),
+    Field("AZURE_API_BASE", "Endpoint", BACKEND_GROUPS["azure"],
+          backend="azure",
+          placeholder="https://<resource>.openai.azure.com/",
+          help="The deployment name is the model id: `azure/<deployment>`."),
+    Field("AZURE_API_VERSION", "API version", BACKEND_GROUPS["azure"],
+          backend="azure",
+          placeholder="2024-06-01"),
 
-    Field("SOURCEWORK_LLM__BEDROCK_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__DEFAULT", "default", BACKEND_GROUPS["bedrock"],
           backend="bedrock", role="default"),
-    Field("SOURCEWORK_LLM__BEDROCK_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__REASONING", "reasoning", BACKEND_GROUPS["bedrock"],
           backend="bedrock", role="reasoning"),
-    Field("SOURCEWORK_LLM__BEDROCK_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__VISION", "vision", BACKEND_GROUPS["bedrock"],
           backend="bedrock", role="vision"),
-    Field("SOURCEWORK_LLM__BEDROCK_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__CRITIC", "critic", BACKEND_GROUPS["bedrock"],
           backend="bedrock", role="critic"),
+    Field("AWS_REGION_NAME", "Region", BACKEND_GROUPS["bedrock"], backend="bedrock",
+          placeholder="eu-west-1"),
+    Field("AWS_ACCESS_KEY_ID", "Access key id", BACKEND_GROUPS["bedrock"], "password",
+          backend="bedrock"),
+    Field("AWS_SECRET_ACCESS_KEY", "Secret access key", BACKEND_GROUPS["bedrock"], "password",
+          backend="bedrock"),
+    Field("AWS_SESSION_TOKEN", "Session token", BACKEND_GROUPS["bedrock"], "password",
+          backend="bedrock",
+          help="Optional; only needed for temporary credentials."),
 
-    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__DEFAULT", "default", BACKEND_GROUPS["vertex-ai"],
           backend="vertex-ai", role="default"),
-    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__REASONING", "reasoning", BACKEND_GROUPS["vertex-ai"],
           backend="vertex-ai", role="reasoning"),
-    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__VISION", "vision", BACKEND_GROUPS["vertex-ai"],
           backend="vertex-ai", role="vision"),
-    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__CRITIC", "critic", BACKEND_GROUPS["vertex-ai"],
           backend="vertex-ai", role="critic"),
+    Field("GOOGLE_APPLICATION_CREDENTIALS", "Service-account file", BACKEND_GROUPS["vertex-ai"],
+          backend="vertex-ai",
+          placeholder="/run/secrets/vertex-sa.json",
+          help="Path to the service-account JSON, or use Application Default "
+               "Credentials. Vertex model ids are `vertex_ai/<model>`."),
+    Field("SOURCEWORK_LLM__VERTEX_PROJECT", "GCP project", BACKEND_GROUPS["vertex-ai"],
+          backend="vertex-ai"),
+    Field("SOURCEWORK_LLM__VERTEX_LOCATION", "GCP region", BACKEND_GROUPS["vertex-ai"],
+          backend="vertex-ai",
+          placeholder="us-central1"),
 
-    Field("SOURCEWORK_LLM__OPENAI_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__DEFAULT", "default", BACKEND_GROUPS["openai"],
           backend="openai", role="default"),
-    Field("SOURCEWORK_LLM__OPENAI_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__REASONING", "reasoning", BACKEND_GROUPS["openai"],
           backend="openai", role="reasoning"),
-    Field("SOURCEWORK_LLM__OPENAI_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__VISION", "vision", BACKEND_GROUPS["openai"],
           backend="openai", role="vision"),
-    Field("SOURCEWORK_LLM__OPENAI_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__CRITIC", "critic", BACKEND_GROUPS["openai"],
           backend="openai", role="critic"),
+    Field("SOURCEWORK_LLM__OPENAI_API_BASE", "api_base", BACKEND_GROUPS["openai"],
+          backend="openai",
+          placeholder="https://api.openai.com/v1",
+          help="Optional; unset reaches openai.com. The key is shared with the "
+               "litellm backend - see Shared credentials."),
 
-    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT", "default", BACKEND_GROUPS["llama-cpp"],
           backend="llama-cpp", role="default"),
-    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__REASONING", "reasoning", BACKEND_GROUPS["llama-cpp"],
           backend="llama-cpp", role="reasoning"),
-    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__VISION", "vision", BACKEND_GROUPS["llama-cpp"],
           backend="llama-cpp", role="vision"),
-    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__CRITIC", "critic", BACKEND_GROUPS["llama-cpp"],
           backend="llama-cpp", role="critic"),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_API_BASE", "Server URL", BACKEND_GROUPS["llama-cpp"],
+          backend="llama-cpp",
+          placeholder="http://127.0.0.1:8081/v1",
+          local_only=True,
+          help="The OpenAI-compatible endpoint from llama-server or llama-swap."),
+    Field("SOURCEWORK_LLM__LLAMA_CPP_API_KEY", "Server key", BACKEND_GROUPS["llama-cpp"], "password",
+          backend="llama-cpp",
+          local_only=True,
+          help="Optional. llama-server accepts any value unless you enable its API key."),
+    Field("SOURCEWORK_MODEL_DIRS", "Local model directories", BACKEND_GROUPS["llama-cpp"],
+          backend="llama-cpp",
+          placeholder="/home/you/.lmstudio/models:/srv/models",
+          local_only=True,
+          help="Colon-separated folders to scan recursively for GGUF models. Used by "
+               "scripts/llama-models.py and llama-swap."),
 
-    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__DEFAULT", "default", BACKEND_GROUPS["claude-code"],
           backend="claude-code", role="default"),
-    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING", "reasoning", BACKEND_GROUPS["claude-code"],
           backend="claude-code", role="reasoning"),
-    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__VISION", "vision", BACKEND_GROUPS["claude-code"],
           backend="claude-code", role="vision"),
-    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__CLAUDE_CODE_MODELS__CRITIC", "critic", BACKEND_GROUPS["claude-code"],
           backend="claude-code", role="critic"),
 
-    Field("SOURCEWORK_LLM__OPENCODE_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__OPENCODE_MODELS__DEFAULT", "default", BACKEND_GROUPS["opencode-cli"],
           backend="opencode-cli", role="default"),
-    Field("SOURCEWORK_LLM__OPENCODE_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__OPENCODE_MODELS__REASONING", "reasoning", BACKEND_GROUPS["opencode-cli"],
           backend="opencode-cli", role="reasoning"),
-    Field("SOURCEWORK_LLM__OPENCODE_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__OPENCODE_MODELS__VISION", "vision", BACKEND_GROUPS["opencode-cli"],
           backend="opencode-cli", role="vision"),
-    Field("SOURCEWORK_LLM__OPENCODE_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__OPENCODE_MODELS__CRITIC", "critic", BACKEND_GROUPS["opencode-cli"],
           backend="opencode-cli", role="critic"),
 
-    Field("SOURCEWORK_LLM__COPILOT_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__COPILOT_MODELS__DEFAULT", "default", BACKEND_GROUPS["copilot-cli"],
           backend="copilot-cli", role="default"),
-    Field("SOURCEWORK_LLM__COPILOT_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__COPILOT_MODELS__REASONING", "reasoning", BACKEND_GROUPS["copilot-cli"],
           backend="copilot-cli", role="reasoning"),
-    Field("SOURCEWORK_LLM__COPILOT_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__COPILOT_MODELS__VISION", "vision", BACKEND_GROUPS["copilot-cli"],
           backend="copilot-cli", role="vision"),
-    Field("SOURCEWORK_LLM__COPILOT_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__COPILOT_MODELS__CRITIC", "critic", BACKEND_GROUPS["copilot-cli"],
           backend="copilot-cli", role="critic"),
+    Field("SOURCEWORK_LLM__COPILOT_HOME", "COPILOT_HOME", BACKEND_GROUPS["copilot-cli"],
+          backend="copilot-cli",
+          local_only=True,
+          help="A dedicated Copilot config dir, so runs skip your MCP servers."),
 
-    Field("SOURCEWORK_LLM__CODEX_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__CODEX_MODELS__DEFAULT", "default", BACKEND_GROUPS["codex-cli"],
           backend="codex-cli", role="default"),
-    Field("SOURCEWORK_LLM__CODEX_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__CODEX_MODELS__REASONING", "reasoning", BACKEND_GROUPS["codex-cli"],
           backend="codex-cli", role="reasoning"),
-    Field("SOURCEWORK_LLM__CODEX_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__CODEX_MODELS__VISION", "vision", BACKEND_GROUPS["codex-cli"],
           backend="codex-cli", role="vision"),
-    Field("SOURCEWORK_LLM__CODEX_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__CODEX_MODELS__CRITIC", "critic", BACKEND_GROUPS["codex-cli"],
           backend="codex-cli", role="critic"),
+    Field("SOURCEWORK_LLM__CODEX_HOME", "CODEX_HOME", BACKEND_GROUPS["codex-cli"],
+          backend="codex-cli",
+          local_only=True,
+          help="A dedicated Codex config dir, so runs get a clean session. Note that "
+               "an OPENAI_API_KEY in your environment makes Codex bill the API instead "
+               "of your subscription - it is preferred over the stored login."),
 
-    Field("SOURCEWORK_LLM__AGY_MODELS__DEFAULT", "default", "Models",
+    Field("SOURCEWORK_LLM__AGY_MODELS__DEFAULT", "default", BACKEND_GROUPS["agy-cli"],
           backend="agy-cli", role="default"),
-    Field("SOURCEWORK_LLM__AGY_MODELS__REASONING", "reasoning", "Models",
+    Field("SOURCEWORK_LLM__AGY_MODELS__REASONING", "reasoning", BACKEND_GROUPS["agy-cli"],
           backend="agy-cli", role="reasoning"),
-    Field("SOURCEWORK_LLM__AGY_MODELS__VISION", "vision", "Models",
+    Field("SOURCEWORK_LLM__AGY_MODELS__VISION", "vision", BACKEND_GROUPS["agy-cli"],
           backend="agy-cli", role="vision"),
-    Field("SOURCEWORK_LLM__AGY_MODELS__CRITIC", "critic", "Models",
+    Field("SOURCEWORK_LLM__AGY_MODELS__CRITIC", "critic", BACKEND_GROUPS["agy-cli"],
           backend="agy-cli", role="critic"),
+
+    # -- shared credentials ---------------------------------------------------
+    # Keys more than one backend reads. The gateway (litellm), Anthropic's key
+    # (litellm's anthropic/… ids *and* the claude-code model listing) and
+    # OpenAI's key (openai *and* litellm's openai/… ids) cannot be one
+    # backend's alone, so they live here rather than in any card.
+    Field("ANTHROPIC_API_KEY", "Anthropic API key", "Shared credentials", "password",
+          help="Used by the litellm backend (anthropic/… ids) and by the "
+               "claude-code model picker."),
+    Field("OPENAI_API_KEY", "OpenAI API key", "Shared credentials", "password",
+          help="Used by the openai backend and by the litellm backend for "
+               "openai/… model ids."),
+    Field("SOURCEWORK_LLM__API_BASE", "LLM gateway base URL", "Shared credentials",
+          placeholder="https://llm-gateway.internal/v1"),
+    Field("SOURCEWORK_LLM__API_KEY", "LLM gateway key", "Shared credentials", "password"),
 
     # -- limits --------------------------------------------------------------
     Field("SOURCEWORK_LLM__EFFORT", "Reasoning effort", "Limits", "select",
@@ -216,58 +315,6 @@ FIELDS: tuple[Field, ...] = (
           help="Retries inside a single API call. Worth lowering for a local server, "
                "where the usual failure is a timeout: 3 attempts at a 20-minute "
                "ceiling is an hour spent learning the same thing once."),
-
-    # -- credentials -------------------------------------------------------
-    Field("ANTHROPIC_API_KEY", "Anthropic API key", "Credentials", "password",
-          help="Only needed by the litellm backend."),
-    Field("OPENAI_API_KEY", "OpenAI API key", "Credentials", "password",
-          help="Used by the openai backend and by the litellm backend for "
-               "openai/… model ids."),
-    Field("SOURCEWORK_LLM__API_BASE", "LLM gateway base URL", "Credentials",
-          placeholder="https://llm-gateway.internal/v1"),
-    Field("SOURCEWORK_LLM__API_KEY", "LLM gateway key", "Credentials", "password"),
-    Field("AZURE_API_KEY", "Azure API key", "Credentials", "password"),
-    Field("AZURE_API_BASE", "Azure endpoint", "Credentials",
-          placeholder="https://<resource>.openai.azure.com/",
-          help="The deployment name is the model id: `azure/<deployment>`."),
-    Field("AZURE_API_VERSION", "Azure API version", "Credentials",
-          placeholder="2024-06-01"),
-    Field("AWS_REGION_NAME", "AWS region", "Credentials",
-          placeholder="eu-west-1"),
-    Field("AWS_ACCESS_KEY_ID", "AWS access key id", "Credentials", "password"),
-    Field("AWS_SECRET_ACCESS_KEY", "AWS secret access key", "Credentials", "password"),
-    Field("AWS_SESSION_TOKEN", "AWS session token", "Credentials", "password",
-          help="Optional; only needed for temporary credentials."),
-    Field("GOOGLE_APPLICATION_CREDENTIALS", "Google service-account file", "Credentials",
-          placeholder="/run/secrets/vertex-sa.json",
-          help="Path to the service-account JSON, or use Application Default "
-               "Credentials. Vertex model ids are `vertex_ai/<model>`."),
-    Field("SOURCEWORK_LLM__VERTEX_PROJECT", "GCP project", "Credentials"),
-    Field("SOURCEWORK_LLM__VERTEX_LOCATION", "GCP region", "Credentials",
-          placeholder="us-central1"),
-    Field("SOURCEWORK_LLM__OPENAI_API_BASE", "OpenAI api_base", "Credentials",
-          placeholder="https://api.openai.com/v1",
-          help="Optional; unset reaches openai.com."),
-    Field("SOURCEWORK_LLM__LLAMA_CPP_API_BASE", "llama.cpp server URL", "Credentials",
-          placeholder="http://127.0.0.1:8081/v1",
-          local_only=True,
-          help="The OpenAI-compatible endpoint from llama-server or llama-swap."),
-    Field("SOURCEWORK_LLM__LLAMA_CPP_API_KEY", "llama.cpp server key", "Credentials", "password",
-          local_only=True,
-          help="Optional. llama-server accepts any value unless you enable its API key."),
-    Field("SOURCEWORK_MODEL_DIRS", "Local model directories", "Credentials",
-          placeholder="/home/you/.lmstudio/models:/srv/models",
-          local_only=True,
-          help="Colon-separated folders to scan recursively for GGUF models. Used by "
-               "scripts/llama-models.py and llama-swap."),
-    Field("SOURCEWORK_LLM__CODEX_HOME", "CODEX_HOME", "Credentials",
-          local_only=True,
-          help="A dedicated Codex config dir, so runs get a clean session. Note that "
-               "an OPENAI_API_KEY in your environment makes Codex bill the API instead "
-               "of your subscription - it is preferred over the stored login."),
-    Field("SOURCEWORK_LLM__COPILOT_HOME", "COPILOT_HOME", "Credentials",
-          local_only=True,
-          help="A dedicated Copilot config dir, so runs skip your MCP servers."),
 
     # -- Confluence --------------------------------------------------------
     Field("SOURCEWORK_CONFLUENCE__BASE_URL", "Base URL", "Confluence",

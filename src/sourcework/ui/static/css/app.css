@@ -599,10 +599,11 @@ input.suggested {
   font-size: 11px;
 }
 
-/* -- settings: models ------------------------------------------------------
-   You run one backend at a time, so that one gets a card and the rest get a
-   disclosure. The profiles sit above both: the fastest correct answer here is
-   usually "one of these three", not twelve model ids typed from memory. */
+/* -- settings: per-backend cards --------------------------------------------
+   You run one backend at a time, so each backend is its own card: its role
+   cells and the credentials only it reads, the active one open and the rest
+   collapsed. The profiles sit above all of them: the fastest correct answer
+   here is usually "one of these three", not model ids typed from memory. */
 
 .profiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 
@@ -618,20 +619,50 @@ input.suggested {
 .profile .name { display: block; font-weight: 500; margin-bottom: 2px; }
 
 .backend-card {
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel-2);
+  margin-top: 14px;
+}
+
+.backend-card > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 14px 16px;
 }
 
+.backend-card > summary::-webkit-details-marker { display: none; }
+
+.backend-card > summary::before {
+  content: '▸';
+  color: var(--ink-2);
+  font-size: 12px;
+  transition: transform 0.15s;
+}
+
+.backend-card[open] > summary::before { transform: rotate(90deg); }
+
+/* The active backend's card is the one worth reading; the accent makes it
+   obvious which, even when everything is collapsed. */
+.backend-card.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.backend-card.active > summary { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* The "active" pill only belongs on the open card; the others carry it, but
+   there is nothing for a collapsed card to be active about on screen. */
+.active-pill { display: none; }
+.backend-card.active .active-pill { display: inline-block; }
+
+.backend-card > .grid2, .backend-card > .grid4 { padding: 0 16px; }
+.backend-card > .small { padding: 0 16px; }
+
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-
-.more { margin-top: 14px; }
-.more > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; padding: 4px 0; }
-.more > summary:hover { color: var(--ink); }
-
-.other-backend { padding: 12px 0; border-top: 1px solid var(--line); }
 
 @media (max-width: 700px) {
   .profiles, .grid3, .grid4 { grid-template-columns: 1fr; }
