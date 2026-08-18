@@ -12,10 +12,20 @@ The version lives in `src/sourcework/__init__.py` and is read from there at
 build time, so `sourcework.__version__`, the installed distribution metadata,
 and the version on every agent card are the same string by construction.
 
-## [Unreleased]
+## [0.2.0] — 2026-08-18
 
 ### Added
 
+- **A direct llama.cpp backend** (`SOURCEWORK_LLM__BACKEND=llama-cpp`): model
+  calls go straight to a local `llama-server` or llama-swap at
+  `SOURCEWORK_LLM__LLAMA_CPP_API_BASE` with no LiteLLM proxy between. Roles map
+  to models per role, and when the server is down the model picker still lists
+  the GGUFs the configured scanner would serve.
+- **The settings page restarts the mesh itself.** Saving a setting that needs a
+  restart now asks every agent to re-exec itself with its original argv, so a
+  save takes effect without touching a process supervisor; the page reloads
+  when the mesh is back. Works under `serve-all`, a terminal, the desktop
+  launcher and docker.
 - **A requirements-quality rule pack**, checked deterministically in the critic
   before the model review runs. The rules follow ISO/IEC/IEEE 29148
   characteristics and the INCOSE Guide to Writing Requirements: escape clauses
@@ -86,6 +96,18 @@ and the version on every agent card are the same string by construction.
   work) alongside the launcher that actually ships. What is left describes the
   code as it is. `sourcework app --help` also stopped advertising a tray icon
   that was removed before the first release.
+
+### Fixed
+
+- **The container UI was unreachable.** The UI container bound the loopback
+  interface, which a published port cannot reach, and every agent's healthcheck
+  probed port 8000 regardless of the port it actually serves. Compose now sets
+  a per-service `PORT` and the UI binds all interfaces.
+- **The test suite leaked the developer's `.env`.** Importing LiteLLM calls
+  `load_dotenv()`, which seeded tests with whatever the machine's `.env`
+  happened to hold; the suite now scrubs `SOURCEWORK_*` from the environment
+  before every test, so a passing run does not depend on the machine it runs
+  on.
 
 ## [0.1.0] — 2026-08-17
 
