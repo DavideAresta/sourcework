@@ -16,6 +16,20 @@ and the version on every agent card are the same string by construction.
 
 ### Added
 
+- **The hosted service starts as a shell.** A sibling `sourcework-cloud` package
+  serves the same web UI over Postgres instead of SQLite — tenant-scoped from
+  day one and guarded by an installed authenticator — so the whole product runs
+  hosted before any of the identity or tenancy machinery is load-bearing. It is
+  web-only by construction: the package declares no console scripts. Its
+  `cloud/tests` suite runs against a real Postgres when one is reachable and
+  skips loudly when a laptop cannot provide one.
+- **`build_app` grows the four seams a hosted deployment needs.** `executor`
+  (runs driven from somewhere other than this process), `settings_backend`
+  (per-tenant settings instead of rewriting the process's own `.env`),
+  `authorizer` (what a signed-in principal may do, decided after identity), and
+  `run_id_factory` (UUIDs where the local 12-hex ids would collide). Each
+  defaults to today's behaviour, so a deployment that passes none of them gets
+  exactly today's app.
 - **The running version in the UI header.** Every page shows the same
   `__version__` the build reads, served by `/healthz` — so the label cannot
   drift from the code it labels.

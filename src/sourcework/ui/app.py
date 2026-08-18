@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -46,7 +46,7 @@ from sourcework.backends import probe
 from sourcework.config import LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
 from sourcework.ui import env_file
-from sourcework.ui.runner import RunManager
+from sourcework.ui.runner import RunExecutor, RunManager
 from sourcework.ui.store import RunStore, Store, new_run_id, now_iso
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,17 @@ STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 """Matches the ingest layer's own ceiling - rejecting here gives a clear error
 instead of one buried in a failed extraction."""
+
+Authorizer = Callable[[Request, auth.Principal, str], Awaitable[bool]]
+"""The second gate: having a principal is one thing, being *allowed* another.
+
+Core's middleware resolves who is asking and refuses when nobody is. What a
+particular installation then lets that person do is not something core can
+know - it depends on who the tenants are and which roles mean what. So it is
+a supplied policy ``(request, principal, method) -> bool``, called after the
+principal is resolved, and a False answer is a 403. The local distribution
+passes nothing and the gate is open, exactly matching :class:`NullAuth`'s
+"you are the person at this machine"."""
 
 
 class UIPaths:
@@ -162,6 +173,11 @@ def build_app(
     workspace: Path | None = None,
     on_shutdown: Callable[[], None] | None = None,
     store: Store | None = None,
+    *,
+    executor: RunExecutor | None = None,
+    settings_backend: env_file.SettingsBackend | None = None,
+    authorizer: Authorizer | None = None,
+    run_id_factory: Callable[[], str] = new_run_id,
 ) -> FastAPI:
     """The web app. ``on_shutdown``, when given, exposes a way to stop it.
 
@@ -175,10 +191,21 @@ def build_app(
     back up or delete. An installation where runs belong to different people
     needs a different one, and the parameter is what lets it arrive from outside
     rather than by editing this line.
+
+    The four keyword parameters are the seams a hosted deployment supplies
+    instead of the single-operator defaults: an :class:`RunExecutor` that runs
+    runs somewhere else, a :class:`SettingsBackend` that keeps settings per
+    tenant rather than in a shared ``.env``, an :class:`Authorizer` that decides
+    what a signed-in principal may do, and a wider run-id factory than the
+    local 12-hex one. Each defaults to today's behaviour, and a deployment that
+    passes none of them gets exactly today's app.
     """
     paths = UIPaths(workspace or Path(settings().ui_workspace))
     store = store if store is not None else RunStore(paths.db)
-    manager = RunManager(store)
+    manager = executor if executor is not None else RunManager(store, run_id_factory=run_id_factory)
+    settings_backend = (
+        settings_backend if settings_backend is not None else env_file.EnvFileBackend(_env_path)
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -264,6 +291,18 @@ def build_app(
                 status_code=401,
                 content={"detail": "Not signed in."},
                 headers=authenticator.challenge(),
+            )
+        # Authentication answered "who"; the policy says whether that is
+        # someone who may. Local passes no policy and the gate stays open, so
+        # this branch only exists for installations that supplied one.
+        if authorizer is not None and not await authorizer(request, principal, request.method):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "Signed in, but not allowed to do that.",
+                    "principal": principal.id,
+                    "roles": sorted(principal.roles),
+                },
             )
         request.state.principal = principal
         return await call_next(request)
@@ -368,7 +407,7 @@ def build_app(
 
         # Chosen here, not by the manager, so uploads land in a directory named
         # after the run that will read them.
-        run_id = new_run_id()
+        run_id = run_id_factory()
         upload_dir = paths.uploads / run_id
         inputs: list[InputRef] = []
 
@@ -652,7 +691,7 @@ def build_app(
         except (ValidationError, json.JSONDecodeError) as exc:
             raise HTTPException(400, f"malformed request: {exc}") from exc
 
-        child_id = new_run_id()
+        child_id = run_id_factory()
         inputs: list[InputRef] = []
 
         for answer in spec.answers:
@@ -763,16 +802,23 @@ def build_app(
     @app.get("/api/settings", tags=["settings"])
     async def read_settings() -> dict[str, Any]:
         return {
-            "path": str(_env_path()),
-            "fields": env_file.describe(_env_path()),
-            "profiles": env_file.profiles_for(_env_path()),
-            "default_profile": env_file.DEFAULT_PROFILE,
+            "path": settings_backend.label,
+            "fields": settings_backend.describe(),
+            "profiles": settings_backend.profiles_for(),
+            "default_profile": settings_backend.default_profile,
         }
 
     @app.put("/api/settings", tags=["settings"])
     async def write_settings(body: dict[str, str]) -> dict[str, Any]:
-        changed = env_file.write(_env_path(), body)
-        needs_restart = any(env_file.BY_KEY[k].restart for k in changed if k in env_file.BY_KEY)
+        changed = settings_backend.write(body)
+        # Restart only applies to a backend that feeds the mesh's start-up
+        # settings. One that resolves settings per request (a hosted tenant's
+        # own values) has nothing to restart, and restarting every agent on a
+        # tenant's save would be taking the whole service down for one of them.
+        needs_restart = (
+            settings_backend.restartable
+            and any(env_file.BY_KEY[k].restart for k in changed if k in env_file.BY_KEY)
+        )
         restarted: list[str] = []
         if needs_restart:
             # The agents read their config once, at start-up; a save is only

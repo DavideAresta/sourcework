@@ -48,6 +48,44 @@ jobs:
         # Catches the wiring failures a unit test cannot see.
         run: python scripts/demo.py
 
+  cloud:
+    # The hosted distribution in its own job, so its packages never share a
+    # venv with core: pip-installing sourcework-cloud would register its
+    # `sourcework.auth` entry point, and core's own suite expects the no-plugin
+    # install it ships in. Cloud tests resolve the package off the repo path
+    # (cloud/tests/conftest.py), so only the Postgres driver needs installing.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sourcework_cloud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[ingest,dev]" "psycopg[binary]" psycopg_pool
+
+      - name: Cloud tests
+        env:
+          SOURCEWORK_CLOUD__TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sourcework_cloud_test
+        run: pytest -q cloud/tests
+
   licences:
     runs-on: ubuntu-latest
     steps:
@@ -58,7 +96,7 @@ jobs:
 
       - name: Install
         run: |
-          pip install -e ".[ingest]"
+          pip install -e ".[ingest]" "psycopg[binary]" psycopg_pool
           pip install pip-licenses
 
       - name: No copyleft dependencies

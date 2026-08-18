@@ -392,14 +392,15 @@ def test_start_up_retention_erases_the_checkpoints_too(tmp_path: Path, monkeypat
 class FakeManager:
     """A run manager that finishes instantly, so the API can be tested alone."""
 
-    def __init__(self, store: RunStore) -> None:
+    def __init__(self, store: RunStore, *, run_id_factory=None, **kwargs) -> None:  # noqa: ANN001, ARG002
         self.store = store
+        self.run_id_factory = run_id_factory or (lambda: "fixed")
         self.started: list[PRDRequest] = []
 
     async def start(self, request: PRDRequest, *, run_id: str | None = None) -> Run:
         self.started.append(request)
         run = Run(
-            id=run_id or "fixed", title=request.title, status="ok",
+            id=run_id or self.run_id_factory(), title=request.title, status="ok",
             created_at=now_iso(), finished_at=now_iso(),
             request=request.model_dump(mode="json"),
             result={"markdown": "# Done", "prd": {"title": request.title},

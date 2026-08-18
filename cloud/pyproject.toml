@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sourcework-cloud"
+description = "SourceWork, as a hosted service: OIDC login, org tenancy, per-tenant settings."
+readme = { text = "The hosted distribution of SourceWork. Web-only - deliberately no CLI.", content-type = "text/plain" }
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    # Core is installed separately (the same venv); naming it bare keeps the
+    # monorepo from reaching for a released wheel.
+    "sourcework",
+    "psycopg[binary]>=3.1",
+    "psycopg_pool>=3.2",
+]
+
+[project.entry-points."sourcework.auth"]
+# A class, not a factory: core instantiates the loaded value itself.
+cloud = "sourcework_cloud.auth:TokenAuth"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sourcework_cloud"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# UP042: (str, Enum) is deliberate - StrEnum changes JSON-schema generation
+# in a way pydantic consumers here rely on.
+ignore = ["E501", "UP042"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

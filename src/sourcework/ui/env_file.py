@@ -20,9 +20,10 @@ ordering and anything the UI does not know about survive.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 MASK = "••••••••"
 
@@ -317,6 +318,71 @@ opencode model fails outright. Every profile covers every backend, not just the
 active one: a failover target with no model is a failover that does not work."""
 
 DEFAULT_PROFILE = "balanced"
+
+
+@runtime_checkable
+class SettingsBackend(Protocol):
+    """Where the settings page reads and writes.
+
+    The local one is a ``.env`` file. A hosted installation cannot rewrite the
+    process's own environment — that is a privilege escalation waiting to happen,
+    and one file cannot hold many tenants' settings anyway — so its backend keeps
+    per-tenant values and answers the same four calls. Everything the settings
+    routes and the page need is here; the allow-list itself (:data:`FIELDS`) is
+    shared because the shape of what may be configured does not change.
+    """
+
+    label: str
+    """What the page says under the form's title, where the local one names the
+    file. A hosted backend names the tenant's own settings."""
+    default_profile: str
+    restartable: bool
+    """Whether a change here needs the mesh restarted. True for ``.env`` - the
+    agents read their configuration once, at start-up. False for a backend that
+    resolves settings per request, where there is nothing to restart."""
+
+    def read(self) -> dict[str, str]: ...
+
+    def write(self, updates: dict[str, str]) -> list[str]: ...
+
+    def describe(self) -> list[dict[str, Any]]: ...
+
+    def profiles_for(self) -> dict[str, dict[str, Any]]: ...
+
+
+class EnvFileBackend:
+    """The settings page over the ``.env`` on disk, i.e. today's behaviour.
+
+    ``path`` may be a path or a callable returning one: the file the page edits
+    is the one the running configuration names, resolved when the page is asked
+    rather than frozen when the app was built.
+    """
+
+    restartable = True
+    default_profile = DEFAULT_PROFILE
+
+    def __init__(self, path: Path | Callable[[], Path]) -> None:
+        self._resolve = (lambda: path) if isinstance(path, Path) else path
+
+    @property
+    def path(self) -> Path:
+        return self._resolve()
+
+    @property
+    def label(self) -> str:
+        return str(self.path)
+
+    def read(self) -> dict[str, str]:
+        return read(self.path)
+
+    def write(self, updates: dict[str, str]) -> list[str]:
+        return write(self.path, updates)
+
+    def describe(self) -> list[dict[str, Any]]:
+        return describe(self.path)
+
+    def profiles_for(self) -> dict[str, dict[str, Any]]:
+        return profiles_for(self.path)
 
 
 def read(path: Path) -> dict[str, str]:
