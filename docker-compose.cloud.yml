@@ -1,0 +1,164 @@
+# The hosted distribution: the same eight-agent mesh, a Postgres for the
+# tenant-scoped run store, and the cloud app in front of it all.
+#
+# Run with: docker compose -f docker-compose.cloud.yml up -d --build
+# The app answers on http://localhost:8080 and refuses every API route until
+# you present the bearer token in SOURCEWORK_CLOUD__AUTH_TOKEN.
+#
+# The mesh is shared with the laptop compose, so the same x-common block and
+# the same eight services appear here; the only differences are the Postgres,
+# the cloud app, and the UI it serves.
+
+x-common: &common
+  build:
+    context: .
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    # Inside the compose network agents address each other by service name, so
+    # that is what their agent cards must advertise.
+    SOURCEWORK_PUBLIC_HOST: ""
+    SOURCEWORK_PEERS__ORCHESTRATOR: http://orchestrator:8000
+    SOURCEWORK_PEERS__INGESTION: http://ingestion:8001
+    SOURCEWORK_PEERS__VISION: http://vision:8002
+    SOURCEWORK_PEERS__TRANSCRIPT: http://transcript:8003
+    SOURCEWORK_PEERS__CONFLUENCE: http://confluence:8004
+    SOURCEWORK_PEERS__REQUIREMENTS: http://requirements:8005
+    SOURCEWORK_PEERS__WRITER: http://writer:8006
+    SOURCEWORK_PEERS__CRITIC: http://critic:8007
+    # The demo philosophy applies here too: the whole pipeline works against a
+    # deterministic fake model before you give it credentials. Your .env wins
+    # over these defaults because env_file values are overridden by anything
+    # set in `environment`.
+    SOURCEWORK_LLM__STUB: "1"
+  restart: unless-stopped
+  networks: [sourcework]
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sourcework_cloud
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - cloud-pgdata:/var/lib/postgresql/data
+    networks: [sourcework]
+
+  orchestrator:
+    <<: *common
+    container_name: sourcework-cloud-orchestrator
+    command: ["sourcework", "serve", "orchestrator"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: orchestrator
+      PORT: 8000
+    ports: ["8000:8000"]
+    depends_on: [ingestion, vision, transcript, confluence, requirements, writer, critic]
+    volumes: ["./workspace:/workspace:ro"]
+
+  ingestion:
+    <<: *common
+    container_name: sourcework-cloud-ingestion
+    command: ["sourcework", "serve", "ingestion"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: ingestion
+      PORT: 8001
+    volumes: ["./workspace:/workspace:ro"]
+
+  vision:
+    <<: *common
+    container_name: sourcework-cloud-vision
+    command: ["sourcework", "serve", "vision"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: vision
+      PORT: 8002
+    volumes: ["./workspace:/workspace:ro"]
+
+  transcript:
+    <<: *common
+    container_name: sourcework-cloud-transcript
+    command: ["sourcework", "serve", "transcript"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: transcript
+      PORT: 8003
+    volumes: ["./workspace:/workspace:ro"]
+
+  confluence:
+    <<: *common
+    container_name: sourcework-cloud-confluence
+    command: ["sourcework", "serve", "confluence"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: confluence
+      PORT: 8004
+
+  requirements:
+    <<: *common
+    container_name: sourcework-cloud-requirements
+    command: ["sourcework", "serve", "requirements"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: requirements
+      PORT: 8005
+
+  writer:
+    <<: *common
+    container_name: sourcework-cloud-writer
+    command: ["sourcework", "serve", "writer"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: writer
+      PORT: 8006
+
+  critic:
+    <<: *common
+    container_name: sourcework-cloud-critic
+    command: ["sourcework", "serve", "critic"]
+    environment:
+      SOURCEWORK_PUBLIC_HOST: critic
+      PORT: 8007
+
+  # The hosted app: core's web UI, tenant-scoped Postgres, an installed
+  # authenticator (the cloud package's `sourcework.auth` entry point), and
+  # UUID run ids. Reads and writes the same ./workspace the agents read.
+  app:
+    build:
+      context: .
+      dockerfile: cloud/Dockerfile
+    container_name: sourcework-cloud-app
+    command: ["python", "-m", "sourcework_cloud", "serve", "--host", "0.0.0.0"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SOURCEWORK_CLOUD__DATABASE_URL: postgresql://postgres:postgres@db:5432/sourcework_cloud
+      SOURCEWORK_CLOUD__AUTH_TOKEN: ${SOURCEWORK_CLOUD__AUTH_TOKEN:-change-me}
+      SOURCEWORK_CLOUD__WORKSPACE: /workspace
+      SOURCEWORK_LLM__STUB: "1"
+      SOURCEWORK_PEERS__ORCHESTRATOR: http://orchestrator:8000
+      SOURCEWORK_PEERS__INGESTION: http://ingestion:8001
+      SOURCEWORK_PEERS__VISION: http://vision:8002
+      SOURCEWORK_PEERS__TRANSCRIPT: http://transcript:8003
+      SOURCEWORK_PEERS__CONFLUENCE: http://confluence:8004
+      SOURCEWORK_PEERS__REQUIREMENTS: http://requirements:8005
+      SOURCEWORK_PEERS__WRITER: http://writer:8006
+      SOURCEWORK_PEERS__CRITIC: http://critic:8007
+    depends_on:
+      db:
+        condition: service_healthy
+      orchestrator:
+        condition: service_started
+    ports: ["8080:8080"]
+    volumes: ["./workspace:/workspace"]
+    restart: unless-stopped
+    networks: [sourcework]
+
+volumes:
+  cloud-pgdata:
+
+networks:
+  sourcework:
+    driver: bridge

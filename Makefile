@@ -1,4 +1,4 @@
-.PHONY: install dev test lint fmt serve-all ui status demo up down logs clean
+.PHONY: install dev test lint fmt serve-all ui status demo up down up-cloud down-cloud logs clean
 
 VENV := .venv
 PY   := $(VENV)/bin/python
@@ -39,6 +39,13 @@ up:
 
 down:
 	docker compose down
+
+up-cloud:
+	docker compose -f docker-compose.cloud.yml up -d --build
+	@sleep 8 && docker compose -f docker-compose.cloud.yml ps
+
+down-cloud:
+	docker compose -f docker-compose.cloud.yml down
 
 logs:
 	docker compose logs -f --tail=100
