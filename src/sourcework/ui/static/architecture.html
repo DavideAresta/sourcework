@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dashboard · SourceWork</title>
+  <title>Architecture · SourceWork</title>
   <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/css/app.css">
   <script>
@@ -19,27 +19,21 @@
 <body>
   <header class="top">
     <div class="brand">Source<b>Work</b><span id="version" class="version"></span></div>
+    <span id="mesh" class="pill">checking…</span>
     <div class="spacer"></div>
     <a href="/"><button class="ghost">Runs</button></a>
-    <button id="refresh" class="ghost">Refresh</button>
     <button id="theme" class="ghost">Auto</button>
-    <a href="/architecture"><button class="ghost">Architecture</button></a>
+    <a href="/dashboard"><button class="ghost">Dashboard</button></a>
     <a href="/settings"><button class="ghost">Settings</button></a>
   </header>
 
-  <main class="centred">
-    <h1>PRD status</h1>
-    <p class="muted">
-      One row per document, newest finished version. <b>Ready</b> means the critic
-      raised nothing blocking, no blocking question is unanswered, and no recorded
-      conflict is unresolved.
-    </p>
-
-    <div id="totals" class="grid4" style="margin:18px 0 24px"></div>
-    <div id="board"></div>
-  </main>
+  <div class="arch-view" id="arch-view">
+    <div class="arch-canvas" id="arch-canvas"></div>
+    <button class="arch-collapse" id="arch-collapse" title="Collapse the panel and widen the diagram">⤢</button>
+    <aside class="arch-panel" id="arch-panel"></aside>
+  </div>
 
   <script type="module" src="/static/js/theme.js"></script>
-  <script type="module" src="/static/js/dashboard.js"></script>
+  <script type="module" src="/static/js/arch.js"></script>
 </body>
 </html>

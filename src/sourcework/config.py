@@ -204,6 +204,15 @@ class LLMSettings(BaseModel):
     OpenCode re-installing a plugin tree into the scratch directory on every
     call - but it also disables user-global plugins, so it is opt-in."""
 
+    copilot_profile: str | None = None
+    """Which Copilot user/profile ``copilot-cli`` should run as.
+
+    When set, SourceWork derives ``COPILOT_HOME`` as
+    ``~/.copilot-<profile>`` unless :attr:`copilot_home` is explicitly set.
+    This mirrors the profile pattern used in codegen-pipeline while keeping the
+    setting surface one-field simple in this project.
+    """
+
     copilot_home: str | None = None
     """``COPILOT_HOME`` for the copilot-cli backend. The CLI keeps credentials,
     MCP config, plugins and skills in one directory; pointing this at a copy

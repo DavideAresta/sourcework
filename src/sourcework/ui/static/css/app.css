@@ -26,6 +26,48 @@
   color-scheme: light;
 }
 
+/* Shape and rhythm, which are the same in both themes and therefore live here
+   rather than in either palette block. */
+:root {
+  --radius-sm: 6px;   /* pills, inputs, small chips */
+  --radius-lg: 14px;  /* top-level cards, diagram nodes and lanes */
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* Four steps of "how much of this colour", as mix percentages rather than as
+     new colours. A surface can then be tinted faintly-through-strongly in any
+     of the four state hues below without the palette growing a single value:
+
+       background: color-mix(in srgb, var(--err) var(--tint-2), transparent)
+
+     which is the same idea as a per-hue alpha ramp, expressed in the one
+     function this stylesheet already leans on. */
+  --tint-1: 8%;
+  --tint-2: 14%;
+  --tint-3: 22%;
+  --tint-4: 32%;
+}
+
+/* ---------------------------------------------------------------------------
+   The state vocabulary, written down once.
+
+   Four states, four existing colours - no new ones, and no per-agent hues:
+
+     running / active   --accent   (already what .pill.run uses)
+     done / healthy     --ok
+     failed / down      --err
+     waiting / warned   --warn
+
+   Identity is carried by an icon and a name, never by colour. Eight agents in
+   eight arbitrary hues would read as a different product against this palette,
+   and would leave nothing distinct to say "this one is the one working".
+   --------------------------------------------------------------------------- */
+
 /* Three states, not two: an explicit choice has to win over the operating
    system in *both* directions, and the un-stamped document - which is what most
    people have - must still follow it. So the dark values are listed twice, once
@@ -253,6 +295,185 @@ button.danger { color: var(--err); }
 .ink-err { color: var(--err); }
 .ink-warn { color: var(--warn); }
 
+/* -- the railway: how far in the run is ---------------------------------- */
+
+/* Scrolls sideways rather than compressing: seven stops do not fit a phone, and
+   squeezing them turns the one glanceable thing on the page into seven slivers. */
+.railway {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--sp-2) 0 var(--sp-5);
+  overflow-x: auto;
+}
+
+.rail-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 104px;
+  position: relative;
+}
+
+.rail-dot {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  background: var(--panel-2);
+  border: 2px solid var(--line);
+  color: var(--ink-3);
+  transition: background .3s, border-color .3s, color .3s, box-shadow .3s;
+}
+
+.rail-dot .ico { width: 22px; height: 22px; }
+
+.rail-node.done .rail-dot {
+  background: color-mix(in srgb, var(--ok) var(--tint-2), transparent);
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* The glow is the one place this stylesheet spends a shadow on meaning rather
+   than on depth: it is what makes "this is the stage running right now"
+   findable from across the room. */
+.rail-node.running .rail-dot {
+  background: color-mix(in srgb, var(--accent) var(--tint-2), transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 40%, transparent);
+  animation: pulse 1.6s infinite;
+}
+
+/* Dashed: in this app that already means "not the normal path". A stage a run
+   never entered is not a stage it passed. */
+.rail-node.skipped .rail-dot { border-style: dashed; color: var(--ink-3); }
+.rail-node.skipped .rail-label { color: var(--ink-3); }
+
+.rail-node.failed .rail-dot {
+  background: color-mix(in srgb, var(--err) var(--tint-2), transparent);
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.rail-label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.rail-node.running .rail-label { color: var(--ink); }
+.rail-node.done .rail-label { color: var(--ink); }
+.rail-node.failed .rail-label { color: var(--err); }
+
+/* Reserves its line whether or not it has anything to say, so the labels above
+   it do not jump as captions appear. */
+.rail-sub {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  min-height: 1em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sits at dot height, not at label height. */
+.rail-link {
+  flex: 0 0 34px;
+  height: 2px;
+  background: var(--line);
+  margin: 0 2px;
+  position: relative;
+  top: 21px;
+  transition: background .3s;
+}
+
+.rail-node.done + .rail-link { background: var(--ok); }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* -- the hero: who is working, and for how long -------------------------- */
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: var(--radius-lg);
+}
+
+.hero[hidden] { display: none; }
+
+.hero-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  color: var(--accent);
+  flex: none;
+}
+
+.hero-icon .ico { width: 26px; height: 26px; }
+.hero-id { min-width: 0; }
+
+.hero-agent {
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -.01em;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-action {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hero-stats { display: flex; gap: var(--sp-5); }
+.hero-stat { text-align: right; }
+
+/* Tabular figures, because these numbers change while you are looking at them
+   and proportional digits make the whole row twitch. */
+.hero-stat-v {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.hero-stat-l,
+.hero-timer-l {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+}
+
+.hero-timer { text-align: right; white-space: nowrap; }
+
+/* The one number worth reading from across the room. */
+.hero-timer-v {
+  font-size: 1.6rem;
+  font-weight: 700;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1.15;
+  min-height: 1.15em;
+}
+
+@media (max-width: 700px) {
+  .hero-stats { display: none; }
+}
+
 /* -- the run view's action row ------------------------------------------- */
 
 /* Wraps without re-ordering: the destructive end stays the end. A spacer
@@ -408,27 +629,99 @@ aside .side-title::after { content: ''; }
   overflow-y: auto;
 }
 
-.log .line { display: flex; gap: 10px; padding: 1px 0; }
+.log .line { display: flex; gap: var(--sp-2); padding: 2px 0; align-items: baseline; }
 .log .line .ts { color: var(--ink-3); flex: none; }
-.log .line.error { color: var(--err); }
 .log .line.done { color: var(--ok); }
 .log .line.status { color: var(--ink-2); }
 
-/* -- tabs ----------------------------------------------------------------- */
-
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 16px; flex-wrap: wrap; }
-
-.tab {
-  border: 0;
-  background: transparent;
-  padding: 8px 12px;
-  color: var(--ink-2);
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-  cursor: pointer;
+/* The minute, once, where it changes - and it stays put while its own lines
+   scroll under it. */
+.event-minute {
+  position: sticky;
+  top: -10px;
+  z-index: 1;
+  background: var(--panel-2);
+  color: var(--ink-3);
+  font-size: 11px;
+  padding: 3px 0 2px;
+  border-bottom: 1px solid var(--line);
+  margin-top: 4px;
 }
 
-.tab.active { color: var(--ink); border-bottom-color: var(--accent); font-weight: 550; }
+.event-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+  flex: none;
+  position: relative;
+  top: -1px;
+}
+
+.log .line.status .event-dot { background: var(--ink-3); }
+.log .line.done .event-dot { background: var(--ok); }
+
+/* Which agent said it, as a chip rather than as four more characters of prose. */
+.event-agent {
+  flex: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.event-text { min-width: 0; }
+
+/* A failure breaks the pattern on purpose: railed, tinted, and wrapping instead
+   of ellipsising, because the detail is the whole point of an error line. */
+.log .line.error {
+  color: var(--err);
+  align-items: flex-start;
+  border-left: 3px solid var(--err);
+  padding-left: 9px;
+  margin-left: -12px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--err) var(--tint-2), transparent),
+    color-mix(in srgb, var(--err) var(--tint-1), transparent) 55%, transparent);
+}
+
+.log .line.error .event-dot { background: var(--err); top: 4px; }
+.log .line.error .event-text { white-space: pre-wrap; word-break: break-word; }
+
+/* -- tabs ----------------------------------------------------------------- */
+
+/* One control rather than six loose words: underlined words sitting on a rule
+   read as six separate links, and the strip is a single choice. Wraps, because
+   six labels do not fit a phone in one row. */
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+  padding: 3px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tab {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 6px 14px;
+  color: var(--ink-2);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: color .14s, background .14s;
+}
+
+.tab:hover { color: var(--ink); background: var(--bg); }
+
+/* The active tab is lifted out of the trough rather than underlined. */
+.tab.active {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--line);
+  font-weight: 550;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 16%);
+}
 
 /* -- rendered PRD --------------------------------------------------------- */
 
@@ -549,13 +842,49 @@ details.card.fold[open] > summary {
    model talking to itself, and reading it as if it were the answer is how a
    half-formed thought gets mistaken for a decision. */
 
+/* -- terminal panes ------------------------------------------------------ */
+
+/* A <details> that reads as a console: the summary is its title bar and the
+   caret is the only affordance it needs. */
+.terminal { padding: 0; overflow: hidden; }
+
+.term-summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  list-style: none;
+  user-select: none;
+  background: var(--panel-2);
+}
+
+.term-summary::-webkit-details-marker { display: none; }
+.term-summary::before { content: '▸'; color: var(--ink-3); transition: transform .15s ease; }
+.terminal[open] .term-summary::before { transform: rotate(90deg); }
+
+.term-copy {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--sans);
+}
+
+.term-copy:hover { color: var(--ink); border-color: var(--ink-3); }
+
 .narration {
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.55;
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
+  background: var(--bg);
+  border: 0;
   padding: 10px 12px;
   max-height: min(380px, 45vh);
   overflow-y: auto;
@@ -722,4 +1051,155 @@ input.suggested {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0 5px;
+}
+
+/* -- the architecture view ----------------------------------------------- */
+
+.arch-view {
+  display: flex;
+  position: relative;
+  height: calc(100vh - var(--header-h));
+}
+
+.arch-canvas {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-3);
+}
+
+/* Child selector, not descendant: the nodes nest an 18px icon <svg> each, and a
+   descendant rule stretches every one of them to the whole canvas. */
+.arch-canvas > svg { width: 100%; height: 100%; }
+
+.arch-bg circle { fill: color-mix(in srgb, var(--ink-3) 26%, transparent); }
+
+.arch-lane { pointer-events: none; }
+.arch-lane rect { fill: var(--ink-3); fill-opacity: .03; stroke: var(--ink-3); stroke-opacity: .16; }
+.arch-lane circle { fill: var(--ink-3); }
+.arch-lane text {
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 1.2px;
+  fill: var(--ink-3);
+}
+
+/* The node: a neutral card, a wash of the state colour, and a rail down its
+   left edge. Setting `color` on the group is what lets every state below be one
+   rule - the icon, the title and the rail all follow currentColor. */
+.arch-node { cursor: pointer; color: var(--ink-3); transition: filter .15s; }
+.arch-node .n-card { fill: var(--panel); stroke: var(--line); stroke-width: 1.25; }
+.arch-node .n-glaze { fill: currentColor; opacity: .05; pointer-events: none; }
+.arch-node .n-accent { fill: currentColor; pointer-events: none; }
+.arch-node .n-title { font-size: 15px; font-weight: 700; fill: currentColor; font-family: var(--sans); }
+.arch-node .n-sub { font-size: 11.5px; fill: var(--ink-2); font-family: var(--sans); }
+.arch-node .ico { color: currentColor; }
+
+.arch-node:hover { filter: brightness(1.08); }
+.arch-node:hover .n-card { stroke: currentColor; stroke-opacity: .65; }
+.arch-node:focus-visible { outline: none; }
+.arch-node:focus-visible .n-card { stroke: var(--accent); stroke-width: 2; }
+.arch-node.selected .n-card { stroke: var(--ink); stroke-width: 2; }
+
+/* An agent that is not answering. Dashed, because in this app dashed already
+   means "not the normal path". */
+.arch-node.down { color: var(--err); }
+.arch-node.down .n-card { stroke: var(--err); stroke-dasharray: 5 4; }
+
+/* Working right now. The halo is the only thing on the page that moves, which
+   is what makes it findable without hunting. */
+.arch-node.glow { color: var(--accent); animation: archPulse 1.8s ease-in-out infinite; }
+.arch-node.glow .n-card { stroke: currentColor; stroke-width: 2; }
+
+@keyframes archPulse {
+  0%, 100% { filter: drop-shadow(0 0 4px currentColor); }
+  50% { filter: drop-shadow(0 0 14px currentColor); }
+}
+
+.arch-edge { stroke: var(--ink-3); stroke-width: 1.6; fill: none; stroke-linecap: round; opacity: .55; }
+.arch-edge.loop { stroke: var(--warn); stroke-dasharray: 6 5; opacity: .8; }
+
+/* Marching ants along the edges of whoever is working: the diagram shows where
+   the data is moving, not only where it came to rest. */
+.arch-edge.flow {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-dasharray: 8 6;
+  opacity: 1;
+  animation: archFlow .9s linear infinite;
+}
+
+@keyframes archFlow { to { stroke-dashoffset: -14; } }
+
+#arr path { fill: var(--ink-3); }
+
+.arch-pill rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+.arch-pill text { font-size: 10.5px; fill: var(--ink-2); font-family: var(--mono); }
+
+.arch-panel {
+  width: 380px;
+  flex: none;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: var(--sp-5);
+  overflow-y: auto;
+}
+
+.arch-panel h2 { font-size: 1.15rem; margin: 0 0 6px; }
+.arch-panel .role {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: var(--sp-3);
+}
+.arch-panel p { margin-bottom: var(--sp-3); line-height: 1.55; }
+
+/* A contract, labelled: what goes in over what comes out. */
+.arch-panel .io {
+  font-size: 12.5px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.arch-panel .io b {
+  color: var(--ink-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: .5px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.arch-panel .io code { font-family: var(--mono); font-size: 12px; }
+.arch-hint { font-size: 12.5px; color: var(--ink-3); }
+
+.arch-collapse {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-3);
+  z-index: 5;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.arch-view.compact .arch-panel { display: none; }
+
+/* The diagram is wide and does not usefully compress: below the breakpoint it
+   scrolls, and the panel goes under it rather than beside it. */
+@media (max-width: 900px) {
+  .arch-view { flex-direction: column; height: auto; }
+  .arch-panel { width: auto; border-left: 0; border-top: 1px solid var(--line); }
+  .arch-canvas { overflow-x: auto; }
+  .arch-canvas > svg { min-width: 900px; }
 }

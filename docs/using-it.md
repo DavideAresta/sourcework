@@ -7,6 +7,8 @@ not a ninth agent — the mesh runs fine without it.
 
 - **New run** — drag files in, add URIs, notes and CQL, watch progress stream
   live while it works.
+- **Live run** — a stage railway across the top shows where the run is, what
+  each stage took, and the hero line names which agent is working right now.
 - **Model output** — the reasoning and the prose as the model produces them,
   in their own panel below the progress log. See *Watching the model work*.
 - **Result** — the PRD rendered, plus a Requirements view showing each one next
@@ -15,6 +17,8 @@ not a ninth agent — the mesh runs fine without it.
 - **History** — past runs, kept in SQLite; downloads and Confluence publishing.
 - **Settings** — a form over `.env`, with the backends this machine can
   actually use probed live.
+- **Architecture** — the eight-agent mesh as a live diagram: topology, health,
+  and the currently active agent highlighted while a run is in flight.
 
 **Pick the backend per run.** The model controls on the run form become an
 override that travels inside the A2A request to every agent, so one run can go

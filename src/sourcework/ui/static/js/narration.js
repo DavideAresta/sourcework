@@ -35,13 +35,24 @@ export function narrationPanel() {
   // log next door is the one that speaks.
   const stream = el('div', { class: 'narration', role: 'region', 'aria-label': 'Model output' });
   const status = el('span', { class: 'ts' });
-  const toggle = el('button', { class: 'ghost', onClick: () => setOpen(!open) }, 'Hide');
+  // Native <details>, like every other disclosure in this app: a hand-rolled
+  // Hide/Show button was the only one that had to reimplement the keyboard
+  // behaviour, and it did not.
+  const copy = el('button', {
+    class: 'term-copy',
+    type: 'button',
+    title: 'Copy the model output',
+    onClick: (event) => {
+      event.preventDefault();   // inside a <summary>, a click would toggle it
+      navigator.clipboard?.writeText(stream.textContent ?? '');
+      copy.textContent = '⧉ copied';
+      setTimeout(() => { copy.textContent = '⧉ copy'; }, 1500);
+    },
+  }, '⧉ copy');
 
-  const card = el('div', { class: 'card narration-card', hidden: true },
-    el('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:8px' },
-      el('h3', { style: 'margin:0' }, 'Model output'),
-      el('div', { class: 'row' }, status, toggle),
-    ),
+  const card = el('details', { class: 'card terminal narration-card', open: true, hidden: true },
+    el('summary', { class: 'term-summary' },
+      'Model output', status, copy),
     stream,
   );
 
@@ -58,8 +69,7 @@ export function narrationPanel() {
 
   function setOpen(next) {
     open = next;
-    stream.hidden = !open;
-    toggle.textContent = open ? 'Hide' : 'Show';
+    card.open = next;
   }
 
   function push(event) {

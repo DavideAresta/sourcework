@@ -121,10 +121,12 @@ it does can be done over JSON-RPC instead.
 | View | What it is for |
 |---|---|
 | **New run** | Drag files in, add URIs, notes and a CQL query; progress streams live while it works |
+| **Live run** | A railway of pipeline stops shows how far in it is and what each stage cost; above the log, the agent working right now, on what, and for how long |
 | **Model output** | The reasoning and the prose as the model produces them, in their own panel below the progress log |
 | **Result** | The PRD rendered; a Requirements view putting each requirement beside the evidence that licenses it, flagging the ones with none; the evidence table; the critic's findings; per-backend token and cost totals. Approve/Reject signs off (append-only record), and the audit bundle downloads the whole run as one digest-verified zip |
 | **History** | Past runs, kept in SQLite, with downloads and Confluence publishing. `SOURCEWORK_RUNS__RETENTION_DAYS` purges finished runs past a limit on start-up |
 | **Settings** | A form over `.env`, with the backends this machine can actually use probed live |
+| **Architecture** | The mesh as a diagram: who reads what, who hands what to whom, which agents are answering — and, during a run, the agent working, glowing, with the edges into it moving |
 
 **The backend is a per-run choice.** The model controls on the run form become
 an override that travels inside the A2A request to every agent, so one run can
@@ -187,6 +189,9 @@ subscription with nothing plumbed through SourceWork:
 | `codex-cli` | `codex login` |
 | `agy-cli` | its own sign-in |
 | `litellm` | any hosted provider, if you'd rather |
+
+For `copilot-cli`, `SOURCEWORK_LLM__COPILOT_PROFILE` selects which account to run as
+(`~/.copilot-<profile>` by default, or `COPILOT_HOME_<PROFILE>` when exported).
 
 ```bash
 sourcework backends          # what is usable on this machine

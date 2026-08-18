@@ -620,6 +620,21 @@ What it adds is what a browser needs and a protocol does not:
   endpoint that writes any key is an environment-injection endpoint and the
   environment is where the API keys live. Secrets go out masked and a masked
   value coming back means "unchanged".
+- **The run as a shape, not a transcript.** A railway of pipeline stops leads the
+  run view and a hero line names the agent working. Both are drawn from what the
+  mesh already emits — the orchestrator's stage lines live, the timings it
+  measured once the run is over — so neither is a second source of truth about
+  what happened. A finished run is drawn from the timings, which is what lets a
+  stage that never ran say *not run* instead of showing a tick: publishing is
+  opt-in, and a strip that ticked it anyway would be inventing work.
+- **The mesh, drawn** (`/architecture`). Eight agents and the pipeline between
+  them as inline SVG: hand-placed, because this topology is `pipeline.py`'s
+  sequence rather than configuration, and a layout engine would move it every
+  time it was asked. Health is an overlay from `/api/mesh`; the working agent
+  glows and its edges animate, both as class toggles on stable ids so a run tick
+  never redraws the diagram. Colour carries state — running, done, failed, down —
+  and never identity: eight agents in eight hues would leave nothing distinct to
+  say *this is the one working*.
 - **Sign-off.** A finished run can be approved or rejected. Recorded, not
   enforced: single-operator software, so the name is what the operator typed
   and the point is the trail, not a gate. The history is append-only — a

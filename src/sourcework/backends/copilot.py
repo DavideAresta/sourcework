@@ -31,6 +31,9 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
+import re
+from pathlib import Path
 
 from sourcework.backends import process
 from sourcework.backends.base import (
@@ -54,12 +57,26 @@ consumes. A published unit conversion, not an estimate - which is what makes it
 safe to do here. Reporting the raw credit count in a field called "cost in USD"
 is how a $2 run gets shown as a $200 one."""
 
+_PROFILE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
+_PROFILE_ENV = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _profile_home(profile: str) -> str:
+    """The conventional home for a named Copilot profile."""
+    segment = _PROFILE_SEGMENT.sub("-", profile.strip()).strip("-_.")
+    return str(Path.home() / f".copilot-{segment or 'default'}")
+
+
+def _profile_suffix(profile: str) -> str:
+    """``ArestaDav`` -> ``ARESTADAV`` for ``COPILOT_HOME_<suffix>`` keys."""
+    return _PROFILE_ENV.sub("_", profile.strip()).strip("_").upper()
+
 
 class CopilotBackend(LLMBackend):
     id = "copilot-cli"
     supports_vision = True  # --attachment takes image files in non-interactive mode
 
-    def __init__(self, *, home: str | None = None) -> None:
+    def __init__(self, *, home: str | None = None, profile: str | None = None) -> None:
         self.home = home
         """``COPILOT_HOME``. The CLI keeps credentials, MCP config, plugins and
         skills in one directory, so pointing this at a copy holding only the
@@ -67,6 +84,31 @@ class CopilotBackend(LLMBackend):
         to dial (one of them failed and cost seconds of wall clock on every
         call), no unrelated skill catalogue in the prompt. Unset by default,
         because getting it wrong means "not logged in"."""
+        self.profile = profile
+        """Named Copilot account/profile.
+
+        Mirrors the codegen-pipeline profile pattern: ``ArestaDav`` maps to
+        ``~/.copilot-ArestaDav`` by default, and ``COPILOT_HOME_ARESTADAV`` can
+        override that path when one profile's credentials live elsewhere.
+        """
+
+    def _runtime_env(self) -> dict[str, str] | None:
+        env: dict[str, str] = {}
+        profile = (self.profile or "").strip()
+        if profile:
+            suffix = _profile_suffix(profile)
+            key = f"COPILOT_HOME_{suffix}" if suffix else ""
+            # The profile picks the account; an explicit COPILOT_HOME_<name>
+            # still wins when the profile's credentials live elsewhere.
+            mapped = os.environ.get(key, "").strip() if key else ""
+            env["COPILOT_HOME"] = mapped or _profile_home(profile)
+            host = os.environ.get(f"COPILOT_GH_HOST_{suffix}", "").strip() if suffix else ""
+            if host:
+                env["COPILOT_GH_HOST"] = host
+
+        if self.home and self.home.strip():
+            env["COPILOT_HOME"] = self.home.strip()
+        return env or None
 
     def available(self) -> bool:
         return process.which("copilot") is not None
@@ -136,7 +178,7 @@ class CopilotBackend(LLMBackend):
             result = await process.run(
                 argv,
                 cwd=process.neutral_cwd(),
-                env={"COPILOT_HOME": self.home} if self.home else None,
+                env=self._runtime_env(),
                 timeout_s=request.timeout_s,
                 on_line=_line_streamer(request.on_chunk),
             )

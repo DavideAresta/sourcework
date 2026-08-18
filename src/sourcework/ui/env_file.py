@@ -238,6 +238,12 @@ FIELDS: tuple[Field, ...] = (
           backend="copilot-cli", role="vision"),
     Field("SOURCEWORK_LLM__COPILOT_MODELS__CRITIC", "critic", BACKEND_GROUPS["copilot-cli"],
           backend="copilot-cli", role="critic"),
+    Field("SOURCEWORK_LLM__COPILOT_PROFILE", "Copilot profile", BACKEND_GROUPS["copilot-cli"],
+          backend="copilot-cli",
+          local_only=True,
+          placeholder="ArestaDav",
+          help="Which Copilot user/profile to run as. It maps to `~/.copilot-<profile>`, "
+               "or to `COPILOT_HOME_<PROFILE>` when that variable is set."),
     Field("SOURCEWORK_LLM__COPILOT_HOME", "COPILOT_HOME", BACKEND_GROUPS["copilot-cli"],
           backend="copilot-cli",
           local_only=True,
@@ -775,6 +781,10 @@ def write(path: Path, updates: dict[str, str]) -> list[str]:
 
     if not effective:
         return []
+
+    # A packaged install may not have created its config directory yet.
+    # Creating it here keeps the first settings save from failing with ENOENT.
+    path.parent.mkdir(parents=True, exist_ok=True)
 
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     remaining = dict(effective)

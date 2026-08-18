@@ -349,6 +349,10 @@ def build_app(
     async def dashboard_page() -> HTMLResponse:
         return HTMLResponse((STATIC / "dashboard.html").read_text(encoding="utf-8"))
 
+    @app.get("/architecture", include_in_schema=False)
+    async def architecture_page() -> HTMLResponse:
+        return HTMLResponse((STATIC / "architecture.html").read_text(encoding="utf-8"))
+
     @app.get("/api/me", tags=["ops"])
     async def me(request: Request) -> dict[str, Any]:
         """Who this installation thinks you are.
@@ -833,17 +837,32 @@ def build_app(
             # are down are logged and left alone - the save is not a failure,
             # just an unfinished one.
             restarted = await _restart_mesh()
+
+        # Next call should resolve from what was just written. Cleared after the
+        # restart attempt so it still uses the currently-running peers' auth.
+        clear_settings = getattr(settings, "cache_clear", None)
+        if callable(clear_settings):
+            clear_settings()
+
+        if not changed:
+            message = "Nothing changed."
+        elif restarted:
+            message = (
+                f"Saved {len(changed)} setting(s). The mesh is restarting "
+                "to pick them up - it will be back in a moment."
+            )
+        elif needs_restart:
+            message = (
+                f"Saved {len(changed)} setting(s). Could not restart the mesh, so running "
+                "agents are still using the previous settings. Restart the mesh manually."
+            )
+        else:
+            message = f"Saved {len(changed)} setting(s)."
+
         return {
             "changed": changed,
             "restart_required": needs_restart,
-            "message": (
-                f"Saved {len(changed)} setting(s). The mesh is restarting "
-                "to pick them up - it will be back in a moment."
-                if restarted
-                else f"Saved {len(changed)} setting(s)."
-            )
-            if changed
-            else "Nothing changed.",
+            "message": message,
         }
 
     class _RevalidatingStatic(StaticFiles):

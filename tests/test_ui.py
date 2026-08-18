@@ -734,7 +734,7 @@ async def _no_peers_reached() -> list[str]:
 def test_a_save_with_no_mesh_reachable_keeps_the_manual_message(
     client: TestClient, tmp_path: Path, monkeypatch
 ):
-    """An install with no running mesh must not claim one was restarted."""
+    """An unreachable mesh must be called out, not implied as restarted."""
     import sourcework.ui.app as ui_app
     from sourcework.config import Settings
 
@@ -745,7 +745,8 @@ def test_a_save_with_no_mesh_reachable_keeps_the_manual_message(
 
     result = client.put("/api/settings", json={"SOURCEWORK_LLM__BACKEND": "llama-cpp"}).json()
     assert result["restart_required"] is True
-    assert "restart" not in result["message"]
+    assert "could not restart the mesh" in result["message"].lower()
+    assert "restart the mesh manually" in result["message"].lower()
 
 
 async def test_restart_mesh_asks_every_peer_and_skips_the_down_ones(monkeypatch):
@@ -1286,6 +1287,7 @@ def test_each_backend_owns_the_credentials_only_it_reads():
         "SOURCEWORK_LLM__LLAMA_CPP_API_KEY": "llama-cpp",
         "SOURCEWORK_MODEL_DIRS": "llama-cpp",
         "SOURCEWORK_LLM__CODEX_HOME": "codex-cli",
+        "SOURCEWORK_LLM__COPILOT_PROFILE": "copilot-cli",
         "SOURCEWORK_LLM__COPILOT_HOME": "copilot-cli",
     }
     for key, backend in exclusive.items():
@@ -1388,6 +1390,20 @@ def test_clearing_a_text_field_really_clears_it(tmp_path: Path):
     env_file.write(path, {"SOURCEWORK_CONFLUENCE__EMAIL": ""})
 
     assert env_file.read(path).get("SOURCEWORK_CONFLUENCE__EMAIL", "") == ""
+
+
+def test_writing_settings_creates_the_parent_directory(tmp_path: Path):
+    """A packaged install writes under ~/.config/SourceWork.
+
+    On a first launch that directory may not exist yet; saving settings should
+    create it instead of failing with ENOENT.
+    """
+    path = tmp_path / "SourceWork" / ".env"
+
+    changed = env_file.write(path, {"SOURCEWORK_LLM__BACKEND": "litellm"})
+
+    assert changed == ["SOURCEWORK_LLM__BACKEND"]
+    assert path.is_file()
 
 
 def test_a_number_never_set_and_left_blank_adds_nothing(tmp_path: Path):
@@ -1505,3 +1521,42 @@ def test_a_run_with_no_result_has_no_verdict_to_give(client: TestClient, tmp_pat
     finally:
         store.close()
     assert client.get("/api/runs/midflight").json()["readiness"] is None
+
+
+def _js_patterns(source: str, name: str) -> list[str]:
+    """The regex sources out of a `const NAME = [[/…/, 'key'], …]` table."""
+    body = re.search(rf"const {name} = \[(.*?)\n\];", source, re.DOTALL)
+    assert body, f"{name} is no longer a table - update this test with it"
+    return re.findall(r"\[/(.+?)/,", body.group(1))
+
+
+def test_the_railway_still_recognises_the_stages_the_pipeline_announces():
+    """The strip advances on the orchestrator's own progress lines.
+
+    Those lines are prose, and prose gets reworded. When it does, the pattern
+    that used to match it silently matches nothing and the railway stops moving
+    for that stage - a strip that quietly stops being true, which is the exact
+    failure this project treats as worse than a crash. So: every pattern must
+    still match something the pipeline actually says.
+    """
+    pipeline = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "sourcework" / "agents" / "orchestrator" / "pipeline.py"
+    ).read_text()
+    runner = (
+        Path(__file__).resolve().parent.parent / "src" / "sourcework" / "ui" / "runner.py"
+    ).read_text()
+
+    # Every quoted phrase in the two files, not only the ones passed straight to
+    # `say`: "Drafting" reaches the stream through a local, and a test that only
+    # read call sites would have declared that stage unmatchable.
+    said = [m.group(1) for m in re.finditer(r'"([A-Z][^"{]{4,})', pipeline + runner)]
+    said = [s for s in said if s.strip()]
+    assert said, "found no progress lines to check against"
+
+    railway = (STATIC_JS / "railway.js").read_text()
+    for pattern in _js_patterns(railway, "ENTERS"):
+        compiled = re.compile(pattern.replace("\\\\", "\\"))
+        assert any(compiled.search(line) for line in said), (
+            f"railway.js matches /{pattern}/, which no line in the pipeline says any more"
+        )

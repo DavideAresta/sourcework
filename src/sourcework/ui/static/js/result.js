@@ -10,6 +10,7 @@ import { renderMarkdown } from './markdown.js';
 import * as notify from './notify.js';
 import { refineTab } from './refine.js';
 import { narrationPanel } from './narration.js';
+import { railway, hero } from './railway.js';
 
 const KIND_CLASS = { error: 'error', done: 'done', status: 'status' };
 
@@ -76,23 +77,28 @@ export function runView(runId, { onChanged }) {
   // through typing into.
   const signOffSlot = el('div');
   const body = el('div');
+  const rail = railway();
+  const live = hero();
   let seen = new Set();
+  let lastRun = null;
+  let lastMinute = null;
 
-  root.append(header, logCard, narration.node, body);
+  // The rail leads: it is the only thing on the page that answers "how far in
+  // is this" without reading anything.
+  root.append(rail.node, live.node, header, logCard, narration.node, body);
 
   // A single step can run for ten minutes with nothing to say. Without a
   // ticking counter that is indistinguishable from a hung run, and the honest
   // answer - "this stage is genuinely this slow" - is the one thing the user
   // cannot tell from a static log.
   let ticker = null;
-  const elapsed = el('span', { class: 'ts' });
 
   function startTicking(fromIso) {
     stopTicking();
     const since = new Date(fromIso).getTime();
     const tick = () => {
       const s = Math.max(0, Math.round((Date.now() - since) / 1000));
-      elapsed.textContent = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+      live.tick(s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
     };
     tick();
     ticker = setInterval(tick, 1000);
@@ -113,20 +119,45 @@ export function runView(runId, { onChanged }) {
     }
     if (seen.has(event.seq)) return;
     seen.add(event.seq);
-    const time = event.t ? new Date(event.t).toLocaleTimeString() : '';
-    const row = el('div', { class: `line ${KIND_CLASS[event.kind] ?? ''}` },
-      el('span', { class: 'ts' }, time),
-      el('span', {}, event.message),
+    const nearBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
+    // The rail is told, never told twice: `seen` already guards the replay.
+    if (rail.sawMessage(event.message, event.kind)) rail.render(lastRun);
+    // One header per minute instead of a timestamp on every row. Forty lines
+    // each carrying 12:19:24 is forty repetitions of the same four digits; what
+    // a reader actually wants from a log is where the time jumped.
+    const stamp = event.t ? new Date(event.t).toLocaleTimeString() : '';
+    const minute = stamp.slice(0, 5);
+    if (minute && minute !== lastMinute) {
+      lastMinute = minute;
+      logBox.append(el('div', { class: 'event-minute' }, minute));
+    }
+
+    // The orchestrator tags a specialist's own lines `[analyst] …`; lift the
+    // tag out of the prose so it can be a chip and the message can be the
+    // message.
+    const tagged = /^\[([a-z-]+)\]\s*/.exec(event.message ?? '');
+    const text = tagged ? event.message.slice(tagged[0].length) : (event.message ?? '');
+
+    const row = el('div', {
+      class: `line ${KIND_CLASS[event.kind] ?? ''}`, title: stamp,
+    },
+      el('span', { class: 'event-dot' }),
+      tagged ? el('span', { class: 'event-agent' }, tagged[1]) : null,
+      el('span', { class: 'event-text' }, text),
     );
     logBox.append(row);
     if (event.kind === 'progress' || event.kind === 'status') {
-      row.append(el('span', { style: 'flex:1' }), elapsed);
+      // The clock belongs to the stage, so it restarts with each one - and it
+      // lives in the hero now rather than chasing the newest row down the log.
+      live.update(lastRun, { agent: tagged?.[1], message: text });
       startTicking(event.t);
     } else {
       stopTicking();
-      elapsed.remove();
     }
-    logBox.scrollTop = logBox.scrollHeight;
+    // Only follow the tail if the reader is already at it. Scrolling back to
+    // read a line and being yanked forward a second later is the log fighting
+    // the person reading it.
+    if (nearBottom) logBox.scrollTop = logBox.scrollHeight;
   }
 
   async function load() {
@@ -138,13 +169,17 @@ export function runView(runId, { onChanged }) {
       return;
     }
 
+    lastRun = run;
     renderHeader(run);
     foldLog(run);
+    rail.render(run);
+    live.update(run, { agent: null, message: 'starting…' });
     stopTicking();
     clear(logBox);
     // Not the narration: `load` runs again when the run finishes, and clearing
     // it there would wipe the reasoning the moment it became worth reading.
     seen = new Set();
+    lastMinute = null;
     for (const event of run.events) line(event);
     renderBody(run);
 
@@ -171,7 +206,9 @@ export function runView(runId, { onChanged }) {
     shownFor = run.status;
     const working = run.status === 'running' || run.status === 'queued';
     logCard.open = working;
-    clear(logSummary).append(
+    // `mount`, not `append`: a bare append(null) writes the string "null", which
+    // is exactly what the summary read while a run was going.
+    mount(clear(logSummary),
       'Progress',
       working ? null : el('span', { class: 'muted small' }, ' — every step, if you want to check one'),
     );
@@ -432,6 +469,17 @@ export function runView(runId, { onChanged }) {
     const wanted = tabs.findIndex(([label]) => slug(label) === activeTab);
     select(wanted === -1 ? 0 : wanted);
   }
+
+  // Back, forward, or a link to another tab of the run already open: the router
+  // sees the same run id and deliberately does not rebuild the view, so the tab
+  // segment would otherwise change in the URL and nowhere else. The listener
+  // removes itself once the hash names a different run, which is what keeps it
+  // from outliving the view in the absence of a teardown hook.
+  window.addEventListener('hashchange', function onHash() {
+    const [, , id, tab] = location.hash.split('/');
+    if (id !== runId) { window.removeEventListener('hashchange', onHash); return; }
+    if (tab && tab.toLowerCase() !== activeTab) showTab(tab);
+  });
 
   // Jump to a tab from outside the strip - the warning chips in the header
   // point at the Run tab, where what they are counting is actually listed.

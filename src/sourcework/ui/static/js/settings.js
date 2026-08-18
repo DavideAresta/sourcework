@@ -30,7 +30,7 @@ const controls = new Map();
 // Backend-specific gotchas worth surfacing where the model is chosen.
 const HINTS = {
   'litellm': 'The gateway reaches any LiteLLM-supported provider (anthropic/, openai/, '
-    + 'ollama/…). Its keys — Anthropic, OpenAI and the gateway's own — live in Shared credentials.',
+    + 'ollama/…). Its keys — Anthropic, OpenAI and the gateway\'s own — live in Shared credentials.',
   'llama-cpp': 'Runs directly against a local llama-server or llama-swap; it does not need a '
     + 'LiteLLM proxy. The server URL, key and model directories are right here: start '
     + 'llama-server, then choose one of the model ids it reports.',
@@ -47,7 +47,9 @@ const HINTS = {
   'opencode-cli': 'opencode needs an explicit model: with none it fails outright with '
     + '"Unexpected server error".',
   'copilot-cli': 'Authenticates as you via the `copilot` login — no key is needed here. '
-    + 'COPILOT_HOME is right below.',
+    + 'Pick a Copilot profile to switch account (`~/.copilot-<profile>` by default, or '
+    + '`COPILOT_HOME_<PROFILE>` when exported), with COPILOT_HOME still available as an '
+    + 'explicit override.',
   'agy-cli': 'agy ids usually carry their own tier (-high/-medium/-low), and then the '
     + 'reasoning-effort setting is left alone. It cannot read images, so the vision '
     + 'role falls through to another backend.',

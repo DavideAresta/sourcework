@@ -129,6 +129,9 @@ AWS_REGION_NAME=eu-west-1  AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…
 SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
 SOURCEWORK_LLM__OPENCODE_MODELS__DEFAULT=opencode/claude-haiku-4-5
 SOURCEWORK_LLM__COPILOT_MODELS__DEFAULT=auto
+SOURCEWORK_LLM__COPILOT_PROFILE=ArestaDav
+# Optional profile-home override from the shell environment:
+# COPILOT_HOME_ARESTADAV=/home/you/.copilot-ArestaDav
 ```
 
 Anything unset means "let that backend pick its own default". Point
@@ -154,4 +157,3 @@ agent ever sees the credentials.
 **Inter-agent auth** — set `SOURCEWORK_SECURITY__ENFORCE=1` and every agent
 declares an `apiKey` security scheme on its card and rejects unauthenticated
 calls.
-

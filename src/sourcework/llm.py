@@ -210,7 +210,12 @@ class LLM:
                 continue
 
             if not backend.available():
-                failures.append(f"{backend_id}: not usable here (CLI missing, or not installed)")
+                detail_for = getattr(backend, "unavailable_detail", None)
+                detail = detail_for() if callable(detail_for) else ""
+                failures.append(
+                    f"{backend_id}: not usable here ({detail})" if detail
+                    else f"{backend_id}: not usable here"
+                )
                 continue
 
             # The model belongs to the backend, not to the call. Carrying the

@@ -366,6 +366,28 @@ async def test_copilot_honours_a_dedicated_home(cli):
     assert cli.calls[-1]["env"]["COPILOT_HOME"] == "/tmp/sourcework-copilot"
 
 
+async def test_copilot_profile_maps_to_a_profile_home(cli, monkeypatch):
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    monkeypatch.setenv("COPILOT_HOME_ARESTADAV", "/tmp/copilot-aresta")
+    monkeypatch.setenv("COPILOT_GH_HOST_ARESTADAV", "github.example.com")
+    await CopilotBackend(profile="ArestaDav").generate(request())
+    assert cli.calls[-1]["env"]["COPILOT_HOME"] == "/tmp/copilot-aresta"
+    assert cli.calls[-1]["env"]["COPILOT_GH_HOST"] == "github.example.com"
+
+
+async def test_copilot_profile_falls_back_to_the_conventional_home(cli):
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    await CopilotBackend(profile="ArestaDav").generate(request())
+    assert cli.calls[-1]["env"]["COPILOT_HOME"] == str(Path.home() / ".copilot-ArestaDav")
+
+
+async def test_copilot_home_override_wins_over_profile_mapping(cli, monkeypatch):
+    cli.script(json.dumps({"type": "assistant.message", "data": {"content": "hi"}}))
+    monkeypatch.setenv("COPILOT_HOME_ARESTADAV", "/tmp/copilot-aresta")
+    await CopilotBackend(profile="ArestaDav", home="/tmp/sourcework-copilot").generate(request())
+    assert cli.calls[-1]["env"]["COPILOT_HOME"] == "/tmp/sourcework-copilot"
+
+
 async def test_copilot_refuses_a_prompt_it_cannot_physically_send(cli):
     # -p takes the prompt inline and the CLI does not read stdin, so this is a
     # real limit, not a policy - failing loudly lets the chain route around it.
@@ -790,6 +812,24 @@ def test_cli_backends_get_the_longer_timeout():
     assert cfg.timeout_for("litellm") == 180
     assert cfg.timeout_for("llama-cpp") == 180
     assert cfg.timeout_for("opencode-cli") == 600
+
+
+def test_build_passes_the_selected_copilot_profile_to_the_backend():
+    from sourcework.backends import build
+
+    backend = build("copilot-cli", LLMSettings(backend="copilot-cli", copilot_profile="ArestaDav"))
+    assert isinstance(backend, CopilotBackend)
+    assert backend.profile == "ArestaDav"
+
+
+async def test_an_unavailable_backend_reports_its_own_detail(monkeypatch):
+    import shutil
+
+    from sourcework.llm import LLM, LLMError
+
+    monkeypatch.setattr(shutil, "which", lambda command: None)
+    with pytest.raises(LLMError, match="llama-server is not installed"):
+        await LLM(cfg=LLMSettings(backend="llama-cpp")).text("SYS", "USR")
 
 
 def test_llama_cpp_is_a_local_backend_with_its_own_endpoint_and_models(monkeypatch):

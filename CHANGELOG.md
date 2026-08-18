@@ -19,6 +19,47 @@ change belongs to.
 
 ### Added
 
+- Nothing yet.
+
+## [0.4.0] — 2026-08-18
+
+### Added
+
+- **An architecture view** (`/architecture`, in the header beside Dashboard).
+  The eight-agent mesh drawn as a diagram rather than summarised as an `8/8`
+  pill: who reads what, who hands what to whom, and the revision loop between
+  writer and critic. Health comes from `/api/mesh`, so an agent that stops
+  answering goes dashed and red; while a run is going the working agent glows
+  and the edges into it animate. Clicking a node gives its role, its
+  consumes/produces contract, the skills its agent card actually advertises and
+  a link to its API docs.
+- **A railway across the top of a run**, one stop per pipeline stage: Discover,
+  Ingest, Analyse, Write, Review, Publish, Done. Finished runs are drawn from
+  the timings the orchestrator measured, so each stop carries what it cost and a
+  stage that never ran says **not run** rather than showing a tick. Live runs
+  advance on the orchestrator's own progress lines — and a line that matches
+  nothing leaves the strip where it was, because the strip may lag but may never
+  lie. A test asserts every pattern still matches something the pipeline says.
+- **A hero line while a run works**: which agent is working, on what, and for
+  how long, in the largest type on the page. The elapsed clock moved here from
+  the tail of the log.
+- **The progress log reads as a feed**: one sticky header per minute instead of
+  a timestamp on every row, the agent as a chip rather than as four more
+  characters of prose, and failures railed in red and wrapped in monospace
+  because the detail is the point of an error line. It only follows the tail
+  when you are already at it.
+- **Copilot CLI can run under a selected profile.**
+  `SOURCEWORK_LLM__COPILOT_PROFILE` now lets the copilot-cli backend switch
+  account by deriving `COPILOT_HOME` from the profile name
+  (`~/.copilot-<profile>`) or from `COPILOT_HOME_<PROFILE>` when that mapping
+  is exported; `SOURCEWORK_LLM__COPILOT_HOME` still overrides it explicitly.
+
+### Changed
+
+- **The run view's tabs are a segmented control**, one choice rather than six
+  underlined words, and the model-output panel is a native disclosure with a
+  copy button like every other terminal-shaped thing in the app.
+
 - **Settings grouped per backend.** The settings page draws one card per backend
   holding that backend's four model cells *and* the credentials only it reads
   (Azure's keys, AWS's, Vertex's, llama.cpp's server, the CLI home dirs), with
@@ -28,6 +69,18 @@ change belongs to.
   hosted install gets the same cards (just fewer of them), and the backend
   filter now also drops a CLI backend's exclusive keys along with its model
   cells.
+
+### Fixed
+
+- **Saving settings now creates the platform config directory on first run**
+  before writing `.env`, so a first-time save on packaged installs no longer
+  fails with `FileNotFoundError` for `~/.config/SourceWork/.env`.
+- **A save that requires restart but reaches no peers now says so explicitly.**
+  The settings response names that running agents are still on the previous
+  values and that a manual mesh restart is required.
+- **Unavailable-backend errors now name the backend's real missing dependency.**
+  A failed `llama-cpp` call now reports the `llama-server` availability detail
+  instead of the generic CLI-missing wording.
 
 ## [0.3.0] — 2026-08-18
 
@@ -285,7 +338,8 @@ tool**. The UI binds loopback and ships no authentication; the agent mesh ships
 a publicly known shared secret and does not enforce it by default; ingestion
 refuses private-network targets; and model output is treated as untrusted input.
 
-[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.4.0
 [0.3.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.3.0
 [0.2.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.2.0
 [0.1.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.1.0

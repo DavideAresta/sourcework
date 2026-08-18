@@ -143,7 +143,7 @@ def build(backend_id: str, cfg: LLMSettings) -> LLMBackend:
     if wanted == "copilot-cli":
         from sourcework.backends.copilot import CopilotBackend
 
-        return CopilotBackend(home=cfg.copilot_home)
+        return CopilotBackend(home=cfg.copilot_home, profile=cfg.copilot_profile)
 
     if wanted == "codex-cli":
         from sourcework.backends.codex import CodexBackend
