@@ -16,6 +16,22 @@ and the version on every agent card are the same string by construction.
 
 ### Added
 
+- **Backends split by distribution.** The settings page, model profiles and
+  backend probe now honour an `allowed_backends` on the settings backend: the
+  local distribution offers everything (hosted APIs *and* the coding CLIs and
+  `llama-cpp`), while the hosted one offers the API family only — `litellm`,
+  `azure`, `bedrock`, `vertex-ai`, `openai`. A tenant cannot even save a CLI
+  backend by posting it by hand: the value is dropped, not stored. The hosted
+  settings page now keeps its values per tenant in Postgres
+  (`TenantSettingsBackend` over a new `tenant_settings` table, RLS-scoped like
+  runs) instead of a shared `.env`.
+- **Four named hosted-provider backends.** `azure`, `bedrock`, `vertex-ai` and
+  `openai` wrap LiteLLM with their own credential fields and per-role model
+  cells on the settings page. Each probes "available" only when its credential
+  is configured, and the settings page says exactly which key is missing.
+  `openai` joins the curated profiles (its ids are portable); `azure`/`bedrock`/
+  `vertex-ai` are deliberately left out, because a deployment name only the
+  operator knows cannot be pre-filled honestly.
 - **The hosted service starts as a shell.** A sibling `sourcework-cloud` package
   serves the same web UI over Postgres instead of SQLite — tenant-scoped from
   day one and guarded by an installed authenticator — so the whole product runs

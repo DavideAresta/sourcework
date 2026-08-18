@@ -30,6 +30,13 @@ const controls = new Map();
 const HINTS = {
   'llama-cpp': 'Runs directly against a local llama-server or llama-swap; it does not need a '
     + 'LiteLLM proxy. Start llama-server, then choose one of the model ids it reports here.',
+  'azure': 'The model id is your Azure deployment: `azure/<deployment>`. Set the key, endpoint '
+    + 'and API version in Credentials.',
+  'bedrock': 'Model ids are AWS names: `bedrock/anthropic.claude-sonnet-5-v1`. Set the region '
+    + 'and keys in Credentials; a session token is only needed for temporary credentials.',
+  'vertex-ai': 'Model ids are Google names: `vertex_ai/gemini-3.1-pro`. Credentials come from '
+    + 'GOOGLE_APPLICATION_CREDENTIALS (or default application credentials), plus project and region.',
+  'openai': 'Plain platform ids: `openai/gpt-5.4`. Needs OPENAI_API_KEY.',
   'opencode-cli': 'opencode needs an explicit model: with none it fails outright with '
     + '"Unexpected server error".',
   'agy-cli': 'agy ids usually carry their own tier (-high/-medium/-low), and then the '
@@ -276,10 +283,18 @@ async function loadBackends() {
         ),
       );
     }
-    backendsBox.append(
-      el('div', { class: 'small muted', style: 'margin-top:10px' },
-        'CLI backends authenticate as you — if you are signed into the tool, runs use that subscription and need no API key here.'),
-    );
+    // The CLI footnote is only true when this distribution actually offers a
+    // CLI backend. The server sends `cli_backends` (the offered CLI ids) so
+    // this page does not carry its own copy of the list - on a hosted install
+    // there are no CLI backends at all, and the footnote would be a lie.
+    const cliOffered = (data.cli_backends ?? [])
+      .some((id) => (data.backends ?? []).some((b) => b.id === id));
+    if (cliOffered) {
+      backendsBox.append(
+        el('div', { class: 'small muted', style: 'margin-top:10px' },
+          'CLI backends authenticate as you — if you are signed into the tool, runs use that subscription and need no API key here.'),
+      );
+    }
   } catch (error) {
     backendsBox.append(el('div', { class: 'small muted' }, `Could not probe backends: ${error.message}`));
   }

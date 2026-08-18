@@ -5,11 +5,24 @@ An agent calls `llm.structured(...)`. What sits behind that is configuration:
 | Backend | How | Auth |
 |---|---|---|
 | `litellm` | HTTPS to a hosted API | provider credentials |
+| `azure` | Azure OpenAI via LiteLLM | `AZURE_API_KEY`/`AZURE_API_BASE`/`AZURE_API_VERSION` |
+| `bedrock` | AWS Bedrock via LiteLLM | `AWS_REGION_NAME` + access/secret keys |
+| `vertex-ai` | Google Vertex AI via LiteLLM | `GOOGLE_APPLICATION_CREDENTIALS` + project/region |
+| `openai` | OpenAI via LiteLLM | `OPENAI_API_KEY` |
 | `claude-code` | `claude -p --output-format json` | the CLI's own login |
 | `opencode-cli` | `opencode run --format json` | OpenCode's provider config |
 | `copilot-cli` | `copilot -p --output-format json` | `copilot login` |
 | `codex-cli` | `codex exec --json` | `codex login` |
 | `agy-cli` | `agy --print --output-format json` | its own sign-in |
+
+**Which backends a distribution offers differs.** The local distribution offers
+everything above — the hosted API backends *and* the CLIs, side by side, since a
+CLI you are signed into needs no key plumbed through SourceWork. The hosted
+distribution offers the API backends only: it has no CLIs, no local
+`llama-server`, and no developer logins to lean on. Its settings page serves
+the same allow-list filtered down to `litellm`/`azure`/`bedrock`/`vertex-ai`/
+`openai`, so a tenant cannot even save a CLI backend by posting it by hand —
+the value is dropped, not stored.
 
 The five CLI backends carry **their own** authentication, so if you are signed
 into one of those tools the entire pipeline runs on that subscription with no
@@ -102,6 +115,16 @@ SOURCEWORK_LLM__VISION_MODEL=anthropic/claude-sonnet-5       # images
 SOURCEWORK_LLM__CRITIC_MODEL=anthropic/claude-opus-5         # the adversarial review
 SOURCEWORK_LLM__FAST_MODEL=anthropic/claude-haiku-4-5
 
+# azure — the model id is your deployment name
+SOURCEWORK_LLM__BACKEND=azure
+SOURCEWORK_LLM__AZURE_MODELS__REASONING=azure/gpt-5.4
+AZURE_API_KEY=…  AZURE_API_BASE=https://<resource>.openai.azure.com/
+
+# bedrock — AWS model ids
+SOURCEWORK_LLM__BACKEND=bedrock
+SOURCEWORK_LLM__BEDROCK_MODELS__REASONING=bedrock/anthropic.claude-sonnet-5-v1
+AWS_REGION_NAME=eu-west-1  AWS_ACCESS_KEY_ID=…  AWS_SECRET_ACCESS_KEY=…
+
 # per CLI backend
 SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING=sonnet
 SOURCEWORK_LLM__OPENCODE_MODELS__DEFAULT=opencode/claude-haiku-4-5
@@ -110,6 +133,12 @@ SOURCEWORK_LLM__COPILOT_MODELS__DEFAULT=auto
 
 Anything unset means "let that backend pick its own default". Point
 `SOURCEWORK_LLM__API_BASE` at a gateway for the litellm path. No code changes.
+
+The named provider backends differ from `litellm` in exactly two ways: their
+credentials are their own fields (so the settings page can show them
+individually), and their profiles do not pre-fill model ids — a deployment name
+only the operator knows is not something a preset can say anything true about.
+`openai` is the exception, because its ids are portable.
 
 **Usage** — every call records what the backend reported (tokens, cache hits,
 cost) into a per-process ledger. Costs are kept apart by unit: Claude Code

@@ -191,6 +191,73 @@ def test_a_hosted_install_still_gets_its_suggestions(env_path: Path):
     assert env_file.profiles_for(env_path) == env_file.PROFILES
 
 
+def test_a_hosted_install_is_not_offered_cli_backends():
+    """The settings page's backends are the distribution's decision.
+
+    The hosted one has no CLIs, no llama-server and no developer logins, so
+    offering those here would hand the operator a trap: pick one, save it, and
+    every run fails. The allow-list filters on the way out, so the choice never
+    reaches the page in the first place.
+    """
+    from sourcework.config import API_BACKEND_IDS
+
+    fields = {f["key"]: f for f in env_file.describe_values({}, allowed=API_BACKEND_IDS)}
+
+    assert fields["SOURCEWORK_LLM__BACKEND"]["options"] == [
+        "litellm", "azure", "bedrock", "vertex-ai", "openai", "stub"
+    ]
+    # No CLI model cells, no llama.cpp, and the CLI-only knobs are gone.
+    assert not any(k.startswith("SOURCEWORK_LLM__CLAUDE_CODE_MODELS") for k in fields)
+    assert not any(k.startswith("SOURCEWORK_LLM__OPENCODE_MODELS") for k in fields)
+    assert not any(f["backend"] == "llama-cpp" for f in fields.values())
+    assert "SOURCEWORK_LLM__CLI_TIMEOUT_S" not in fields
+    assert "SOURCEWORK_LLM__EFFORT" not in fields
+
+    # The API family is still there in full, credentials and all.
+    assert "AZURE_API_KEY" in fields
+    assert "SOURCEWORK_LLM__VERTEX_AI_MODELS__REASONING" in fields
+    assert "SOURCEWORK_LLM__OPENAI_MODELS__CRITIC" in fields
+
+
+def test_a_hosted_profile_drops_cli_cells_and_keeps_openai():
+    """A profile sweep must only write cells the distribution actually has.
+
+    On a hosted install the CLI backends have no cells at all, so the sweep
+    shrinks to the API family: openai keeps its rows (its ids are portable)
+    while claude-code's disappear rather than being written somewhere no
+    backend will ever read.
+    """
+    from sourcework.config import API_BACKEND_IDS
+
+    for profile in env_file.profiles_for_values({}, allowed=API_BACKEND_IDS).values():
+        keys = profile["models"]
+        assert not any("CLI" in k or "LLAMA" in k or "CLAUDE" in k for k in keys)
+        assert "SOURCEWORK_LLM__OPENAI_MODELS__REASONING" in keys
+        assert "SOURCEWORK_LLM__AZURE_MODELS__REASONING" not in keys
+
+
+def test_a_hand_posted_cli_backend_is_dropped_not_stored():
+    """The page is not the only writer: the value filter is the enforcement.
+
+    A tenant that POSTs ``SOURCEWORK_LLM__BACKEND=claude-code`` at the API gets
+    the value dropped, the same as if the option had never been on the page.
+    The key is allow-listed for every distribution; the *value* is what the
+    offering decides.
+    """
+    from sourcework.config import API_BACKEND_IDS
+
+    changed = env_file.filter_updates(
+        {},
+        {"SOURCEWORK_LLM__BACKEND": "claude-code", "AZURE_API_KEY": "sk-azure"},
+        allowed=API_BACKEND_IDS,
+    )
+    assert changed == {"AZURE_API_KEY": "sk-azure"}
+
+    assert env_file.filter_updates(
+        {}, {"SOURCEWORK_LLM__BACKEND": "azure"}, allowed=API_BACKEND_IDS
+    ) == {"SOURCEWORK_LLM__BACKEND": "azure"}
+
+
 def test_an_unset_switch_shows_the_default_it_actually_has(env_path: Path):
     """A checkbox has no "unset" position, and the form posts every control it
     drew. Rendering an absent default-on setting unticked means opening the
@@ -1099,7 +1166,8 @@ def test_the_model_fields_carry_both_axes():
     assert all(f.backend and f.role for f in models)
 
     covered = {(f.backend, f.role) for f in models}
-    for backend in ("litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli",
+    for backend in ("litellm", "azure", "bedrock", "vertex-ai", "openai",
+                    "llama-cpp", "claude-code", "opencode-cli", "copilot-cli",
                     "codex-cli", "agy-cli"):
         for role in ("default", "reasoning", "vision"):
             assert (backend, role) in covered, f"no control for {backend}/{role}"
@@ -1134,12 +1202,15 @@ def test_every_profile_covers_every_model_cell():
     the failover target is exactly the one nobody remembers to configure - and
     on opencode an unset model is not a default, it is an outright failure.
     """
-    # llama.cpp serves whatever GGUFs the operator installed. A hosted preset
-    # cannot know their ids, so profiles must deliberately leave those cells
-    # alone rather than write a value guaranteed to fail.
+    # llama.cpp serves whatever GGUFs the operator installed, and azure/bedrock/
+    # vertex-ai deploy names only the operator knows. A hosted preset cannot
+    # know their ids, so profiles must deliberately leave those cells alone
+    # rather than write a value guaranteed to fail. (openai's ids are portable,
+    # which is exactly why it is in the profiles.)
     cells = {
         f.key for f in env_file.FIELDS
-        if f.group == "Models" and f.backend != "llama-cpp"
+        if f.group == "Models"
+        and f.backend not in {"llama-cpp", "azure", "bedrock", "vertex-ai"}
     }
     for name, profile in env_file.PROFILES.items():
         assert set(profile["models"]) == cells, f"{name} does not cover every cell"

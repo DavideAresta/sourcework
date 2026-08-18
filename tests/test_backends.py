@@ -835,6 +835,150 @@ def test_llama_cpp_lists_local_ggufs_when_the_server_is_not_running(monkeypatch,
 
 
 # ---------------------------------------------------------------------------
+# Named hosted providers (azure / bedrock / vertex-ai / openai)
+# ---------------------------------------------------------------------------
+
+
+def test_the_named_hosted_providers_are_first_class_backends():
+    """A backend id the settings page lists must build into the backend that
+    answers for it, carrying its own provider kwargs - the credentials a run
+    actually sends to LiteLLM, not the gateway's."""
+    from sourcework.backends import build
+
+    cfg = LLMSettings(
+        backend="azure",
+        azure_models={"default": "azure/gpt-5.4", "reasoning": "azure/gpt-5.4"},
+        azure_api_base="https://sw.openai.azure.com/",
+        azure_api_key="sk-az",
+        azure_api_version="2024-06-01",
+    )
+    backend = build("azure", cfg)
+
+    assert backend.id == "azure"
+    assert backend.provider_kwargs["api_version"] == "2024-06-01"
+    assert cfg.model_for("default") == "azure/gpt-5.4"
+    # A deployment name is meaningless to a CLI; None means "its own default".
+    assert cfg.model_for("default", "claude-code") is None
+
+
+async def test_the_azure_provider_sends_its_own_credentials(litellm_api):
+    from sourcework.backends.litellm_backend import AzureBackend
+
+    await AzureBackend(
+        api_base="https://sw.openai.azure.com/",
+        api_key="sk-az",
+        api_version="2024-06-01",
+    ).generate(request(model="azure/gpt-5.4"))
+
+    sent = litellm_api.calls[0]
+    assert sent["model"] == "azure/gpt-5.4"
+    assert sent["api_base"] == "https://sw.openai.azure.com/"
+    assert sent["api_key"] == "sk-az"
+    assert sent["api_version"] == "2024-06-01"
+
+
+async def test_the_bedrock_provider_sends_the_aws_credentials(litellm_api):
+    from sourcework.backends.litellm_backend import BedrockBackend
+
+    await BedrockBackend(
+        region_name="eu-west-1", access_key_id="AKIA", secret_access_key="s3cret",
+        session_token="tok",
+    ).generate(request(model="bedrock/anthropic.claude-haiku-5-v1"))
+
+    sent = litellm_api.calls[0]
+    assert sent["model"] == "bedrock/anthropic.claude-haiku-5-v1"
+    assert sent["aws_region_name"] == "eu-west-1"
+    assert sent["aws_access_key_id"] == "AKIA"
+    assert sent["aws_secret_access_key"] == "s3cret"
+    assert sent["aws_session_token"] == "tok"
+
+
+def test_a_named_provider_is_available_only_with_its_credential(monkeypatch):
+    """The settings page cannot offer a backend nobody is logged into.
+
+    Each named provider gates "available" on its own credential - the key the
+    run would actually bill - so a fresh tenant sees azure/bedrock/vertex-ai/
+    openai light up only once the right field is set. Cheap and network-free,
+    like every availability check.
+    """
+    from sourcework.backends import build
+
+    for name in ("AZURE_API_KEY", "AWS_REGION_NAME", "AWS_ACCESS_KEY_ID",
+                 "AWS_SECRET_ACCESS_KEY", "GCP_PROJECT_ID", "GCP_REGION_NAME",
+                 "GOOGLE_CLOUD_PROJECT", "GCP_VERTEX_LOCATION", "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert not build("azure", LLMSettings(backend="azure")).available()
+    assert not build("bedrock", LLMSettings(backend="bedrock")).available()
+    assert not build("vertex-ai", LLMSettings(backend="vertex-ai")).available()
+    assert not build("openai", LLMSettings(backend="openai")).available()
+
+    assert build("azure", LLMSettings(backend="azure", azure_api_key="sk")).available()
+    assert build("bedrock", LLMSettings(
+        backend="bedrock", aws_region_name="eu-west-1",
+        aws_access_key_id="AKIA", aws_secret_access_key="secret"
+    )).available()
+    assert build("vertex-ai", LLMSettings(
+        backend="vertex-ai", vertex_project="p", vertex_location="us-central1"
+    )).available()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    assert build("openai", LLMSettings(backend="openai")).available()
+
+
+def test_an_unavailable_named_provider_names_the_missing_credential(monkeypatch):
+    """The "what is missing" message points at the settings field, so fixing it
+    is one box on the page rather than a hunt through provider docs."""
+    from sourcework.backends import build
+
+    monkeypatch.delenv("AZURE_API_KEY", raising=False)
+    azure = build("azure", LLMSettings(backend="azure"))
+    assert not azure.available()
+    assert "SOURCEWORK_LLM__AZURE_API_KEY" in azure.unavailable_detail()
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    openai = build("openai", LLMSettings(backend="openai"))
+    assert "OPENAI_API_KEY" in openai.unavailable_detail()
+
+
+def test_vertex_ai_reads_project_and_region_from_the_gcp_environment(monkeypatch):
+    """The settings fields and the environment LiteLLM reads both count.
+
+    A tenant that fills SOURCEWORK_LLM__VERTEX_PROJECT in one box and nothing
+    in the other still sees vertex-ai as available - the environment supplies
+    the rest, exactly as it does for a bare LiteLLM deployment.
+    """
+    from sourcework.backends import build
+
+    for name in ("GCP_PROJECT_ID", "GCP_REGION_NAME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "gcp-proj")
+    monkeypatch.setenv("GCP_VERTEX_LOCATION", "europe-west4")
+
+    backend = build("vertex-ai", LLMSettings(backend="vertex-ai"))
+    assert backend.available()
+
+
+def test_probe_narrows_to_the_distributions_offer(monkeypatch):
+    """``probe(allowed=…)`` is the ``/api/backends`` offering: no CLI rows on a
+    hosted install, and a credential-less provider marked unavailable with the
+    reason the settings page shows."""
+    from sourcework.backends import probe
+    from sourcework.config import API_BACKEND_IDS
+
+    for name in ("AZURE_API_KEY", "AWS_REGION_NAME", "AWS_ACCESS_KEY_ID",
+                 "AWS_SECRET_ACCESS_KEY", "GCP_PROJECT_ID", "GCP_REGION_NAME",
+                 "OPENAI_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    rows = probe(LLMSettings(backend="litellm"), allowed=API_BACKEND_IDS)
+    assert [r["id"] for r in rows] == list(API_BACKEND_IDS)
+    assert rows[0]["id"] == "litellm" and rows[0]["available"] is True
+    assert all(r["available"] is False for r in rows[1:])
+    assert "AZURE_API_KEY" in rows[1]["detail"]
+    assert "OPENAI_API_KEY" in rows[4]["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Quota classification
 # ---------------------------------------------------------------------------
 

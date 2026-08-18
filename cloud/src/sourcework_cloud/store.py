@@ -58,12 +58,23 @@ CREATE TABLE IF NOT EXISTS runs (
     approval    TEXT
 );
 CREATE INDEX IF NOT EXISTS runs_tenant_created ON runs (tenant_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS tenant_settings (
+    tenant_id   TEXT NOT NULL,
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, key)
+);
 """
 
 RLS = """
 ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON runs;
 CREATE POLICY tenant_isolation ON runs
+    USING (tenant_id = current_setting('app.tenant_id', true));
+ALTER TABLE tenant_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_settings ON tenant_settings;
+CREATE POLICY tenant_isolation_settings ON tenant_settings
     USING (tenant_id = current_setting('app.tenant_id', true));
 """
 
@@ -190,6 +201,57 @@ class PostgresStore:
             return cur.rowcount
 
         return await asyncio.to_thread(self._scoped, sweep)
+
+    # -- tenant settings ----------------------------------------------------
+
+    def get_settings(self) -> dict[str, str]:
+        """This tenant's saved settings, ``KEY -> value``.
+
+        Synchronous on purpose: it serves the settings backend, whose protocol
+        is synchronous (the local one reads a file, after all), and the page is
+        a handful of rows. RLS applies like everywhere else - a call with no
+        tenant set returns nothing, the safe direction.
+        """
+        def read_all(conn) -> dict[str, str]:
+            rows = conn.execute(
+                "SELECT key, value FROM tenant_settings WHERE tenant_id = %s",
+                (_tenant.get(),),
+            ).fetchall()
+            return {key: value for key, value in rows}
+
+        return self._scoped(read_all)
+
+    def put_settings(self, updates: dict[str, str]) -> list[str]:
+        """Save ``updates`` for this tenant, returning the keys that changed.
+
+        An empty value *unsets*: the settings page sends ``""`` to clear a
+        field, and storing a blank is how a config that was fine becomes one
+        every later process chokes on (an empty ``MAX_TOKENS`` is not an int).
+        Deleting the row means the code default applies, exactly what clearing
+        a box means on the local page.
+        """
+        def write_all(conn) -> list[str]:
+            changed: list[str] = []
+            for key, value in updates.items():
+                if value == "":
+                    cur = conn.execute(
+                        "DELETE FROM tenant_settings WHERE tenant_id = %s AND key = %s",
+                        (_tenant.get(), key),
+                    )
+                else:
+                    cur = conn.execute(
+                        """INSERT INTO tenant_settings (tenant_id, key, value)
+                           VALUES (%s, %s, %s)
+                           ON CONFLICT (tenant_id, key) DO UPDATE SET
+                             value = excluded.value, updated_at = now()
+                           WHERE tenant_settings.value IS DISTINCT FROM excluded.value""",
+                        (_tenant.get(), key, value),
+                    )
+                if cur.rowcount:
+                    changed.append(key)
+            return sorted(changed)
+
+        return self._scoped(write_all)
 
 
 def _row_to_run(row: tuple[Any, ...]) -> Run:

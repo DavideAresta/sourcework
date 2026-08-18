@@ -13,8 +13,9 @@ pointed at a gateway.
 from __future__ import annotations
 
 import logging
+import os
 import re
-from typing import Any
+from typing import Any, ClassVar
 
 from sourcework.backends.base import (
     COST_USD,
@@ -77,6 +78,7 @@ class LiteLLMBackend(LLMBackend):
         api_key: str | None = None,
         num_retries: int = 2,
         backend_id: str = "litellm",
+        provider_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self.id = backend_id
         self.api_base = api_base
@@ -85,6 +87,11 @@ class LiteLLMBackend(LLMBackend):
         """LiteLLM's own retries, *inside* one call. Worth lowering for a local
         server: there the usual failure is a timeout, and three attempts at a
         20-minute ceiling is an hour spent discovering the same thing."""
+        # Provider-specific completion kwargs (api_version for Azure, the AWS
+        # credentials for Bedrock, vertex_project/location). None entries are
+        # dropped at call time so an unset value never reaches LiteLLM as a
+        # literal `None` kwarg it was not given.
+        self.provider_kwargs = {k: v for k, v in (provider_kwargs or {}).items() if v is not None}
 
     def available(self) -> bool:
         try:
@@ -171,6 +178,7 @@ class LiteLLMBackend(LLMBackend):
             kwargs["api_base"] = self.api_base
         if self.api_key:
             kwargs["api_key"] = self.api_key
+        kwargs.update(self.provider_kwargs)
 
         # Constrained decoding, when the caller asked for a schema. `strict` is
         # deliberately absent: llama.cpp, vLLM and Ollama build their grammar
@@ -255,3 +263,153 @@ def _usage_from(response: object, finish_reason: str | None) -> LLMUsage | None:
         cost_unit=COST_USD if cost is not None else None,
         finish_reason=finish_reason,
     )
+
+
+class _NamedProviderBackend(LiteLLMBackend):
+    """A hosted provider behind :class:`LiteLLMBackend`, surfaced as its own
+    backend id so its credentials get their own fields on the settings page.
+
+    ``available()`` gates on the provider's credential being present - via the
+    configured settings *or* the standard environment variable LiteLLM itself
+    would read - because a backend nobody can use should say so up front rather
+    than light up as "available" and fail on the first call. The check stays
+    cheap and network-free, per :meth:`LLMBackend.available`.
+    """
+
+    #: setting name -> the environment variable LiteLLM accepts for the same value
+    env_names: ClassVar[dict[str, str]] = {}
+    #: setting name -> the settings-page field (SOURCEWORK_LLM__…), for the
+    #: "what is missing" message. OpenAI's key is the bare OPENAI_API_KEY, so
+    #: there the label is that variable.
+    setting_names: ClassVar[dict[str, str]] = {}
+
+    def _credential(self, name: str) -> str | None:
+        value = self.provider_kwargs.get(name) or getattr(self, name, None)
+        if value:
+            return value
+        return os.environ.get(self.env_names.get(name, "")) if name in self.env_names else None
+
+    def _credential_missing(self) -> str | None:
+        for name in self.env_names:
+            if self._credential(name):
+                continue
+            setting = self.setting_names.get(name, name)
+            return f"set {setting} (or {self.env_names[name]})"
+        return None
+
+    def available(self) -> bool:
+        if not super().available():
+            return False
+        return self._credential_missing() is None
+
+    def unavailable_detail(self) -> str:
+        if not super().available():
+            return "litellm is not installed"
+        return self._credential_missing() or ""
+
+
+class AzureBackend(_NamedProviderBackend):
+    """Azure OpenAI (``azure``). The model id is the deployment name:
+    ``azure/<deployment>``."""
+
+    id = "azure"
+
+    env_names = {"api_key": "AZURE_API_KEY"}
+    setting_names = {"api_key": "SOURCEWORK_LLM__AZURE_API_KEY"}
+
+    def __init__(
+        self, *, api_base: str | None, api_key: str | None, api_version: str | None,
+        num_retries: int = 2,
+    ) -> None:
+        super().__init__(
+            api_base=api_base,
+            api_key=api_key,
+            num_retries=num_retries,
+            backend_id="azure",
+            provider_kwargs={"api_version": api_version},
+        )
+
+
+class BedrockBackend(_NamedProviderBackend):
+    """AWS Bedrock (``bedrock``). Model ids look like ``bedrock/<model-id>``,
+    e.g. ``bedrock/anthropic.claude-sonnet-5-v1``."""
+
+    id = "bedrock"
+
+    env_names = {
+        "aws_region_name": "AWS_REGION_NAME",
+        "aws_access_key_id": "AWS_ACCESS_KEY_ID",
+        "aws_secret_access_key": "AWS_SECRET_ACCESS_KEY",
+    }
+    setting_names = {
+        "aws_region_name": "SOURCEWORK_LLM__AWS_REGION_NAME",
+        "aws_access_key_id": "SOURCEWORK_LLM__AWS_ACCESS_KEY_ID",
+        "aws_secret_access_key": "SOURCEWORK_LLM__AWS_SECRET_ACCESS_KEY",
+    }
+
+    def __init__(
+        self, *, region_name: str | None, access_key_id: str | None,
+        secret_access_key: str | None, session_token: str | None = None,
+        num_retries: int = 2,
+    ) -> None:
+        super().__init__(
+            backend_id="bedrock",
+            num_retries=num_retries,
+            provider_kwargs={
+                "aws_region_name": region_name,
+                "aws_access_key_id": access_key_id,
+                "aws_secret_access_key": secret_access_key,
+                "aws_session_token": session_token,
+            },
+        )
+
+
+class VertexAIBackend(_NamedProviderBackend):
+    """Google Vertex AI / Gemini (``vertex_ai``). Credentials come from
+    ``GOOGLE_APPLICATION_CREDENTIALS`` (a service-account file) or Application
+    Default Credentials, exactly as LiteLLM reads them."""
+
+    id = "vertex-ai"
+
+    env_names = {
+        "vertex_project": "GCP_PROJECT_ID",
+        "vertex_location": "GCP_REGION_NAME",
+    }
+    setting_names = {
+        "vertex_project": "SOURCEWORK_LLM__VERTEX_PROJECT",
+        "vertex_location": "SOURCEWORK_LLM__VERTEX_LOCATION",
+    }
+
+    def __init__(self, *, project: str | None, location: str | None, num_retries: int = 2) -> None:
+        super().__init__(
+            backend_id="vertex-ai",
+            num_retries=num_retries,
+            provider_kwargs={"vertex_project": project, "vertex_location": location},
+        )
+
+    def _credential(self, name: str) -> str | None:
+        # boto3-style fallbacks: Google also answers to GOOGLE_CLOUD_PROJECT and
+        # GCP_VERTEX_LOCATION, so accept both spellings without naming two fields.
+        if name == "vertex_project":
+            return super()._credential(name) or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        if name == "vertex_location":
+            return super()._credential(name) or os.environ.get("GCP_VERTEX_LOCATION")
+        return super()._credential(name)
+
+
+class OpenAIBackend(_NamedProviderBackend):
+    """OpenAI (``openai``). The key is the standard ``OPENAI_API_KEY``; the
+    model ids are the platform's own, so ``openai/gpt-5``."""
+
+    id = "openai"
+
+    env_names = {"api_key": "OPENAI_API_KEY"}
+    setting_names = {"api_key": "OPENAI_API_KEY"}
+
+    def __init__(self, *, api_base: str | None = None, num_retries: int = 2) -> None:
+        super().__init__(api_base=api_base, num_retries=num_retries, backend_id="openai")
+
+    def _credential(self, name: str) -> str | None:
+        if name == "api_key":
+            return os.environ.get("OPENAI_API_KEY")
+        return super()._credential(name)

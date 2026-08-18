@@ -19,14 +19,30 @@ from sourcework import paths
 
 ROLES = ("default", "reasoning", "vision", "fast", "critic")
 
-BACKEND_IDS = (
-    "litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli",
-)
+API_BACKEND_IDS = ("litellm", "azure", "bedrock", "vertex-ai", "openai")
+"""Backends that reach a hosted provider over HTTPS.
+
+The family a hosted distribution offers: their credentials are configuration a
+server can hold, which is exactly what the CLIs and the local server are not.
+``litellm`` is the general provider - ``azure``/``bedrock``/``vertex-ai``/
+``openai`` exist as named, first-class options with their own credential
+fields on the settings page. (``vertex-ai``, hyphenated like every other id;
+LiteLLM spells its provider prefix ``vertex_ai``, which is a model-id matter.)
+"""
+
+CLI_BACKEND_IDS = ("claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli")
+"""Backends that drive a coding CLI on the machine the agent runs on. They carry
+their own authentication, so they are local-first by construction: a hosted
+deployment never offers them."""
+
+BACKEND_IDS = API_BACKEND_IDS + ("llama-cpp",) + CLI_BACKEND_IDS
 """Every way of reaching a model.
 
-``litellm`` reaches hosted APIs; ``llama-cpp`` reaches a local ``llama-server``
-directly through its OpenAI-compatible API. The remaining backends drive coding
-CLIs that carry their own authentication.
+``API_BACKEND_IDS`` reach hosted providers; ``llama-cpp`` reaches a local
+``llama-server`` directly through its OpenAI-compatible API; the CLI backends
+drive coding CLIs that carry their own authentication. The settings page offers
+a subset of this per distribution: the local one everything, a hosted one only
+:data:`API_BACKEND_IDS`.
 """
 
 
@@ -42,6 +58,10 @@ def normalise_backend(backend: str) -> str:
 
 _MODEL_FIELDS = {
     "litellm": "litellm_models",
+    "azure": "azure_models",
+    "bedrock": "bedrock_models",
+    "vertex-ai": "vertex_ai_models",
+    "openai": "openai_models",
     "llama-cpp": "llama_cpp_models",
     "claude-code": "claude_code_models",
     "opencode-cli": "opencode_models",
@@ -106,6 +126,10 @@ class LLMSettings(BaseModel):
     # DEFAULT` into a dict-of-models, it tries to JSON-decode the leaf and fails.
     # Explicit fields also make the whole surface visible in .env.example.
     litellm_models: BackendModels = Field(default_factory=BackendModels)
+    azure_models: BackendModels = Field(default_factory=BackendModels)
+    bedrock_models: BackendModels = Field(default_factory=BackendModels)
+    vertex_ai_models: BackendModels = Field(default_factory=BackendModels)
+    openai_models: BackendModels = Field(default_factory=BackendModels)
     llama_cpp_models: BackendModels = Field(default_factory=BackendModels)
     claude_code_models: BackendModels = Field(default_factory=BackendModels)
     opencode_models: BackendModels = Field(default_factory=BackendModels)
@@ -193,6 +217,31 @@ class LLMSettings(BaseModel):
     the credentials gives generation calls a clean session. Unset means "use the
     developer's own", which always works."""
 
+    # Hosted-provider credentials, one named backend per provider. Each is the
+    # surface the settings page shows for the azure/bedrock/vertex_ai/openai
+    # backends; litellm's own backend reuses ANTHROPIC_API_KEY/OPENAI_API_KEY
+    # and SOURCEWORK_LLM__API_BASE/API_KEY instead. LiteLLM reads the same
+    # values from the standard environment variables when these are unset, so
+    # nothing here is ever required in code - a deployment may credential the
+    # provider through its own secret-injection instead.
+    azure_api_key: str | None = None
+    azure_api_base: str | None = None
+    """``https://<resource>.openai.azure.com/``. LiteLLM derives the
+    ``/openai/deployments/<name>`` path from the model id ``azure/<name>``."""
+    azure_api_version: str | None = None
+
+    aws_region_name: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_session_token: str | None = None
+
+    vertex_project: str | None = None
+    vertex_location: str | None = None
+
+    openai_api_base: str | None = None
+    """Optional ``api_base`` for the openai backend; unset reaches openai.com.
+    The key is the standard ``OPENAI_API_KEY``."""
+
     constrained_json: bool = True
     """Ask the backend to *enforce* the JSON schema, not just describe it.
 
@@ -278,7 +327,8 @@ class LLMSettings(BaseModel):
         return None
 
     def timeout_for(self, backend: str) -> float:
-        return self.timeout_s if normalise_backend(backend) in {"litellm", "llama-cpp"} else self.cli_timeout_s
+        api = API_BACKEND_IDS + ("llama-cpp",)
+        return self.timeout_s if normalise_backend(backend) in api else self.cli_timeout_s
 
 
 class ConfluenceSettings(BaseModel):

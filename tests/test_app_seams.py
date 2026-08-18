@@ -15,6 +15,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from sourcework import auth
+from sourcework.config import API_BACKEND_IDS, BACKEND_IDS, CLI_BACKEND_IDS
 from sourcework.ui.app import build_app
 from sourcework.ui.env_file import SettingsBackend
 from sourcework.ui.runner import RunExecutor
@@ -65,6 +66,7 @@ class DictBackend:
     label = "tenant settings"
     default_profile = "balanced"
     restartable = False
+    allowed_backends = BACKEND_IDS
 
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
@@ -177,6 +179,35 @@ def test_a_settings_backend_supplied_to_build_app_is_the_one_served(tmp_path):
     # down for one of them.
     assert written["restart_required"] is False
     assert backend.values == {"SOURCEWORK_LLM__BACKEND": "llama-cpp"}
+
+
+def test_the_backends_route_offers_what_the_settings_backend_allows(tmp_path):
+    """/api/backends advertises the distribution's actual offering.
+
+    The route already proxied availability to the configured backends; the
+    settings backend is what decides *which* backends count at all, and the
+    CLI list is the same decision read differently - a hosted install has no
+    CLIs to warn the user about.
+    """
+
+    class HostedBackend(DictBackend):
+        allowed_backends = API_BACKEND_IDS
+
+    with TestClient(build_app(tmp_path, settings_backend=HostedBackend())) as client:
+        offered = client.get("/api/backends").json()
+
+    assert {b["id"] for b in offered["backends"]} == set(API_BACKEND_IDS)
+    assert offered["cli_backends"] == []
+    assert offered["roles"]
+
+
+def test_the_local_settings_backend_offers_the_cli_list(tmp_path):
+    """The default install still warns that CLIs take minutes - the copy the
+    hosted fix removed must not have been removed from the local page."""
+    with TestClient(build_app(tmp_path)) as client:
+        offered = client.get("/api/backends").json()
+
+    assert offered["cli_backends"] == list(CLI_BACKEND_IDS)
 
 
 def test_the_env_file_backend_satisfies_the_settings_protocol(tmp_path):

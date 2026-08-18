@@ -92,8 +92,15 @@ export function newRunView(onStarted) {
   const backendHint = el('div', { class: 'small muted' });
 
   let catalogue = {};
+  const cliNote = el('span', { class: 'muted small' }, 'CLI backends take minutes — you can leave this page.');
   api.backends().then((data) => {
     catalogue = Object.fromEntries(data.backends.map((b) => [b.id, b]));
+    // The note is a lie on a hosted install, which offers no CLI backends.
+    // `cli_backends` is the offered CLI ids, sent by the server so this page
+    // does not carry its own copy of the list.
+    const cliOffered = (data.cli_backends ?? [])
+      .some((id) => (data.backends ?? []).some((b) => b.id === id));
+    if (!cliOffered) cliNote.style.display = 'none';
     for (const role of data.roles ?? []) {
       const input = el('input', { type: 'text', placeholder: 'backend default' });
       modelInputs[role] = input;
@@ -244,7 +251,7 @@ export function newRunView(onStarted) {
       ),
     ),
 
-    el('div', { class: 'row' }, submit, el('span', { class: 'muted small' }, 'CLI backends take minutes — you can leave this page.')),
+    el('div', { class: 'row' }, submit, cliNote),
   );
 
   return root;

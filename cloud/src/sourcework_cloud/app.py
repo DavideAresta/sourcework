@@ -63,10 +63,14 @@ def build_cloud_app(
         tenant_for(DEFAULT_TENANT)
         return True
 
+    from sourcework_cloud.settings import TenantSettingsBackend
+
+    store = store or PostgresStore(_dsn())
     return build_app(
         workspace=workspace or _default_workspace(),
-        store=store or PostgresStore(_dsn()),
+        store=store,
         executor=executor,
+        settings_backend=TenantSettingsBackend(store),
         authorizer=policy,
         run_id_factory=lambda: str(uuid.uuid4()),
     )

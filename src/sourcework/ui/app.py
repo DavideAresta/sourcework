@@ -43,7 +43,7 @@ from starlette.datastructures import UploadFile
 from sourcework import __version__, audit, auth, checkpoint, readiness
 from sourcework.a2a_common import AgentPool
 from sourcework.backends import probe
-from sourcework.config import LLMOverrides, settings
+from sourcework.config import CLI_BACKEND_IDS, LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
 from sourcework.ui import env_file
 from sourcework.ui.runner import RunExecutor, RunManager
@@ -788,10 +788,17 @@ def build_app(
     @app.get("/api/backends", tags=["ops"])
     async def backends() -> dict[str, Any]:
         cfg = settings().llm
+        allowed = settings_backend.allowed_backends
         return {
             "active": cfg.active_backend,
             "failover_order": cfg.failover_order,
-            "backends": probe(cfg),
+            "backends": probe(cfg, allowed=allowed),
+            # Which backends this distribution offers, rather than a second
+            # hand-written list: the run form and the settings page both need to
+            # know whether any of the offered backends is a CLI (the copy about
+            # "CLIs take minutes" is a lie on a hosted install), and keeping it
+            # here stops the front end from duplicating the ids.
+            "cli_backends": [b for b in allowed if b in CLI_BACKEND_IDS],
             # From the settings fields, not a second hand-written list - see
             # env_file.model_roles for what the two drifting apart cost.
             "roles": env_file.model_roles(),

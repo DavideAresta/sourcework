@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from sourcework.config import BACKEND_IDS
+
 MASK = "••••••••"
 
 _LINE = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=(?P<value>.*)$")
@@ -52,6 +54,14 @@ class Field:
     that grid in their head. Carrying the two axes as data lets the page draw
     the grid instead."""
 
+    local_only: bool = False
+    """Only offered by the local distribution.
+
+    The hosted one has no CLIs, no local model server and no per-developer
+    scratch dirs, so the fields that configure those are meaningless there.
+    ``describe`` drops them whenever the allowed backends are not the full
+    set - the proxy for "this is a hosted installation"."""
+
     @property
     def secret(self) -> bool:
         return self.kind == "password"
@@ -60,9 +70,10 @@ class Field:
 FIELDS: tuple[Field, ...] = (
     # -- routing -----------------------------------------------------------
     Field("SOURCEWORK_LLM__BACKEND", "Default backend", "Routing", "select",
-          ("litellm", "llama-cpp", "claude-code", "opencode-cli", "copilot-cli", "codex-cli",
-           "agy-cli", "stub"),
-          help="What a run uses when it does not choose for itself."),
+          ("litellm", "azure", "bedrock", "vertex-ai", "openai", "llama-cpp",
+           "claude-code", "opencode-cli", "copilot-cli", "codex-cli", "agy-cli", "stub"),
+          help="What a run uses when it does not choose for itself. The hosted "
+               "distribution offers only the API backends."),
     Field("SOURCEWORK_LLM__FAILOVER_ORDER", "Failover order", "Routing",
           placeholder="claude-code,opencode-cli",
           help="Comma-separated, tried in order when the active backend fails. "
@@ -81,6 +92,42 @@ FIELDS: tuple[Field, ...] = (
           backend="litellm", role="vision"),
     Field("SOURCEWORK_LLM__CRITIC_MODEL", "critic", "Models",
           backend="litellm", role="critic"),
+
+    Field("SOURCEWORK_LLM__AZURE_MODELS__DEFAULT", "default", "Models",
+          backend="azure", role="default"),
+    Field("SOURCEWORK_LLM__AZURE_MODELS__REASONING", "reasoning", "Models",
+          backend="azure", role="reasoning"),
+    Field("SOURCEWORK_LLM__AZURE_MODELS__VISION", "vision", "Models",
+          backend="azure", role="vision"),
+    Field("SOURCEWORK_LLM__AZURE_MODELS__CRITIC", "critic", "Models",
+          backend="azure", role="critic"),
+
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__DEFAULT", "default", "Models",
+          backend="bedrock", role="default"),
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__REASONING", "reasoning", "Models",
+          backend="bedrock", role="reasoning"),
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__VISION", "vision", "Models",
+          backend="bedrock", role="vision"),
+    Field("SOURCEWORK_LLM__BEDROCK_MODELS__CRITIC", "critic", "Models",
+          backend="bedrock", role="critic"),
+
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__DEFAULT", "default", "Models",
+          backend="vertex-ai", role="default"),
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__REASONING", "reasoning", "Models",
+          backend="vertex-ai", role="reasoning"),
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__VISION", "vision", "Models",
+          backend="vertex-ai", role="vision"),
+    Field("SOURCEWORK_LLM__VERTEX_AI_MODELS__CRITIC", "critic", "Models",
+          backend="vertex-ai", role="critic"),
+
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__DEFAULT", "default", "Models",
+          backend="openai", role="default"),
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__REASONING", "reasoning", "Models",
+          backend="openai", role="reasoning"),
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__VISION", "vision", "Models",
+          backend="openai", role="vision"),
+    Field("SOURCEWORK_LLM__OPENAI_MODELS__CRITIC", "critic", "Models",
+          backend="openai", role="critic"),
 
     Field("SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT", "default", "Models",
           backend="llama-cpp", role="default"),
@@ -139,14 +186,16 @@ FIELDS: tuple[Field, ...] = (
     # -- limits --------------------------------------------------------------
     Field("SOURCEWORK_LLM__EFFORT", "Reasoning effort", "Limits", "select",
           ("", "low", "medium", "high", "xhigh", "max"),
+          local_only=True,
           help="CLI backends only; litellm ignores it. `max` is expensive: on one "
                "measured call it cost 13x the wall clock of `high` for an answer "
                "that then hit the output ceiling anyway."),
     Field("SOURCEWORK_LLM__MAX_TOKENS", "Max output tokens", "Limits", "number"),
     Field("SOURCEWORK_LLM__TEMPERATURE", "Temperature", "Limits", "number"),
     Field("SOURCEWORK_LLM__TIMEOUT_S", "API timeout (s)", "Limits", "number",
-          help="litellm only."),
+          help="litellm and the named hosted providers only."),
     Field("SOURCEWORK_LLM__CLI_TIMEOUT_S", "CLI timeout (s)", "Limits", "number",
+          local_only=True,
           help="Per call, for the coding CLIs. A large analysis can legitimately "
                "run for minutes."),
     Field("SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS", "Analyst slice: evidence items", "Limits",
@@ -171,24 +220,53 @@ FIELDS: tuple[Field, ...] = (
     # -- credentials -------------------------------------------------------
     Field("ANTHROPIC_API_KEY", "Anthropic API key", "Credentials", "password",
           help="Only needed by the litellm backend."),
-    Field("OPENAI_API_KEY", "OpenAI API key", "Credentials", "password"),
+    Field("OPENAI_API_KEY", "OpenAI API key", "Credentials", "password",
+          help="Used by the openai backend and by the litellm backend for "
+               "openai/… model ids."),
     Field("SOURCEWORK_LLM__API_BASE", "LLM gateway base URL", "Credentials",
           placeholder="https://llm-gateway.internal/v1"),
     Field("SOURCEWORK_LLM__API_KEY", "LLM gateway key", "Credentials", "password"),
+    Field("AZURE_API_KEY", "Azure API key", "Credentials", "password"),
+    Field("AZURE_API_BASE", "Azure endpoint", "Credentials",
+          placeholder="https://<resource>.openai.azure.com/",
+          help="The deployment name is the model id: `azure/<deployment>`."),
+    Field("AZURE_API_VERSION", "Azure API version", "Credentials",
+          placeholder="2024-06-01"),
+    Field("AWS_REGION_NAME", "AWS region", "Credentials",
+          placeholder="eu-west-1"),
+    Field("AWS_ACCESS_KEY_ID", "AWS access key id", "Credentials", "password"),
+    Field("AWS_SECRET_ACCESS_KEY", "AWS secret access key", "Credentials", "password"),
+    Field("AWS_SESSION_TOKEN", "AWS session token", "Credentials", "password",
+          help="Optional; only needed for temporary credentials."),
+    Field("GOOGLE_APPLICATION_CREDENTIALS", "Google service-account file", "Credentials",
+          placeholder="/run/secrets/vertex-sa.json",
+          help="Path to the service-account JSON, or use Application Default "
+               "Credentials. Vertex model ids are `vertex_ai/<model>`."),
+    Field("SOURCEWORK_LLM__VERTEX_PROJECT", "GCP project", "Credentials"),
+    Field("SOURCEWORK_LLM__VERTEX_LOCATION", "GCP region", "Credentials",
+          placeholder="us-central1"),
+    Field("SOURCEWORK_LLM__OPENAI_API_BASE", "OpenAI api_base", "Credentials",
+          placeholder="https://api.openai.com/v1",
+          help="Optional; unset reaches openai.com."),
     Field("SOURCEWORK_LLM__LLAMA_CPP_API_BASE", "llama.cpp server URL", "Credentials",
           placeholder="http://127.0.0.1:8081/v1",
+          local_only=True,
           help="The OpenAI-compatible endpoint from llama-server or llama-swap."),
     Field("SOURCEWORK_LLM__LLAMA_CPP_API_KEY", "llama.cpp server key", "Credentials", "password",
+          local_only=True,
           help="Optional. llama-server accepts any value unless you enable its API key."),
     Field("SOURCEWORK_MODEL_DIRS", "Local model directories", "Credentials",
           placeholder="/home/you/.lmstudio/models:/srv/models",
+          local_only=True,
           help="Colon-separated folders to scan recursively for GGUF models. Used by "
                "scripts/llama-models.py and llama-swap."),
     Field("SOURCEWORK_LLM__CODEX_HOME", "CODEX_HOME", "Credentials",
+          local_only=True,
           help="A dedicated Codex config dir, so runs get a clean session. Note that "
                "an OPENAI_API_KEY in your environment makes Codex bill the API instead "
                "of your subscription - it is preferred over the stored login."),
     Field("SOURCEWORK_LLM__COPILOT_HOME", "COPILOT_HOME", "Credentials",
+          local_only=True,
           help="A dedicated Copilot config dir, so runs skip your MCP servers."),
 
     # -- Confluence --------------------------------------------------------
@@ -239,20 +317,26 @@ def model_roles() -> list[str]:
 _ROLE_SUFFIXES = ("DEFAULT", "REASONING", "VISION", "CRITIC")
 
 
-def _models(litellm: tuple[str, ...], claude: tuple[str, ...],
+def _models(litellm: tuple[str, ...], openai: tuple[str, ...], claude: tuple[str, ...],
             opencode: tuple[str, ...], copilot: tuple[str, ...],
             codex: tuple[str, ...], agy: tuple[str, ...]) -> dict[str, str]:
-    """One profile, as (default, reasoning, vision, critic) per backend."""
+    """One profile, as (default, reasoning, vision, critic) per backend.
+
+    azure/bedrock/vertex-ai deliberately have no column: their ids are a
+    deployment/account name only the operator knows, so a preset cannot say
+    anything true about them. openai ids are portable, so it is covered.
+    """
     keys = {
         "litellm": ("SOURCEWORK_LLM__DEFAULT_MODEL", "SOURCEWORK_LLM__REASONING_MODEL",
                     "SOURCEWORK_LLM__VISION_MODEL", "SOURCEWORK_LLM__CRITIC_MODEL"),
+        "openai": tuple(f"SOURCEWORK_LLM__OPENAI_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "claude-code": tuple(f"SOURCEWORK_LLM__CLAUDE_CODE_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "opencode-cli": tuple(f"SOURCEWORK_LLM__OPENCODE_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "copilot-cli": tuple(f"SOURCEWORK_LLM__COPILOT_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "codex-cli": tuple(f"SOURCEWORK_LLM__CODEX_MODELS__{r}" for r in _ROLE_SUFFIXES),
         "agy-cli": tuple(f"SOURCEWORK_LLM__AGY_MODELS__{r}" for r in _ROLE_SUFFIXES),
     }
-    chosen = {"litellm": litellm, "claude-code": claude,
+    chosen = {"litellm": litellm, "openai": openai, "claude-code": claude,
               "opencode-cli": opencode, "copilot-cli": copilot,
               "codex-cli": codex, "agy-cli": agy}
     return {k: v for backend, ks in keys.items() for k, v in zip(ks, chosen[backend], strict=True)}
@@ -265,6 +349,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "models": _models(
             ("anthropic/claude-haiku-4-5", "anthropic/claude-sonnet-5", "anthropic/claude-haiku-4-5",
              "anthropic/claude-sonnet-5"),
+            ("openai/gpt-5.1-mini", "openai/gpt-5.1-mini", "openai/gpt-5.1-mini",
+             "openai/gpt-5.1-mini"),
             ("haiku", "sonnet", "haiku", "sonnet"),
             ("opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5", "opencode/claude-haiku-4-5",
              "opencode/claude-haiku-4-5"),
@@ -284,6 +370,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "models": _models(
             ("anthropic/claude-sonnet-5", "anthropic/claude-opus-5", "anthropic/claude-sonnet-5",
              "anthropic/claude-opus-5"),
+            ("openai/gpt-5.1-mini", "openai/gpt-5.4", "openai/gpt-5.1-mini",
+             "openai/gpt-5.4"),
             ("sonnet", "opus", "sonnet", "opus"),
             ("opencode/claude-haiku-4-5", "opencode/claude-opus-5", "opencode/claude-sonnet-5",
              "opencode/claude-opus-5"),
@@ -302,6 +390,8 @@ PROFILES: dict[str, dict[str, Any]] = {
         "models": _models(
             ("anthropic/claude-opus-5", "anthropic/claude-opus-5", "anthropic/claude-opus-5",
              "anthropic/claude-opus-5"),
+            ("openai/gpt-5.4", "openai/gpt-5.4", "openai/gpt-5.4",
+             "openai/gpt-5.4"),
             ("opus", "opus", "opus", "opus"),
             ("opencode/claude-opus-5", "opencode/claude-opus-5", "opencode/claude-sonnet-5",
              "opencode/claude-opus-5"),
@@ -315,7 +405,10 @@ PROFILES: dict[str, dict[str, Any]] = {
 """Curated model sets, so nobody has to know from memory that
 ``opencode/claude-opus-5`` is the one that reasons well and that an unset
 opencode model fails outright. Every profile covers every backend, not just the
-active one: a failover target with no model is a failover that does not work."""
+active one: a failover target with no model is a failover that does not work.
+The exceptions are the backends whose ids only an operator knows - llama.cpp's
+GGUFs, azure's deployments, bedrock's and vertex's account model ids - which a
+preset cannot say anything true about."""
 
 DEFAULT_PROFILE = "balanced"
 
@@ -340,6 +433,12 @@ class SettingsBackend(Protocol):
     """Whether a change here needs the mesh restarted. True for ``.env`` - the
     agents read their configuration once, at start-up. False for a backend that
     resolves settings per request, where there is nothing to restart."""
+    allowed_backends: tuple[str, ...]
+    """Which backends this distribution offers. The local one offers the full
+    set; a hosted one offers :data:`~sourcework.config.API_BACKEND_IDS`. The
+    allow-list and profiles are filtered to this on the way out, and the
+    backend probe is narrowed to it too - so a tenant never even *sees* a CLI
+    backend, let alone gets to save one."""
 
     def read(self) -> dict[str, str]: ...
 
@@ -360,6 +459,7 @@ class EnvFileBackend:
 
     restartable = True
     default_profile = DEFAULT_PROFILE
+    allowed_backends = BACKEND_IDS
 
     def __init__(self, path: Path | Callable[[], Path]) -> None:
         self._resolve = (lambda: path) if isinstance(path, Path) else path
@@ -379,10 +479,10 @@ class EnvFileBackend:
         return write(self.path, updates)
 
     def describe(self) -> list[dict[str, Any]]:
-        return describe(self.path)
+        return describe(self.path, allowed=self.allowed_backends)
 
     def profiles_for(self) -> dict[str, dict[str, Any]]:
-        return profiles_for(self.path)
+        return profiles_for(self.path, allowed=self.allowed_backends)
 
 
 def read(path: Path) -> dict[str, str]:
@@ -469,47 +569,84 @@ def _suggestion(field: Field, current: dict[str, str]) -> str:
     Local llama.cpp model ids are discovered from the selected server, so never
     pre-fill a hosted profile id into those cells.
     """
-    if field.backend == "llama-cpp" or (field.backend == "litellm" and _points_at_a_private_endpoint(current)):
+    if field.backend in {"llama-cpp", "azure", "bedrock", "vertex-ai"} or (
+        field.backend == "litellm" and _points_at_a_private_endpoint(current)
+    ):
         return ""
     return PROFILES[DEFAULT_PROFILE]["models"].get(field.key, "")
 
 
-def profiles_for(path: Path) -> dict[str, dict[str, Any]]:
+def profiles_for(path: Path, *, allowed: tuple[str, ...] = BACKEND_IDS) -> dict[str, dict[str, Any]]:
     """:data:`PROFILES`, minus what would not work on this install.
 
     A profile is applied to every backend at once, on purpose - the failover
     target is exactly the one nobody remembers to configure. But when
     ``litellm`` points at a private endpoint, its three hosted ids are the one
     part of that sweep that cannot work, and writing them is worse than leaving
-    those cells alone. The UI needs no special case: it already skips a cell a
-    profile has nothing to say about.
+    those cells alone. And a backend this distribution does not offer (a CLI on
+    a hosted install) has no cells to sweep. The UI needs no special case: it
+    already skips a cell a profile has nothing to say about.
     """
-    if not _points_at_a_private_endpoint(read(path)):
-        return PROFILES
+    return profiles_for_values(read(path), allowed=allowed)
 
-    local_keys = {f.key for f in FIELDS if f.backend == "llama-cpp"}
-    litellm_keys = {f.key for f in FIELDS if f.backend == "litellm"}
-    excluded = local_keys | (litellm_keys if _points_at_a_private_endpoint(read(path)) else set())
+
+def profiles_for_values(
+    current: dict[str, str], *, allowed: tuple[str, ...] = BACKEND_IDS
+) -> dict[str, dict[str, Any]]:
+    excluded = {
+        f.key for f in FIELDS
+        if f.backend == "llama-cpp" or (f.backend and f.backend not in allowed)
+    }
+    if _points_at_a_private_endpoint(current):
+        excluded |= {f.key for f in FIELDS if f.backend == "litellm"}
     return {
         name: {
             **profile,
             "models": {k: v for k, v in profile["models"].items() if k not in excluded},
-            "detail": profile["detail"] + " Leaves local endpoint models alone.",
+            "detail": (
+                profile["detail"] + " Leaves local endpoint models alone."
+                if _points_at_a_private_endpoint(current)
+                else profile["detail"]
+            ),
         }
         for name, profile in PROFILES.items()
     }
 
 
-def describe(path: Path) -> list[dict[str, Any]]:
+def describe(path: Path, *, allowed: tuple[str, ...] = BACKEND_IDS) -> list[dict[str, Any]]:
     """The settings form: every allowed field, with its current value masked."""
-    current = read(path)
-    return [
-        {
+    return describe_values(read(path), allowed=allowed)
+
+
+def describe_values(
+    current: dict[str, str], *, allowed: tuple[str, ...] = BACKEND_IDS
+) -> list[dict[str, Any]]:
+    """The form for a given set of current values, without reading a file.
+
+    Split off from :func:`describe` so a hosted backend can build the same page
+    from per-tenant values instead of a file, and still share one allow-list,
+    one masking rule and one filter.
+    """
+    restricted = set(allowed) != set(BACKEND_IDS)
+    rows: list[dict[str, Any]] = []
+    for f in FIELDS:
+        if restricted and f.local_only:
+            continue
+        if f.backend and f.backend not in allowed:
+            continue
+        options = list(f.options)
+        if f.key == "SOURCEWORK_LLM__BACKEND":
+            # A select offering a backend the install cannot run is a trap: the
+            # UI lets you pick it, Save stores it, the run fails. Filter the
+            # choices to the offered set, keeping `stub` (an alias, not a
+            # backend id) and anything else that is not a backend id.
+            options = [o for o in options if o in allowed or o not in BACKEND_IDS]
+        rows.append({
             "key": f.key,
             "label": f.label,
             "group": f.group,
             "kind": f.kind,
-            "options": list(f.options),
+            "options": options,
             "help": f.help,
             "placeholder": f.placeholder or _builtin_default(f.key),
             "suggested": _suggestion(f, current),
@@ -518,9 +655,8 @@ def describe(path: Path) -> list[dict[str, Any]]:
             "role": f.role,
             "value": _display_value(f, current),
             "set": bool(current.get(f.key)),
-        }
-        for f in FIELDS
-    ]
+        })
+    return rows
 
 
 def _means_unset(key: str, value: str) -> bool:
@@ -539,13 +675,24 @@ def _means_unset(key: str, value: str) -> bool:
     return field is not None and field.kind == "number" and not value.strip()
 
 
-def write(path: Path, updates: dict[str, str]) -> list[str]:
-    """Apply ``updates`` to the file. Returns the keys that actually changed.
+def filter_updates(
+    current: dict[str, str], updates: dict[str, str], *, allowed: tuple[str, ...] | None = None
+) -> dict[str, str]:
+    """The ``updates`` that would actually change anything.
 
-    Unknown keys are dropped rather than rejected: the form posts what it has,
-    and a stale browser tab should not fail the whole save.
+    Applies the safety rules before anything is stored: unknown keys are
+    dropped (the allow-list is the only way an environment value is ever
+    written), and a value that still equals :data:`MASK` means "untouched" and
+    is left alone. ``allowed`` additionally rejects a backend id the
+    distribution does not offer - a hosted tenant posting
+    ``SOURCEWORK_LLM__BACKEND=claude-code`` by hand gets it dropped, the same
+    way a page that never offered the option would. Shared by :func:`write`
+    and by a settings backend that keeps the same values somewhere other than
+    a file - the hosted tenant store - so both enforce exactly the same
+    allow-list.
+
+    Returns the effective keys to write, ``{}`` when nothing would change.
     """
-    current = read(path)
     effective: dict[str, str] = {}
     for key, value in updates.items():
         field = BY_KEY.get(key)
@@ -554,9 +701,30 @@ def write(path: Path, updates: dict[str, str]) -> list[str]:
         if field.secret and value == MASK:
             continue  # untouched masked field
         value = "" if value is None else str(value).strip()
+        if (
+            allowed is not None
+            and key == "SOURCEWORK_LLM__BACKEND"
+            and value in BACKEND_IDS
+            and value not in allowed
+        ):
+            # Value-level check, not just key-level: the key is on the page for
+            # every distribution, but a backend this install cannot run is a
+            # value the page would never offer. A hand-posted one is dropped.
+            continue
         if value == current.get(key, ""):
             continue
         effective[key] = value
+    return effective
+
+
+def write(path: Path, updates: dict[str, str]) -> list[str]:
+    """Apply ``updates`` to the file. Returns the keys that actually changed.
+
+    Unknown keys are dropped rather than rejected: the form posts what it has,
+    and a stale browser tab should not fail the whole save.
+    """
+    current = read(path)
+    effective = filter_updates(current, updates)
 
     if not effective:
         return []

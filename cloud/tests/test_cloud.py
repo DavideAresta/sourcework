@@ -18,10 +18,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sourcework.auth import ENTRY_POINT_GROUP
+from sourcework.config import API_BACKEND_IDS
+from sourcework.ui import env_file
 from sourcework.ui.store import Run, now_iso
 
 from sourcework_cloud import auth as cloud_auth
 from sourcework_cloud.app import build_cloud_app
+from sourcework_cloud.settings import TenantSettingsBackend
 from sourcework_cloud.store import PostgresStore, tenant_for
 
 TOKEN = "dev-token-for-tests"
@@ -64,6 +67,7 @@ class MemoryStore:
 
     def __init__(self) -> None:
         self.runs: dict[str, Run] = {}
+        self.settings: dict[str, str] = {}
 
     async def save(self, run: Run) -> None:
         self.runs[run.id] = run
@@ -79,6 +83,18 @@ class MemoryStore:
 
     async def reap_orphans(self) -> int:
         return 0
+
+    def get_settings(self) -> dict[str, str]:
+        return dict(self.settings)
+
+    def put_settings(self, updates: dict[str, str]) -> list[str]:
+        changed = sorted(k for k, v in updates.items() if v != self.settings.get(k))
+        for key, value in updates.items():
+            if value == "":
+                self.settings.pop(key, None)
+            else:
+                self.settings[key] = value
+        return changed
 
     def close(self) -> None:
         pass
@@ -202,6 +218,56 @@ def test_a_signed_in_cloud_app_serves_the_core_ui(
         assert client.get("/api/runs", headers=headers).status_code == 200
 
 
+# -- tenant settings ----------------------------------------------------------
+
+
+def test_the_tenant_settings_backend_serves_the_api_offer_only() -> None:
+    """A hosted tenant is offered exactly the API family, nothing that needs a
+    CLI or a local model server - the same ``allowed_backends`` that drives the
+    page, asserted where it is declared."""
+    backend = TenantSettingsBackend(MemoryStore())
+
+    assert isinstance(backend, env_file.SettingsBackend)
+    assert backend.label == "Tenant settings"
+    assert backend.restartable is False
+    assert backend.allowed_backends == API_BACKEND_IDS
+
+
+def test_tenant_settings_are_the_hosted_offer_not_the_local_sheet() -> None:
+    """The per-tenant values render through the same allow-list the local page
+    uses, filtered to the hosted offer: CLI cells and CLI-only knobs simply do
+    not exist, and the backend select cannot offer one either."""
+    store = MemoryStore()
+    store.settings["SOURCEWORK_LLM__BACKEND"] = "azure"
+    store.settings["SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING"] = "sonnet"
+    backend = TenantSettingsBackend(store)
+
+    fields = {f["key"]: f for f in backend.describe()}
+    assert fields["SOURCEWORK_LLM__BACKEND"]["options"] == [
+        "litellm", "azure", "bedrock", "vertex-ai", "openai", "stub"
+    ]
+    assert "SOURCEWORK_LLM__CLAUDE_CODE_MODELS__REASONING" not in fields
+    assert "SOURCEWORK_LLM__CLI_TIMEOUT_S" not in fields
+
+    for profile in backend.profiles_for().values():
+        assert not any("CLI" in k or "LLAMA" in k for k in profile["models"])
+
+
+def test_a_tenant_write_of_a_cli_backend_is_dropped_not_stored() -> None:
+    """The page is not the only writer: the settings backend rejects a hand
+    POSTed CLI backend the same way the filtered select would, so no tenant
+    state can ever name one."""
+    store = MemoryStore()
+    backend = TenantSettingsBackend(store)
+
+    changed = backend.write({"SOURCEWORK_LLM__BACKEND": "claude-code", "AZURE_API_KEY": "sk-az"})
+    assert changed == ["AZURE_API_KEY"]
+    assert "SOURCEWORK_LLM__BACKEND" not in store.settings
+
+    assert backend.write({"SOURCEWORK_LLM__BACKEND": "azure"}) == ["SOURCEWORK_LLM__BACKEND"]
+    assert store.settings["SOURCEWORK_LLM__BACKEND"] == "azure"
+
+
 # -- Postgres: skipped, loudly, when no database is reachable ----------------
 
 
@@ -319,6 +385,84 @@ async def test_row_level_security_blocks_a_query_that_forgets_the_tenant(
         conn.execute("SELECT set_config('app.tenant_id', 'gamma', true)")
         rows = conn.execute("SELECT id FROM runs").fetchall()
     assert [row[0] for row in rows] == ["gamma-1"]
+
+
+async def test_tenant_settings_round_trip_scoped_to_the_tenant(
+    clean_postgres: PostgresStore,
+) -> None:
+    """Saved settings live in the same tenant-scoped store as runs, so each
+    tenant's page starts from their own values - never the neighbours'."""
+    tenant_for("alpha")
+    alpha = TenantSettingsBackend(clean_postgres)
+    assert alpha.write({"SOURCEWORK_LLM__BACKEND": "azure", "AZURE_API_KEY": "sk-a"}) == [
+        "AZURE_API_KEY", "SOURCEWORK_LLM__BACKEND"
+    ]
+    assert alpha.read()["SOURCEWORK_LLM__BACKEND"] == "azure"
+
+    tenant_for("beta")
+    assert TenantSettingsBackend(clean_postgres).read() == {}
+    assert TenantSettingsBackend(clean_postgres).write(
+        {"SOURCEWORK_LLM__BACKEND": "openai"}
+    ) == ["SOURCEWORK_LLM__BACKEND"]
+
+    tenant_for("alpha")
+    assert TenantSettingsBackend(clean_postgres).read()["SOURCEWORK_LLM__BACKEND"] == "azure"
+
+    # An empty value unsets rather than storing a blank that later processes choke on.
+    tenant_for("beta")
+    assert TenantSettingsBackend(clean_postgres).write(
+        {"SOURCEWORK_LLM__BACKEND": ""}
+    ) == ["SOURCEWORK_LLM__BACKEND"]
+    assert TenantSettingsBackend(clean_postgres).read() == {}
+
+
+async def test_row_level_security_scopes_tenant_settings_too(
+    clean_postgres: PostgresStore,
+) -> None:
+    """The second wall for settings as for runs: a bare SELECT without a tenant
+    filter still only sees the tenant in the session."""
+    tenant_for("delta")
+    TenantSettingsBackend(clean_postgres).write({"SOURCEWORK_LLM__BACKEND": "litellm"})
+
+    with clean_postgres._pool.connection() as conn:
+        conn.execute("SELECT set_config('app.tenant_id', 'delta', true)")
+        rows = conn.execute("SELECT key FROM tenant_settings").fetchall()
+    assert [row[0] for row in rows] == ["SOURCEWORK_LLM__BACKEND"]
+
+
+async def test_the_cloud_app_serves_tenant_settings_over_postgres(
+    monkeypatch: pytest.MonkeyPatch, postgres: PostgresStore
+) -> None:
+    """The settings routes read and write the tenant's Postgres row, and the
+    hosted offer is enforced on the way in - a CLI backend posted at the API is
+    dropped, exactly as on the filtered page."""
+    _install_cloud_auth(monkeypatch, token=TOKEN)
+    app_store = PostgresStore(_postgres_dsn(), min_size=1, max_size=2)
+    app = build_cloud_app(
+        store=app_store, workspace=Path("/tmp/cloud-ws"), executor=FakeExecutor(app_store)
+    )
+    headers = {"Authorization": f"Bearer {TOKEN}", "X-SourceWork-UI": "1"}
+
+    with TestClient(app) as client:
+        saved = client.put(
+            "/api/settings",
+            json={"SOURCEWORK_LLM__BACKEND": "azure", "AZURE_API_KEY": "sk-az"},
+            headers=headers,
+        ).json()
+        assert saved["changed"] == ["AZURE_API_KEY", "SOURCEWORK_LLM__BACKEND"]
+        assert saved["restart_required"] is False
+
+        # The hosted offer is enforced on the way in: a CLI backend posted at
+        # the API is dropped, exactly as it would be on the filtered page.
+        cli = client.put(
+            "/api/settings", json={"SOURCEWORK_LLM__BACKEND": "claude-code"}, headers=headers
+        ).json()
+        assert "SOURCEWORK_LLM__BACKEND" not in cli["changed"]
+
+        got = client.get("/api/settings", headers=headers).json()
+        fields = {f["key"]: f for f in got["fields"]}
+        assert fields["SOURCEWORK_LLM__BACKEND"]["value"] == "azure"
+        assert "SOURCEWORK_LLM__CLAUDE_CODE_MODELS__DEFAULT" not in fields
 
 
 async def test_the_cloud_app_runs_over_postgres_unchanged(
