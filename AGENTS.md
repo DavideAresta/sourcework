@@ -67,8 +67,13 @@ what those don't make obvious at the moment you're editing code.
 - Ruff: line-length 100 with E501 ignored; `UP042` ignored because
   `(str, Enum)` is deliberate — StrEnum changes pydantic JSON-schema generation
   that consumers rely on. Don't "modernize" those enums.
-- Version lives only in `src/sourcework/__init__.py` (`__version__`), read by
-  hatch at build time. Bump it there and only there; note it in `CHANGELOG.md`.
+- Each distribution's version lives only in its own package's `__init__.py`
+  (`__version__`), read by hatch at build time: core in
+  `src/sourcework/__init__.py`, the hosted sibling in
+  `cloud/src/sourcework_cloud/__init__.py`. Bump there and only there; note it
+  in `CHANGELOG.md`. Releases share one tag (`vX.Y.Z`); the changelog's
+  `Hosted` sections name what changed for the cloud package. The PRD's default
+  `version` label in `models.py` is bumped in step at release time.
 - New configuration goes in `.env.example` **and** the settings-page allow-list
   (`src/sourcework/ui/env_file.py:FIELDS`) — a key the UI can't see is one nobody
   finds. Env prefix is `SOURCEWORK_` with `__` nesting

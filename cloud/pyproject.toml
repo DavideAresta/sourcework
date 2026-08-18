@@ -4,15 +4,19 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sourcework-cloud"
-version = "0.0.0"
+# Its own version, in the package, read at build time the way core's is - the
+# two distributions release under one tag, but they are not the same artifact.
+dynamic = ["version"]
 description = "SourceWork, as a hosted service: OIDC login, org tenancy, per-tenant settings."
 readme = { text = "The hosted distribution of SourceWork. Web-only - deliberately no CLI.", content-type = "text/plain" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
     # Core is installed separately (the same venv); naming it bare keeps the
-    # monorepo from reaching for a released wheel.
-    "sourcework",
+    # monorepo from reaching for a released wheel. The floor records the
+    # coupling: this package mounts core's build_app, so a cloud build is only
+    # meaningful against a core that has the seams it passes.
+    "sourcework>=0.3.0",
     "psycopg[binary]>=3.1",
     "psycopg_pool>=3.2",
 ]
@@ -23,6 +27,9 @@ cloud = "sourcework_cloud.auth:TokenAuth"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sourcework_cloud"]
+
+[tool.hatch.version]
+path = "src/sourcework_cloud/__init__.py"
 
 [tool.ruff]
 line-length = 100

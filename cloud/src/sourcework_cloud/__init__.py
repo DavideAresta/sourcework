@@ -13,4 +13,4 @@ whole product is already served before any of the tenancy machinery is
 load-bearing.
 """
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"

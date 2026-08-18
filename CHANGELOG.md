@@ -10,9 +10,19 @@ say so at the top of its section.
 
 The version lives in `src/sourcework/__init__.py` and is read from there at
 build time, so `sourcework.__version__`, the installed distribution metadata,
-and the version on every agent card are the same string by construction.
+and the version on every agent card are the same string by construction. The
+hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
+One release tag covers both distributions; the sections below name which one a
+change belongs to.
 
 ## [Unreleased]
+
+## [0.3.0] — 2026-08-18
+
+The release is the distribution split: the local install keeps everything —
+hosted APIs, the coding CLIs, `llama.cpp` — while the hosted one offers the API
+family only (`litellm`, `azure`, `bedrock`, `vertex-ai`, `openai`), and a
+tenant's settings now live per-tenant in Postgres instead of a shared `.env`.
 
 ### Added
 
@@ -32,13 +42,6 @@ and the version on every agent card are the same string by construction.
   `openai` joins the curated profiles (its ids are portable); `azure`/`bedrock`/
   `vertex-ai` are deliberately left out, because a deployment name only the
   operator knows cannot be pre-filled honestly.
-- **The hosted service starts as a shell.** A sibling `sourcework-cloud` package
-  serves the same web UI over Postgres instead of SQLite — tenant-scoped from
-  day one and guarded by an installed authenticator — so the whole product runs
-  hosted before any of the identity or tenancy machinery is load-bearing. It is
-  web-only by construction: the package declares no console scripts. Its
-  `cloud/tests` suite runs against a real Postgres when one is reachable and
-  skips loudly when a laptop cannot provide one.
 - **`build_app` grows the four seams a hosted deployment needs.** `executor`
   (runs driven from somewhere other than this process), `settings_backend`
   (per-tenant settings instead of rewriting the process's own `.env`),
@@ -85,6 +88,21 @@ and the version on every agent card are the same string by construction.
   chrome off a sticky bar, the history list folds behind its heading under
   820px, and the two centred pages stop wearing desktop margins on a narrow
   screen.
+
+#### Hosted — `sourcework-cloud` 0.1.0
+
+- **The hosted service starts as a shell.** A sibling `sourcework-cloud` package
+  serves the same web UI over Postgres instead of SQLite — tenant-scoped from
+  day one and guarded by an installed authenticator — so the whole product runs
+  hosted before any of the identity or tenancy machinery is load-bearing. It is
+  web-only by construction: the package declares no console scripts. Its
+  `cloud/tests` suite runs against a real Postgres when one is reachable and
+  skips loudly when a laptop cannot provide one.
+- **The hosted package is versioned at last.** It shipped as the unreleased
+  marker `0.0.0`, written out twice; it now carries its own `__version__`
+  (`0.1.0`), read at build time the way core's is, and depends on
+  `sourcework>=0.3.0` to record the coupling. One release tag still covers both
+  distributions — the `Hosted` sections here are what name which one changed.
 
 ### Fixed
 
@@ -255,5 +273,7 @@ tool**. The UI binds loopback and ships no authentication; the agent mesh ships
 a publicly known shared secret and does not enforce it by default; ingestion
 refuses private-network targets; and model output is treated as untrusted input.
 
-[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.3.0
+[0.2.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.2.0
 [0.1.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.1.0
