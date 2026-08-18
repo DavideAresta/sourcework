@@ -329,3 +329,7 @@ load()
   .then(suggestModels)
   .catch((error) => toast(error.message, 'err'));
 loadBackends();
+api.health().then((h) => {
+  const version = document.getElementById('version');
+  if (version && h.version) version.textContent = h.version;
+}).catch(() => {});

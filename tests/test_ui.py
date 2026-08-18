@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from sourcework import __version__
 from sourcework.config import LLMOverrides, LLMSettings, effective_llm, llm_overrides, settings
 from sourcework.llm import LLM
 from sourcework.models import PRDRequest
@@ -722,7 +723,11 @@ def test_the_page_and_static_assets_are_served(client: TestClient):
     assert "PRD" in client.get("/").text
     assert client.get("/settings").status_code == 200
     assert client.get("/static/js/app.js").status_code == 200
-    assert client.get("/healthz").json()["status"] == "ok"
+    health = client.get("/healthz").json()
+    assert health["status"] == "ok"
+    # The version label in the header must show what the code actually is: a
+    # label that drifted from __version__ would be a lie nobody notices.
+    assert health["version"] == __version__
 
 
 # ---------------------------------------------------------------------------

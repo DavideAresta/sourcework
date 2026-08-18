@@ -103,6 +103,12 @@ header.top .brand {
 }
 
 header.top .brand b { color: var(--accent); }
+header.top .brand .version {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-2);
+  letter-spacing: 0;
+}
 header.top .spacer { flex: 1; }
 
 .layout {

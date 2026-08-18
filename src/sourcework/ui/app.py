@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field, ValidationError
 # every uploaded file and the run proceeds with no sources.
 from starlette.datastructures import UploadFile
 
-from sourcework import audit, auth, checkpoint, readiness
+from sourcework import __version__, audit, auth, checkpoint, readiness
 from sourcework.a2a_common import AgentPool
 from sourcework.backends import probe
 from sourcework.config import LLMOverrides, settings
@@ -333,7 +333,12 @@ def build_app(
         # `shutdown` tells the front end whether to draw a Quit control. The UI
         # is served from the same build in both modes, so it has to ask rather
         # than assume.
-        return {"status": "ok", "service": "sourcework-ui", "shutdown": on_shutdown is not None}
+        return {
+            "status": "ok",
+            "service": "sourcework-ui",
+            "version": __version__,
+            "shutdown": on_shutdown is not None,
+        }
 
     if on_shutdown is not None:
 

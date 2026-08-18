@@ -154,3 +154,7 @@ document.getElementById('refresh').addEventListener('click', () => {
 
 load();
 setInterval(load, 60_000);
+api.health().then((h) => {
+  const version = document.getElementById('version');
+  if (version && h.version) version.textContent = h.version;
+}).catch(() => {});

@@ -12,6 +12,14 @@ The version lives in `src/sourcework/__init__.py` and is read from there at
 build time, so `sourcework.__version__`, the installed distribution metadata,
 and the version on every agent card are the same string by construction.
 
+## [Unreleased]
+
+### Added
+
+- **The running version in the UI header.** Every page shows the same
+  `__version__` the build reads, served by `/healthz` — so the label cannot
+  drift from the code it labels.
+
 ## [0.2.0] — 2026-08-18
 
 ### Added

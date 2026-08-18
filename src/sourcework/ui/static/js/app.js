@@ -73,6 +73,8 @@ async function mountQuit() {
   } catch {
     return;
   }
+  const version = document.getElementById('version');
+  if (version && health.version) version.textContent = health.version;
   if (!health.shutdown) return;
 
   const button = el('button', {
