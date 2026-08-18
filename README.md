@@ -246,6 +246,17 @@ docker compose up -d --build
 curl localhost:8000/.well-known/agent-card.json
 ```
 
+## The hosted distribution
+
+`cloud/` holds `sourcework-cloud`, a sibling package that serves the same web UI
+over Postgres instead of the local SQLite file, tenant-scoped and behind a
+sign-in. It is a Phase-0 shell today — one tenant, a development bearer token for
+sign-in — deliberately behavior-identical to this app, so the product already
+runs hosted before the identity, per-tenant settings and worker infrastructure
+land. It is web-only by construction: no CLI, and `python -m sourcework_cloud
+serve` is the only way it starts. Nothing in this package is wired into the
+laptop distribution, and nothing here requires one.
+
 ## Documentation
 
 Everything here describes what the code does today. Design notes for things that

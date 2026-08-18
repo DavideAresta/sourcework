@@ -17,8 +17,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncIterator, Callable
+from typing import Any, Protocol, runtime_checkable
 
 from sourcework import stream
 from sourcework.a2a_common import AgentPool, RemoteAgentError
@@ -33,11 +33,43 @@ logger = logging.getLogger(__name__)
 SUBSCRIBER_BACKLOG = 256
 
 
+@runtime_checkable
+class RunExecutor(Protocol):
+    """What the UI needs of a place that *executes* runs.
+
+    The in-process :class:`RunManager` is the local implementation: runs live in
+    this process, subscribers are an in-memory dict. A hosted deployment keeps
+    the same routes but none of the machinery — the API enqueues, workers
+    execute, and events come back over Redis — so the six calls below are the
+    whole interface between the HTTP layer and however a run is driven. Taken
+    from what the routes actually call, as the :class:`Store` protocol is.
+    """
+
+    async def start(self, request: PRDRequest, *, run_id: str | None = None) -> Run: ...
+
+    async def resume(self, run_id: str) -> Run | None: ...
+
+    async def cancel(self, run_id: str) -> bool: ...
+
+    def is_active(self, run_id: str) -> bool: ...
+
+    def subscribe(self, run_id: str) -> AsyncIterator[dict[str, Any]]: ...
+
+    async def shutdown(self) -> None: ...
+
+
 class RunManager:
     """Starts runs, keeps the live ones, fans their events out."""
 
-    def __init__(self, store: Store, *, max_concurrent: int | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        *,
+        max_concurrent: int | None = None,
+        run_id_factory: Callable[[], str] = new_run_id,
+    ) -> None:
         self.store = store
+        self._run_id_factory = run_id_factory
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any] | None]]] = {}
         # Runs wait their turn rather than all starting at once. A run is not
@@ -54,7 +86,7 @@ class RunManager:
 
     async def start(self, request: PRDRequest, *, run_id: str | None = None) -> Run:
         run = Run(
-            id=run_id or new_run_id(),
+            id=run_id or self._run_id_factory(),
             title=request.title,
             status="queued",
             created_at=now_iso(),

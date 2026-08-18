@@ -11,14 +11,15 @@ install:
 	@echo "Ready. Copy .env.example to .env and fill it in."
 
 test:
-	$(VENV)/bin/pytest -q
+	$(VENV)/bin/pytest -q tests
+	$(VENV)/bin/pytest -q cloud/tests
 
 lint:
-	$(VENV)/bin/ruff check src tests
+	$(VENV)/bin/ruff check src tests cloud
 
 fmt:
-	$(VENV)/bin/ruff format src tests
-	$(VENV)/bin/ruff check --fix src tests
+	$(VENV)/bin/ruff format src tests cloud
+	$(VENV)/bin/ruff check --fix src tests cloud
 
 serve-all:
 	$(VENV)/bin/sourcework serve-all
