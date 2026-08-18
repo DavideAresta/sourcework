@@ -48,10 +48,40 @@ export function $(selector, root = document) {
   return root.querySelector(selector);
 }
 
+// One live region, reused. Toasts were appended straight to <body>, which meant
+// two at once drew on top of each other, and none of them was ever announced -
+// for several failures in this app the toast is the *only* surfacing there is,
+// so a screen reader was told nothing at all.
+let toastStack = null;
+
 export function toast(message, kind = '') {
+  if (!toastStack) {
+    toastStack = el('div', {
+      class: 'toasts', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'false',
+    });
+    document.body.append(toastStack);
+  }
   const node = el('div', { class: `toast ${kind}` }, message);
-  document.body.append(node);
+  toastStack.append(node);
   setTimeout(() => node.remove(), kind === 'err' ? 7000 : 3500);
+}
+
+let fieldSeq = 0;
+
+// A labelled control, with the label actually attached to it.
+//
+// Every label in this app used to be a sibling <label> with no `for`, so
+// clicking one focused nothing and a screen reader announced the input
+// unlabelled. Minting the id here rather than at each call site is what keeps
+// that from being a thing anyone has to remember.
+export function field(label, control, help = '', title = '') {
+  const id = control.id || `f${++fieldSeq}`;
+  control.id = id;
+  return el('div', {},
+    el('label', { for: id, title: title || null }, label),
+    control,
+    help ? el('div', { class: 'small muted hint' }, help) : null,
+  );
 }
 
 export function ago(iso) {

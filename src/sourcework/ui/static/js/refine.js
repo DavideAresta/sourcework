@@ -7,7 +7,7 @@
 // baseline, which is the same argument the rest of the system makes about
 // traceability.
 
-import { el, clear, bytes, toast, ago } from './dom.js';
+import { el, clear, bytes, toast, ago, field } from './dom.js';
 import { api } from './api.js';
 import * as drafts from './drafts.js';
 
@@ -81,7 +81,10 @@ export function refineTab(run, onStarted) {
   });
   const uris = el('textarea', { placeholder: 'https://intranet/specs/addendum.html', rows: '2' });
   const fileList = el('div');
-  const drop = el('div', { class: 'drop' }, 'Drop new documents, transcripts or images here');
+  // Same reasoning as the new-run form: a button, so there is a keyboard path
+  // to the hidden file input.
+  const drop = el('button', { type: 'button', class: 'drop' },
+    'Drop new documents, transcripts or images here');
   const picker = el('input', { type: 'file', multiple: true, style: 'display:none' });
 
   function renderFiles() {
@@ -90,7 +93,10 @@ export function refineTab(run, onStarted) {
       el('div', { class: 'file-row' },
         el('span', { class: 'name' }, file.name),
         el('span', { class: 'muted small' }, bytes(file.size)),
-        el('button', { class: 'ghost', onClick: () => { files.splice(index, 1); renderFiles(); } }, '✕'))));
+        el('button', {
+          class: 'ghost', title: `Remove ${file.name}`, 'aria-label': `Remove ${file.name}`,
+          onClick: () => { files.splice(index, 1); renderFiles(); },
+        }, '✕'))));
   }
   drop.addEventListener('click', () => picker.click());
   picker.addEventListener('change', () => { files.push(...picker.files); picker.value = ''; renderFiles(); });
@@ -160,14 +166,14 @@ export function refineTab(run, onStarted) {
   root.append(
     el('div', { class: 'card' },
       el('h3', { style: 'margin-top:0' }, 'Add requirements or material'),
-      el('label', {}, 'New requirements and decisions'), notes,
+      field('New requirements and decisions', notes),
       el('div', { style: 'height:12px' }),
       drop, picker, fileList,
-      el('div', { style: 'margin-top:12px' }, el('label', {}, 'URIs'), uris),
+      el('div', { style: 'margin-top:12px' }, field('URIs', uris)),
       el('div', { class: 'grid3', style: 'margin-top:12px' },
-        el('div', {}, el('label', {}, 'Template'), template),
-        el('div', {}, el('label', {}, 'Review rounds'), rounds),
-        el('div', {}, el('label', {}, 'Extra instructions'), instructions)),
+        field('Template', template),
+        field('Review rounds', rounds),
+        field('Extra instructions', instructions)),
     ),
   );
 

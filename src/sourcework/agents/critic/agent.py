@@ -74,6 +74,9 @@ concrete `suggested_fix`. Do not report style preferences. Do not repeat the
 deterministic findings you are shown; add to them.
 
 Verdict: `approved` only when there are no blockers and no majors.
+
+Put in `notes` the one sentence a reader should have before the findings: what
+this document is like to receive. Not a count - they can see the count.
 """
 
 
@@ -127,6 +130,10 @@ class CriticExecutor(SkillExecutor):
             coverage=coverage,
             verdict=_verdict(findings, draft.verdict),
             standards=quality.standards_line(ears=settings().quality.ears),
+            # The reviewer's prose, kept rather than dropped on the floor: the
+            # findings are the itemised part, this is the sentence that frames
+            # them - and in stub mode it is the marker saying no model ran.
+            summary=draft.notes.strip(),
         )
         return ReviewResponse(
             report=report,

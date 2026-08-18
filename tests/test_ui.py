@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -1266,3 +1267,111 @@ def test_a_number_never_set_and_left_blank_adds_nothing(tmp_path: Path):
     env_file.write(path, {"SOURCEWORK_LLM__TIMEOUT_S": ""})
 
     assert "TIMEOUT_S" not in path.read_text()
+
+
+# ---------------------------------------------------------------------------
+# The front end's copy of the server's vocabulary
+#
+# CI never runs the browser: there is no JS test and no JS lint, by design -
+# the front end is plain modules with no build step. So the one thing worth
+# asserting from here is that the strings it *branches on* still exist on this
+# side. They are the failure that looks like nothing: a severity the critic
+# renamed does not throw, it just renders every finding the same colour.
+# ---------------------------------------------------------------------------
+
+STATIC_JS = Path(__file__).resolve().parent.parent / "src" / "sourcework" / "ui" / "static" / "js"
+
+
+def _object_keys(source: str, name: str) -> set[str]:
+    """The keys of a `const NAME = { a: …, b: … }` literal in a JS module.
+
+    Quoted values are blanked before the keys are read, so a colon inside a
+    label cannot be mistaken for one.
+    """
+    body = re.search(rf"const {name} = \{{(.*?)\}};", source, re.DOTALL)
+    assert body, f"{name} is no longer an object literal - update this test with it"
+    without_values = re.sub(r"'[^']*'", "''", body.group(1))
+    return set(re.findall(r"([A-Za-z_]\w*)\s*:", without_values))
+
+
+def test_the_review_tab_knows_every_severity_the_critic_emits():
+    """A severity with no entry here renders in whatever colour the fallback
+    picks, so a blocker quietly reads as a nit. That is how `blocking` - a value
+    Severity never had - survived in this file long enough to make every finding
+    in every review the same shade of yellow."""
+    from sourcework.models import Severity
+
+    rendered = _object_keys((STATIC_JS / "result.js").read_text(), "SEVERITY_CLASS")
+    assert rendered == {s.value for s in Severity}
+
+
+def test_the_history_list_knows_every_status_a_run_can_hold():
+    """A status with no pill still renders - unstyled, and indistinguishable
+    from the ones that are fine."""
+    from sourcework.ui.store import STATUSES
+
+    styled = _object_keys((STATIC_JS / "app.js").read_text(), "STATUS_PILL")
+    assert styled == set(STATUSES)
+
+
+def test_the_dashboard_knows_every_readiness_state():
+    from sourcework.readiness import Readiness, assess
+
+    states = _object_keys((STATIC_JS / "dashboard.js").read_text(), "STATE")
+    # `ready`, `needs_work`, `unreviewed` come from the assessment itself; the
+    # other two are run statuses the dashboard falls back to (ui/app.py).
+    assert {"ready", "needs_work", "unreviewed"} <= states
+    assert assess(None, None).state in states
+    assert Readiness(state="ready").state in states
+
+
+async def test_a_run_that_warned_says_so_in_the_list(tmp_path: Path):
+    """`ok` with a dropped source is still `ok`. The list view cannot carry the
+    text of what was skipped, but carrying the count is what makes somebody open
+    the run and read it."""
+    store = RunStore(tmp_path / "runs.db")
+    try:
+        await store.save(Run(
+            id="warned", title="T", status="ok", created_at=now_iso(), request={},
+            result={"stats": {"warnings": ["Kickoff meeting: no text extracted"],
+                              "failures": []}},
+        ))
+        summary = (await store.get("warned")).summary()
+        assert summary["warnings"] == 1
+        assert summary["failures"] == 0
+        # The strings themselves stay out of the list payload.
+        assert "Kickoff" not in json.dumps(summary)
+    finally:
+        store.close()
+
+
+def test_the_roles_a_run_can_override_are_the_roles_settings_can_configure(client: TestClient):
+    """One list, derived from the settings fields. Two hand-written copies is
+    how the API came to offer `fast`, which no agent has ever asked for, while
+    omitting `critic`, which every review runs on."""
+    roles = client.get("/api/backends").json()["roles"]
+    assert roles == env_file.model_roles()
+    assert "critic" in roles
+    assert "fast" not in roles
+
+
+def test_a_finished_run_carries_the_same_verdict_the_dashboard_shows(client: TestClient):
+    """The run's own page could not say whether the PRD was ready; the reader
+    had to go to the dashboard to find out about the document in front of them."""
+    run_id = _finished_run(client)
+    run = client.get(f"/api/runs/{run_id}").json()
+    assert run["readiness"]["state"] in {"ready", "needs_work", "unreviewed"}
+    assert run["readiness"]["headline"]
+
+
+def test_a_run_with_no_result_has_no_verdict_to_give(client: TestClient, tmp_path: Path):
+    """Nothing to assess is not the same as "not ready", and saying the latter
+    about a run that is still going would be inventing a judgement."""
+    store = RunStore(tmp_path / "sourcework-ui.db")
+    try:
+        asyncio.run(store.save(Run(
+            id="midflight", title="T", status="running", created_at=now_iso(), request={},
+        )))
+    finally:
+        store.close()
+    assert client.get("/api/runs/midflight").json()["readiness"] is None

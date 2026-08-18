@@ -19,9 +19,49 @@ and the version on every agent card are the same string by construction.
 - **The running version in the UI header.** Every page shows the same
   `__version__` the build reads, served by `/healthz` — so the label cannot
   drift from the code it labels.
+- **The run's own page answers "is this finished enough to send".** It now
+  shows the same readiness verdict as the dashboard, computed from the same
+  stored dicts, with a link into the review tab when blockers stand in the way.
+  A run still in flight has no verdict rather than a made-up one.
+- **Warnings and failures travel with the status.** A run that skipped a source
+  still finishes `ok`, and now the history row and the run header carry the
+  counts — `ok` with a dropped source no longer reads as unqualified success,
+  and the header links straight to the tab that lists what happened.
+- **The reviewer's own sentence reaches the review tab.** The critic writes one
+  line framing the findings (`ReviewReport.summary`); it used to be dropped on
+  the floor, and in stub mode it is what says no model ran.
+- **Run-view tabs are in the URL.** `#/run/<id>/<tab>` reloads and shares to the
+  same tab, which tab is showing survives re-renders, and the strip is a real
+  tablist with roving tabindex and arrow keys. Backing between two tabs of one
+  run no longer drops the live event stream.
+- **Sign-off is a form, not two stacked `prompt()` dialogs.** Those ignored the
+  theme, could not be corrected once past the first, and turned "cancel" on the
+  note into a submitted decision. The append-only approval trail now renders
+  under the header, and actions that hand work to an agent (cancel, resume,
+  publish, delete) disable themselves while running so nothing is sent twice.
+- **Downloads sit behind one control** instead of four buttons that re-ordered
+  on a wrapped row, and the destructive end of the action row stays the end.
+- **The roles a run may override are the roles the settings page can
+  configure.** Both come from the same list now, derived from the settings
+  fields instead of a second hand-written copy — `critic` is offered where it
+  was missing, and the phantom `fast` role no agent has ever requested is gone.
+  Their wording lives in one file shared by the run form and the settings page.
+- **An accessibility pass across the app**: every label is attached to its
+  control, the drop zones are buttons (the one control the new-run form cannot
+  work without now has a keyboard path), toasts live in one live region instead
+  of drawing over each other, the progress log is announced, and
+  `prefers-reduced-motion` is honoured.
+- **The layout survives a phone.** The header wraps instead of scrolling its
+  chrome off a sticky bar, the history list folds behind its heading under
+  820px, and the two centred pages stop wearing desktop margins on a narrow
+  screen.
 
 ### Fixed
 
+- **A severity the critic emits can no longer render in the wrong colour.** The
+  review tab maps all four severities — a blocker previously read as a nit after
+  `blocking` — and tests now tie the front end's maps to `Severity`, the run
+  statuses and the readiness states so the vocabularies cannot drift apart again.
 - **The claude-code model picker lists the account's models live instead of a
   hand-maintained list.** With `ANTHROPIC_API_KEY` set, the suggestions come
   from Anthropic's models endpoint, so a model released yesterday is offered

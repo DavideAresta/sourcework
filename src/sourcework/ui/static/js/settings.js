@@ -14,9 +14,10 @@
 // `opencode/claude-opus-4-6` reasons well, and that an unset opencode model
 // fails outright — belongs in the app rather than in your memory.
 
-import { el, clear, mount, toast } from './dom.js';
+import { el, clear, mount, toast, field } from './dom.js';
 import { api } from './api.js';
 import { attachModelPicker } from './combo.js';
+import { roleLabel, roleHelp } from './roles.js';
 
 const form = document.getElementById('form');
 const backendsBox = document.getElementById('backends');
@@ -24,17 +25,6 @@ const pathLabel = document.getElementById('env-path');
 const saveButton = document.getElementById('save');
 
 const controls = new Map();
-
-const ROLES = ['default', 'reasoning', 'vision', 'critic'];
-
-// Role ids are the code's vocabulary, not the reader's. "reasoning" is the role
-// the analyst runs on, and that is what the label should say.
-const ROLE_LABEL = {
-  default: 'Everyday work',
-  reasoning: 'Hard thinking',
-  vision: 'Reading images',
-  critic: 'Adversarial review',
-};
 
 // Backend-specific gotchas worth surfacing where the model is chosen.
 const HINTS = {
@@ -48,13 +38,6 @@ const HINTS = {
   'codex-cli': 'Codex tiers by reasoning effort rather than by model, so one id across '
     + 'the roles is normal. An OPENAI_API_KEY in your environment overrides `codex '
     + 'login`, billing the API instead of your subscription.',
-};
-
-const ROLE_HELP = {
-  default: 'Ingestion, drafting, review',
-  reasoning: 'The analyst — the call that decides whether the PRD is any good',
-  vision: 'Screenshots, wireframes, diagrams',
-  critic: 'Best from another family - a critic that shares the writer\'s training shares its blind spots',
 };
 
 function control(field) {
@@ -112,16 +95,15 @@ async function load() {
 
 function plainGrid(fields) {
   const grid = el('div', { class: 'grid2' });
-  for (const field of fields) {
-    const made = control(field);
-    controls.set(field.key, made.read);
-    grid.append(
-      el('div', {},
-        made.labelled ? null : el('label', { title: field.key }, field.label),
-        made.node,
-        field.help ? el('div', { class: 'small muted', style: 'margin-top:3px' }, field.help) : null,
-      ),
-    );
+  for (const spec of fields) {
+    const made = control(spec);
+    controls.set(spec.key, made.read);
+    // A checkbox brings its own wrapping label, which already associates it;
+    // everything else gets one attached by `field`.
+    grid.append(made.labelled
+      ? el('div', {}, made.node,
+          spec.help ? el('div', { class: 'small muted hint' }, spec.help) : null)
+      : field(spec.label, made.node, spec.help, spec.key));
   }
   return grid;
 }
@@ -129,13 +111,14 @@ function plainGrid(fields) {
 function modelSection(fields, profiles) {
   const backends = [...new Set(fields.map((f) => f.backend))];
 
-  // Only the roles the server actually sent. A browser holding a newer bundle
-  // than the process it is talking to - exactly what a restart-less deploy or a
-  // cached tab produces - would otherwise dereference a cell that does not
-  // exist, and one throw in here takes down every section below it: Models,
-  // Limits, Credentials and Confluence all vanish over one missing input.
-  const served = new Set(fields.map((f) => f.role));
-  const roles = ROLES.filter((role) => served.has(role));
+  // The roles the server sent, in the order it sent them - never a list
+  // written out again here. Reading them off the fields is also what keeps a
+  // browser holding a newer bundle than the process it is talking to - exactly
+  // what a restart-less deploy or a cached tab produces - from dereferencing a
+  // cell that does not exist: one throw in here takes down every section below
+  // it, and Models, Limits, Credentials and Confluence all vanish over one
+  // missing input.
+  const roles = [...new Set(fields.map((f) => f.role))];
 
   // Built once and re-parented rather than re-rendered, so switching the active
   // backend cannot silently discard something half-typed.
@@ -169,9 +152,9 @@ function modelSection(fields, profiles) {
         ...roles.map((role) => {
           const cell = cells.get(`${active} ${role}`);
           return el('div', {},
-            el('label', { title: cell.field.key }, ROLE_LABEL[role] ?? role),
+            el('label', { title: cell.field.key }, roleLabel(role)),
             cell.input,
-            el('div', { class: 'small muted', style: 'margin-top:3px' }, ROLE_HELP[role] ?? ''));
+            el('div', { class: 'small muted', style: 'margin-top:3px' }, roleHelp(role)));
         }),
       ),
       HINTS[active]
@@ -189,7 +172,7 @@ function modelSection(fields, profiles) {
             ...roles.map((role) => {
               const cell = cells.get(`${backend} ${role}`);
               return el('div', {},
-                el('label', { class: 'small', title: cell.field.key }, ROLE_LABEL[role] ?? role),
+                el('label', { class: 'small', title: cell.field.key }, roleLabel(role)),
                 cell.input);
             })),
         ),

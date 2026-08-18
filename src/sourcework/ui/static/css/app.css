@@ -82,10 +82,14 @@ a { color: var(--accent); }
 
 /* -- shell ---------------------------------------------------------------- */
 
+/* Wraps rather than overflowing. Brand, version, mesh pill and three or four
+   buttons do not fit a phone, and the bar is sticky - so what did not fit was
+   scrolled off a chrome nobody can scroll. */
 header.top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 10px 16px;
   padding: 10px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -111,10 +115,16 @@ header.top .brand .version {
 }
 header.top .spacer { flex: 1; }
 
+/* The header's height, written once. It was 49px in three rules, which is a
+   measurement of one particular header at one particular font size - and now
+   that the bar wraps, a number that is wrong on exactly the screens the wrap
+   exists for. */
+:root { --header-h: 49px; }
+
 .layout {
   display: grid;
   grid-template-columns: 270px 1fr;
-  min-height: calc(100vh - 49px);
+  min-height: calc(100vh - var(--header-h));
 }
 
 aside {
@@ -122,16 +132,32 @@ aside {
   background: var(--panel);
   padding: 14px;
   overflow-y: auto;
-  max-height: calc(100vh - 49px);
+  max-height: calc(100vh - var(--header-h));
   position: sticky;
-  top: 49px;
+  top: var(--header-h);
 }
 
 main { padding: 22px 26px 60px; max-width: 1100px; }
+/* The two pages that are one centred column rather than sidebar + content.
+   They used to carry this inline, which beat the narrow-screen padding rule
+   below and kept desktop margins on a phone. */
+main.centred { margin: 0 auto; max-width: 1000px; }
+main.centred.narrow-col { max-width: 960px; }
 
+/* One column, and the history folds away. Left open it put up to fifty rows
+   above the document the reader actually opened. */
 @media (max-width: 820px) {
   .layout { grid-template-columns: 1fr; }
-  aside { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--line); }
+  aside {
+    position: static;
+    max-height: none;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 8px 14px;
+  }
+  aside > .side-title { display: block; }
+  aside > #runs { display: none; }
+  aside.open > #runs { display: block; max-height: 50vh; overflow-y: auto; }
   main { padding: 16px; }
 }
 
@@ -161,6 +187,7 @@ h3 { font-size: 14px; margin: 18px 0 8px; color: var(--ink-2); }
 @media (max-width: 700px) { .grid2, .grid3, .grid4 { grid-template-columns: 1fr; } }
 
 label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 4px; }
+.hint { margin-top: 4px; }
 
 input[type=text], input[type=number], input[type=password], select, textarea {
   width: 100%;
@@ -221,6 +248,67 @@ button.danger { color: var(--err); }
 .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
 .pill.run { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
 
+/* The same two meanings outside a pill: the history row is plain text, and a
+   warning marker there has to read as one without becoming a chip. */
+.ink-err { color: var(--err); }
+.ink-warn { color: var(--warn); }
+
+/* -- the run view's action row ------------------------------------------- */
+
+/* Wraps without re-ordering: the destructive end stays the end. A spacer
+   element cannot do this - it collapses on the wrap, which is the one moment
+   the separation is load-bearing. */
+.actions { gap: 8px; }
+.actions .last { margin-left: auto; }
+.grow { flex: 1; }
+
+/* Downloads, behind one control. `details` is already this app's disclosure
+   idiom, so it inherits the keyboard behaviour rather than reimplementing it. */
+.menu { position: relative; }
+.menu > summary.as-button {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 13px;
+}
+.menu > summary.as-button::-webkit-details-marker { display: none; }
+.menu > summary.as-button::after { content: '▾'; color: var(--ink-3); }
+.menu[open] > summary.as-button { border-color: var(--accent); }
+.menu-body {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  margin-top: 4px;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.menu-body a {
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 13px;
+}
+.menu-body a:hover, .menu-body a:focus-visible { background: var(--panel-2); }
+
+.readiness { margin: -6px 0 12px; }
+.sign-off { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.sign-off input { flex: 1 1 180px; }
+.trail { margin: -4px 0 14px; display: flex; flex-direction: column; gap: 2px; }
+
 .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
@@ -228,11 +316,28 @@ button.danger { color: var(--err); }
 /* -- sidebar -------------------------------------------------------------- */
 
 aside .side-title {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: default;
+  font: inherit;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--ink-3);
   margin: 16px 0 7px;
+}
+
+/* The caret is the only part that appears when the list is collapsible, which
+   is the only width where the button does anything. */
+aside .side-title::after { content: ''; }
+@media (max-width: 820px) {
+  aside .side-title { cursor: pointer; margin: 10px 0 6px; }
+  aside .side-title::after { content: ' ▸'; }
+  aside.open .side-title::after { content: ' ▾'; }
 }
 
 .run-item {
@@ -256,7 +361,12 @@ aside .side-title {
 
 /* This is the primary input on the page - a run without sources cannot start -
    and at one text-field's height it read as a divider between two fields. */
+/* A <button>, so it is reachable from the keyboard - which means undoing the
+   button defaults it does not want, and keeping the focus ring it does. */
 .drop {
+  display: block;
+  width: 100%;
+  font: inherit;
   border: 1.5px dashed var(--ink-3);
   border-radius: var(--radius);
   padding: 26px 18px;
@@ -293,7 +403,8 @@ aside .side-title {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px;
-  max-height: 340px;
+  /* Never taller than the screen it shares with the document. */
+  max-height: min(340px, 40vh);
   overflow-y: auto;
 }
 
@@ -381,24 +492,43 @@ pre.raw {
 .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
 .stat .v { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
 
-.toast {
+/* The stack is what is pinned; the toasts sit in it. Fixing each one to the
+   same corner meant the second drew over the first. */
+.toasts {
   position: fixed;
   bottom: 18px;
   right: 18px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  max-width: min(380px, calc(100vw - 36px));
+}
+
+.toast {
   background: var(--panel);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   padding: 10px 14px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
-  z-index: 100;
-  max-width: 380px;
 }
 
 .toast.err { border-left-color: var(--err); }
 .toast.ok { border-left-color: var(--ok); }
 
 .empty { color: var(--ink-3); text-align: center; padding: 40px 20px; }
+
+/* Taken at their word: the pulsing status dot is decoration, and a transition
+   is never the thing that carries the meaning here. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 details.adv { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
 details.adv summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
@@ -427,7 +557,7 @@ details.card.fold[open] > summary {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px;
-  max-height: 380px;
+  max-height: min(380px, 45vh);
   overflow-y: auto;
 }
 

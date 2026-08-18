@@ -219,6 +219,22 @@ FIELDS: tuple[Field, ...] = (
 BY_KEY = {f.key: f for f in FIELDS}
 
 
+def model_roles() -> list[str]:
+    """The roles a model can be chosen for, in the order the pages show them.
+
+    Taken from the fields themselves rather than written out again: a role the
+    settings page cannot configure is one a run has no business overriding, and
+    the two lists drifting apart is exactly how the API came to advertise a
+    ``fast`` role no agent has ever requested while omitting ``critic``, which
+    every review runs on.
+    """
+    seen: list[str] = []
+    for field in FIELDS:
+        if field.role and field.role not in seen:
+            seen.append(field.role)
+    return seen
+
+
 _ROLE_SUFFIXES = ("DEFAULT", "REASONING", "VISION", "CRITIC")
 
 

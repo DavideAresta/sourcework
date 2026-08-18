@@ -30,7 +30,10 @@ const LABEL = {
 };
 
 export function narrationPanel() {
-  const stream = el('div', { class: 'narration' });
+  // Labelled but deliberately *not* a live region: this arrives token by token,
+  // and announcing it would talk over everything else on the page. The progress
+  // log next door is the one that speaks.
+  const stream = el('div', { class: 'narration', role: 'region', 'aria-label': 'Model output' });
   const status = el('span', { class: 'ts' });
   const toggle = el('button', { class: 'ghost', onClick: () => setOpen(!open) }, 'Hide');
 

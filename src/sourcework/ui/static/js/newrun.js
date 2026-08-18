@@ -6,19 +6,13 @@
 // anything. Leaving a control on "configured default" omits the key entirely,
 // which is what makes the environment's setting still mean something.
 
-import { el, clear, bytes, toast } from './dom.js';
+import { el, clear, bytes, toast, field } from './dom.js';
 import { api } from './api.js';
 import * as notify from './notify.js';
 import { attachModelPicker } from './combo.js';
+import { roleLabel, roleHelp } from './roles.js';
 
 const TEMPLATES = ['standard', 'lean', 'technical', 'discovery'];
-// Same four roles as the settings page, named the same way. "Extraction" and
-// "Analyst / writer" are what the code calls them; these are what they do.
-const ROLES = [
-  ['default', 'Everyday work', 'Ingestion, drafting, review'],
-  ['reasoning', 'Hard thinking', 'The analyst, which decides whether the PRD is any good'],
-  ['vision', 'Reading images', 'Screenshots, wireframes, diagrams'],
-  ['critic', 'Adversarial review', 'Best from another family'],];
 
 export function newRunView(onStarted) {
   const files = [];
@@ -26,7 +20,10 @@ export function newRunView(onStarted) {
 
   // -- inputs ------------------------------------------------------------
   const fileList = el('div');
-  const drop = el('div', { class: 'drop' },
+  // A button, not a div with a click handler: the file input it stands in for
+  // is display:none, so a div left no keyboard path to attaching a file at all
+  // - on the one control this form cannot work without.
+  const drop = el('button', { type: 'button', class: 'drop' },
     el('strong', {}, 'Drop your sources here'),
     el('div', { class: 'small' }, 'or click to choose — PDF, DOCX, PPTX, XLSX, CSV, HTML, MD, VTT, SRT, PNG, JPG'));
   const picker = el('input', { type: 'file', multiple: true, style: 'display:none' });
@@ -45,7 +42,8 @@ export function newRunView(onStarted) {
           el('span', { class: 'muted small' }, bytes(file.size)),
           el('button', {
             class: 'ghost small',
-            title: 'Remove',
+            title: `Remove ${file.name}`,
+            'aria-label': `Remove ${file.name}`,
             onClick: () => { files.splice(index, 1); renderFiles(); },
           }, '✕'),
         ),
@@ -85,20 +83,22 @@ export function newRunView(onStarted) {
     ...['low', 'medium', 'high', 'xhigh', 'max'].map((e) => el('option', { value: e }, e)));
   const failover = el('input', { type: 'text', placeholder: 'claude-code,codex-cli' });
   const modelInputs = {};
+  // Filled from /api/backends below, not from a list written out here: the
+  // roles a run may override are the roles the settings page can configure,
+  // and one of the two saying otherwise is how the API came to advertise a
+  // role no agent requests.
   const modelRow = el('div', { class: 'grid3' });
-
-  for (const [role, label, does] of ROLES) {
-    const input = el('input', { type: 'text', placeholder: 'backend default' });
-    modelInputs[role] = input;
-    modelRow.append(el('div', {}, el('label', {}, label), input,
-      el('div', { class: 'small muted', style: 'margin-top:4px' }, does)));
-  }
 
   const backendHint = el('div', { class: 'small muted' });
 
   let catalogue = {};
   api.backends().then((data) => {
     catalogue = Object.fromEntries(data.backends.map((b) => [b.id, b]));
+    for (const role of data.roles ?? []) {
+      const input = el('input', { type: 'text', placeholder: 'backend default' });
+      modelInputs[role] = input;
+      modelRow.append(field(roleLabel(role), input, roleHelp(role)));
+    }
     for (const b of data.backends) {
       backend.append(el('option', {
         value: b.id,
@@ -119,8 +119,8 @@ export function newRunView(onStarted) {
     // Offer that backend's models as suggestions; the field stays free text
     // because the CLIs accept ids that no listing knows about.
     for (const picker of pickers) picker.destroy();
-    pickers = ROLES
-      .map(([role]) => attachModelPicker(modelInputs[role], info?.models ?? []))
+    pickers = Object.values(modelInputs)
+      .map((input) => attachModelPicker(input, info?.models ?? []))
       .filter(Boolean);
     backendHint.textContent = !chosen
       ? 'Uses whatever the mesh was started with.'
@@ -147,8 +147,8 @@ export function newRunView(onStarted) {
     notify.askOnGesture();
 
     const models = {};
-    for (const [role] of ROLES) {
-      if (modelInputs[role].value.trim()) models[role] = modelInputs[role].value.trim();
+    for (const [role, input] of Object.entries(modelInputs)) {
+      if (input.value.trim()) models[role] = input.value.trim();
     }
     const llm = {};
     if (backend.value) llm.backend = backend.value;
@@ -191,18 +191,14 @@ export function newRunView(onStarted) {
     el('p', { class: 'muted' }, 'Documents, transcripts, images and Confluence pages in. A traceable PRD out.'),
 
     el('div', { class: 'card' },
-      el('label', {}, 'Title'), title,
+      field('Title', title),
       el('div', { style: 'height:12px' }),
       drop, picker, fileList,
       el('div', { class: 'grid2', style: 'margin-top:12px' },
-        el('div', {}, el('label', {}, 'URIs'), uris,
-          el('div', { class: 'small muted', style: 'margin-top:4px' }, 'One per line.')),
-        el('div', {}, el('label', {}, 'Inline notes'), notes,
-          el('div', { class: 'small muted', style: 'margin-top:4px' },
-            'One per line. Each becomes a source you can cite.')),
+        field('URIs', uris, 'One per line.'),
+        field('Inline notes', notes, 'One per line. Each becomes a source you can cite.'),
       ),
-      el('div', { style: 'margin-top:12px' }, el('label', {}, 'Confluence CQL'), cql,
-        el('div', { class: 'small muted', style: 'margin-top:4px' }, 'One query per line.')),
+      el('div', { style: 'margin-top:12px' }, field('Confluence CQL', cql, 'One query per line.')),
     ),
 
     // Folded by default. A run needs a title and something to read; everything
@@ -212,9 +208,9 @@ export function newRunView(onStarted) {
       el('summary', {}, 'Model',
         el('span', { class: 'muted small' }, ' — this run only, otherwise the configured default')),
       el('div', { class: 'grid3' },
-        el('div', {}, el('label', {}, 'Backend'), backend),
-        el('div', {}, el('label', {}, 'Reasoning effort'), effort),
-        el('div', {}, el('label', {}, 'Failover order'), failover),
+        field('Backend', backend),
+        field('Reasoning effort', effort),
+        field('Failover order', failover),
       ),
       el('div', { style: 'height:12px' }),
       modelRow,
@@ -225,11 +221,11 @@ export function newRunView(onStarted) {
       el('summary', {}, 'Shape',
         el('span', { class: 'muted small' }, ' — template, audience, review rounds, publishing')),
       el('div', { class: 'grid3' },
-        el('div', {}, el('label', {}, 'Template'), template),
-        el('div', {}, el('label', {}, 'Audience'), audience),
-        el('div', {}, el('label', {}, 'Review rounds'), rounds),
+        field('Template', template),
+        field('Audience', audience),
+        field('Review rounds', rounds),
       ),
-      el('div', { style: 'margin-top:12px' }, el('label', {}, 'Extra instructions'), instructions),
+      el('div', { style: 'margin-top:12px' }, field('Extra instructions', instructions)),
       el('div', { class: 'row', style: 'margin-top:14px' },
         el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0' }, estimate,
           'Estimate effort',
@@ -242,8 +238,8 @@ export function newRunView(onStarted) {
           el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0' }, publish, 'Publish when finished'),
         ),
         el('div', { class: 'grid2', style: 'margin-top:10px' },
-          el('div', {}, el('label', {}, 'Space key'), space),
-          el('div', {}, el('label', {}, 'Parent page id'), parent),
+          field('Space key', space),
+          field('Parent page id', parent),
         ),
       ),
     ),

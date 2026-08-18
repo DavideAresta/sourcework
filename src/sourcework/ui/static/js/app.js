@@ -25,7 +25,10 @@ async function refreshSidebar() {
     return;
   }
 
-  const current = location.hash.replace('#/run/', '');
+  // The hash may carry a tab (`#/run/<id>/review`); the id is the second
+  // segment either way. Comparing against the whole tail stopped highlighting
+  // the open run the moment tabs went into the URL.
+  const current = location.hash.split('/')[2] ?? '';
   clear(sidebar);
   if (!runs.length) {
     sidebar.append(el('div', { class: 'small muted', style: 'padding:6px 8px' }, 'No runs yet.'));
@@ -46,6 +49,15 @@ async function refreshSidebar() {
           run.requirements !== null && run.requirements !== undefined
             ? el('span', {}, `· ${run.requirements} reqs`) : null,
           run.parent_id ? el('span', { title: 'refines an earlier version' }, '· \u21b3') : null,
+          // `ok` with warnings is still `ok`, and this list is where somebody
+          // decides which run to open. A run that quietly skipped a source
+          // should not look like one that read everything.
+          (run.failures || run.warnings)
+            ? el('span', {
+                class: run.failures ? 'ink-err' : 'ink-warn',
+                title: `${run.failures || 0} failure(s), ${run.warnings || 0} warning(s)`,
+              }, `· \u26a0 ${(run.failures || 0) + (run.warnings || 0)}`)
+            : null,
           run.approval === 'approved'
             ? el('span', { title: 'signed off' }, '· \u2713 approved')
             : run.approval === 'rejected'
@@ -114,11 +126,22 @@ async function refreshMesh() {
   }
 }
 
+// The optional third segment is the run view's tab (`#/run/<id>/review`), read
+// by that view rather than here - the router only has to stop treating it as an
+// unknown route and dropping the reader on the new-run form.
+const ROUTE = /^#\/run\/([a-z0-9]+)(?:\/[a-z]+)?$/;
+
+let shownRun = null;
+
 function render() {
-  const hash = location.hash;
-  const match = /^#\/run\/([a-z0-9]+)$/.exec(hash);
+  const match = ROUTE.exec(location.hash);
 
   if (match) {
+    // Switching tabs rewrites the hash (replaceState, so no event) but a Back
+    // button between two tabs of the same run still lands here; rebuilding the
+    // view then would drop the live event stream and reset scroll for nothing.
+    if (match[1] === shownRun) { refreshSidebar(); return; }
+    shownRun = match[1];
     clear(main).append(runView(match[1], {
       onChanged: (goHome) => {
         refreshSidebar();
@@ -126,6 +149,7 @@ function render() {
       },
     }));
   } else {
+    shownRun = null;
     clear(main).append(newRunView((id) => {
       location.hash = `#/run/${id}`;
       refreshSidebar();
@@ -135,6 +159,34 @@ function render() {
 }
 
 window.addEventListener('hashchange', render);
+
+// Under 820px the sidebar sits above the document rather than beside it, so a
+// full history is fifty rows in front of the thing you opened. The heading
+// becomes the control that folds it - and says which state it is in, honestly:
+// on a wide screen the list is shown whatever the class says, so `aria-expanded`
+// is computed from the width as well as from the class.
+const historyToggle = document.getElementById('history-toggle');
+const aside = document.querySelector('aside');
+const narrow = window.matchMedia('(max-width: 820px)');
+
+function syncHistoryToggle() {
+  historyToggle.setAttribute(
+    'aria-expanded', String(!narrow.matches || aside.classList.contains('open')));
+}
+
+historyToggle.addEventListener('click', () => {
+  if (!narrow.matches) return;
+  aside.classList.toggle('open');
+  syncHistoryToggle();
+});
+narrow.addEventListener('change', syncHistoryToggle);
+syncHistoryToggle();
+
+// Opening a run from the list closes it again: on a phone the point of the tap
+// was the document underneath.
+sidebar.addEventListener('click', () => {
+  if (narrow.matches) { aside.classList.remove('open'); syncHistoryToggle(); }
+});
 
 document.getElementById('new-run').addEventListener('click', () => {
   if (location.hash === '#/new') render();

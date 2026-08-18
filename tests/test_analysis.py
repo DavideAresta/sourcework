@@ -251,6 +251,27 @@ async def test_a_big_prd_does_not_grow_the_review_prompt_without_bound(prd: PRDD
     assert any("left out of the review prompt" in m for m in said)
 
 
+async def test_the_reviewers_own_sentence_reaches_the_report(prd: PRDDocument):
+    """The critic writes one line framing the findings; the report used to drop
+    it on the floor, and the tab that rendered it showed a permanently empty
+    paragraph. In stub mode that same line is the marker saying no model ran -
+    which is exactly the thing a reader must not have hidden from them."""
+    from sourcework.agents.critic.agent import CriticDraft, CriticExecutor
+
+    executor = CriticExecutor()
+
+    async def fake_structured(system, user, schema, **kw):  # noqa: ANN001, ANN202
+        return CriticDraft(verdict="approved", notes="  Thin on failure handling.  ")
+
+    executor.llm.structured = fake_structured
+
+    async def say(message: str) -> None:
+        return None
+
+    response = await executor.review_prd({"prd": prd.model_dump(mode="json")}, say)
+    assert response.report.summary == "Thin on failure handling."
+
+
 def test_coverage_stats(prd: PRDDocument):
     stats = coverage_stats(prd)
     assert stats["requirements"] == 2.0

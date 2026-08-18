@@ -45,6 +45,22 @@ SCHEMA_VERSION = 2
 1 -> 2 added the approval column."""
 
 
+STATUSES = ("queued", "running", "ok", "failed", "cancelled")
+"""Every status a run can hold, in the order one passes through them.
+
+Named because three places test against subsets of it - and because the browser
+branches on these strings too. `tests/test_ui.py` compares this tuple against the
+front end's own status map, which is how a status added here and nowhere else
+stops being an invisible row in the history list.
+"""
+
+FINISHED = ("ok", "failed", "cancelled")
+"""Terminal: nothing is running, and the row will not change again by itself."""
+
+IN_FLIGHT = ("queued", "running")
+"""The two that a restart turns into a lie - see :meth:`RunStore.reap_orphans`."""
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -76,7 +92,7 @@ class Run:
 
     @property
     def done(self) -> bool:
-        return self.status in {"ok", "failed", "cancelled"}
+        return self.status in FINISHED
 
     def summary(self) -> dict[str, Any]:
         """The list-view shape: everything except the payloads, which are big."""
@@ -99,6 +115,12 @@ class Run:
             "verdict": review.get("verdict") if isinstance(review, dict) else None,
             "usage": self.usage,
             "approval": (self.approval or {}).get("state"),
+            # Counts, not the strings: a run that dropped a source finished
+            # `ok` and reads as unqualified success everywhere the status pill
+            # appears. The list view cannot afford the text, but it can afford
+            # the number that makes somebody open the run.
+            "warnings": len(stats.get("warnings") or []),
+            "failures": len(stats.get("failures") or []),
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -243,7 +265,7 @@ class RunStore:
         A `running` row on start-up is a lie: nothing is running, the UI was
         restarted mid-run. Leaving it says "in progress" forever.
         """
-        stale = [r for r in await self.list(limit=500) if r.status in {"queued", "running"}]
+        stale = [r for r in await self.list(limit=500) if r.status in IN_FLIGHT]
         for run in stale:
             run.status = "failed"
             run.error = "The UI restarted while this run was in flight."
@@ -260,7 +282,7 @@ class RunStore:
             doomed = [
                 r["id"]
                 for r in rows
-                if r["status"] in ("ok", "failed", "cancelled")
+                if r["status"] in FINISHED
                 and datetime.fromisoformat(r["created_at"]).timestamp() < cutoff
             ]
             for run_id in doomed:

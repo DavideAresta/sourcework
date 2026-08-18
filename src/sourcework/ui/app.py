@@ -460,6 +460,14 @@ def build_app(
             # separately so the view can offer resuming only when there is
             # something to resume, and can say what it would keep.
             "resumable": checkpoint.saved_stages(run_id),
+            # The same verdict the dashboard shows, computed the same way from
+            # the same stored dicts. Without it the run's own page was the one
+            # place that could not answer "is this finished enough to send",
+            # and a reader had to leave the document to find out.
+            "readiness": (
+                readiness.assess(run.result.get("prd"), run.result.get("review")).as_dict()
+                if run.result else None
+            ),
         }
 
     @app.post("/api/runs/{run_id}/resume", tags=["runs"])
@@ -745,7 +753,9 @@ def build_app(
             "active": cfg.active_backend,
             "failover_order": cfg.failover_order,
             "backends": probe(cfg),
-            "roles": ["default", "reasoning", "vision", "fast"],
+            # From the settings fields, not a second hand-written list - see
+            # env_file.model_roles for what the two drifting apart cost.
+            "roles": env_file.model_roles(),
         }
 
     # -- settings ----------------------------------------------------------

@@ -263,6 +263,12 @@ class ReviewReport(BaseModel):
     ISO/IEC/IEEE 29148 + INCOSE GtWR, EARS on or off). Rendered in the PRD's
     review section, because a quality claim without its yardstick is just an
     adjective."""
+    summary: str = ""
+    """The reviewer's own sentence about the document, before the findings.
+
+    The findings say what is wrong item by item; this says what a reader should
+    know first. It carries the stub marker too, so a review that no model ever
+    performed says so where the review is read rather than only in the log."""
 
     @property
     def blocking(self) -> list[ReviewFinding]:
