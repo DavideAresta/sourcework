@@ -19,6 +19,18 @@ change belongs to.
 
 ### Added
 
+- Nothing yet.
+
+## [0.4.1] — 2026-08-20
+
+A repair release. Everything below is something that was already broken:
+runs that timed out on a model still thinking, a UI that stopped agreeing
+with the run it was showing, a `docker compose up` that could not parse its
+own file — and, underneath two of them, tools that reported a component
+healthy without having checked the thing that would fail.
+
+### Added
+
 - **A working agent now says so every 15 seconds**, whether or not it has
   anything to report (`a2a_common.executor.KEEPALIVE_INTERVAL_S`). Narration was
   the only thing putting bytes on the A2A channel during a model call, and it is
@@ -129,6 +141,15 @@ change belongs to.
   `end` frame was emitted from a `finally`, which on generator close raises
   `async generator ignored GeneratorExit` — over a connection with nobody left
   to read the frame.
+
+#### Hosted — `sourcework-cloud` 0.1.0 (unchanged)
+
+- The package itself did not change, so its version does not move; the shared
+  `v0.4.1` tag covers it at `0.1.0`. What did change for the hosted
+  distribution is `docker-compose.cloud.yml`, which had both faults described
+  above — and one of its own, since the mesh block it lost carried
+  `SOURCEWORK_LLM__STUB=1`, so the deployment asked for credentials it had
+  promised not to need before you supplied any.
 
 ## [0.4.0] — 2026-08-18
 
@@ -447,7 +468,8 @@ tool**. The UI binds loopback and ships no authentication; the agent mesh ships
 a publicly known shared secret and does not enforce it by default; ingestion
 refuses private-network targets; and model output is treated as untrusted input.
 
-[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/DavideAresta/sourcework/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/DavideAresta/sourcework/releases/tag/v0.4.1
 [0.4.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.4.0
 [0.3.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.3.0
 [0.2.0]: https://github.com/DavideAresta/sourcework/releases/tag/v0.2.0
