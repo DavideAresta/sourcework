@@ -49,6 +49,10 @@ dev = [
   "pytest-asyncio>=0.23",
   "ruff>=0.5",
   "mypy>=1.10",
+  # For tests/test_compose.py. Already present transitively via
+  # uvicorn[standard]; declared here so the one test that reads YAML does not
+  # depend on that staying true. MIT, so the licence gate is untroubled.
+  "pyyaml>=6.0",
 ]
 
 [project.urls]

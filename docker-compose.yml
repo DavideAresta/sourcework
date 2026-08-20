@@ -1,19 +1,27 @@
+# Merged into each service's own `environment`, and deliberately NOT carried by
+# `x-common`. A YAML merge key merges one level only: a service that defines
+# `environment` replaces the anchor's map wholesale instead of adding to it.
+# That is how every agent silently lost its peer URLs and fell back to the
+# localhost defaults in .env - where, inside a container, localhost is the
+# container itself and the mesh cannot reach any of its own members. Any service
+# added below needs `<<: *mesh-env` at the top of its `environment`.
+x-mesh-env: &mesh-env
+  # Inside the compose network agents address each other by service name, so
+  # that is what their agent cards must advertise.
+  SOURCEWORK_PUBLIC_HOST: ""
+  SOURCEWORK_PEERS__ORCHESTRATOR: http://orchestrator:8000
+  SOURCEWORK_PEERS__INGESTION: http://ingestion:8001
+  SOURCEWORK_PEERS__VISION: http://vision:8002
+  SOURCEWORK_PEERS__TRANSCRIPT: http://transcript:8003
+  SOURCEWORK_PEERS__CONFLUENCE: http://confluence:8004
+  SOURCEWORK_PEERS__REQUIREMENTS: http://requirements:8005
+  SOURCEWORK_PEERS__WRITER: http://writer:8006
+  SOURCEWORK_PEERS__CRITIC: http://critic:8007
+
 x-common: &common
   build:
     context: .
   env_file: .env
-  environment:
-    # Inside the compose network agents address each other by service name, so
-    # that is what their agent cards must advertise.
-    SOURCEWORK_PUBLIC_HOST: ""
-    SOURCEWORK_PEERS__ORCHESTRATOR: http://orchestrator:8000
-    SOURCEWORK_PEERS__INGESTION: http://ingestion:8001
-    SOURCEWORK_PEERS__VISION: http://vision:8002
-    SOURCEWORK_PEERS__TRANSCRIPT: http://transcript:8003
-    SOURCEWORK_PEERS__CONFLUENCE: http://confluence:8004
-    SOURCEWORK_PEERS__REQUIREMENTS: http://requirements:8005
-    SOURCEWORK_PEERS__WRITER: http://writer:8006
-    SOURCEWORK_PEERS__CRITIC: http://critic:8007
   restart: unless-stopped
   networks: [sourcework]
 
@@ -23,6 +31,7 @@ services:
     container_name: sourcework-orchestrator
     command: ["sourcework", "serve", "orchestrator"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: orchestrator
       PORT: 8000
     ports: ["8000:8000"]
@@ -34,6 +43,7 @@ services:
     container_name: sourcework-ingestion
     command: ["sourcework", "serve", "ingestion"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: ingestion
       PORT: 8001
     volumes: ["./workspace:/workspace:ro"]
@@ -43,6 +53,7 @@ services:
     container_name: sourcework-vision
     command: ["sourcework", "serve", "vision"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: vision
       PORT: 8002
     volumes: ["./workspace:/workspace:ro"]
@@ -52,6 +63,7 @@ services:
     container_name: sourcework-transcript
     command: ["sourcework", "serve", "transcript"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: transcript
       PORT: 8003
     volumes: ["./workspace:/workspace:ro"]
@@ -61,6 +73,7 @@ services:
     container_name: sourcework-confluence
     command: ["sourcework", "serve", "confluence"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: confluence
       PORT: 8004
 
@@ -69,6 +82,7 @@ services:
     container_name: sourcework-requirements
     command: ["sourcework", "serve", "requirements"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: requirements
       PORT: 8005
 
@@ -77,6 +91,7 @@ services:
     container_name: sourcework-writer
     command: ["sourcework", "serve", "writer"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: writer
       PORT: 8006
 
@@ -85,6 +100,7 @@ services:
     container_name: sourcework-critic
     command: ["sourcework", "serve", "critic"]
     environment:
+      <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: critic
       PORT: 8007
 
@@ -93,11 +109,14 @@ services:
   ui:
     <<: *common
     container_name: sourcework-ui
-    command: ["sourcework", "ui", "--port", "8080"]
+    # 0.0.0.0, not the CLI's 127.0.0.1 default: bound to loopback *inside* the
+    # container, the published port reaches nothing. Safe here only because the
+    # port is published to the host, not to a network.
     command: ["sourcework", "ui", "--port", "8080", "--host", "0.0.0.0"]
     ports: ["8080:8080"]
     depends_on: [orchestrator]
     environment:
+      <<: *mesh-env
       SOURCEWORK_UI_WORKSPACE: /workspace
       # The image's healthcheck probes ${PORT:-8000}; this service serves 8080.
       PORT: 8080

@@ -76,6 +76,21 @@ change belongs to.
   that hung rather than refusing could hold a 30-second-polled status pill for
   the better part of an hour. It now probes all eight at once with three seconds
   of patience.
+- **`docker compose up` works again, and the mesh it starts can reach itself.**
+  Two separate faults in the compose files, neither covered by any test. The
+  `ui` service carried two `command:` keys — the second added to make the
+  container reachable, the first left behind — which older parsers resolved
+  last-one-wins and Compose v5 rejects outright, so the file would not load at
+  all. Underneath that, every service declared its own `environment` to set
+  `PUBLIC_HOST` and `PORT`, and a YAML merge key merges one level only: each
+  service replaced the shared block wholesale rather than adding to it, so all
+  eight agents and the UI lost every `SOURCEWORK_PEERS__*` URL and fell back to
+  the `localhost` defaults in `.env` — where, inside a container, localhost is
+  the container. The mesh came up, every healthcheck passed, and not one service
+  could reach another. The hosted file lost `SOURCEWORK_LLM__STUB=1` the same
+  way, so it asked for real credentials it had promised not to need. The shared
+  block is now an `x-mesh-env` anchor merged *into* each service's environment,
+  and `tests/test_compose.py` fails on either fault.
 - **The event stream tears down cleanly when a browser navigates away.** The
   `end` frame was emitted from a `finally`, which on generator close raises
   `async generator ignored GeneratorExit` — over a connection with nobody left
