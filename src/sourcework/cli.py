@@ -175,6 +175,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             f"\n{found['backend']} sends its calls to {configured_base} and will not use\n"
             "the server above. Start yours there, or point the backend at that one."
         )
+        print(_how_to_start_one())
         return 1
     elif active:
         print(f"engine     {active.summary()}  [found by probing]")
@@ -197,13 +198,89 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             print(f"  {url}")
         print(
             "\nStart one, or point SOURCEWORK_LLM__API_BASE at an OpenAI-compatible\n"
-            "server. scripts/llama-swap.sh starts one from models already on disk."
+            "server."
         )
+        print(_how_to_start_one())
         return 1
 
     print("\nroles")
     for role, model in found["roles"].items():
         print(f"  {role:<10} {model or '(backend default)'}")
+    return 0
+
+
+def _how_to_start_one() -> str:
+    """The next step, which depends on whether llama-swap is actually here.
+
+    Doctor used to end by recommending `scripts/llama-swap.sh` unconditionally.
+    On a machine without llama-swap that script's first act is to fail, so the
+    advice sent you to a dead end - the same shape of unhelpfulness as a green
+    pill on a backend that cannot answer.
+    """
+    from shutil import which
+
+    if which("llama-swap"):
+        return (
+            "\nllama-swap is installed. Serve your models with:\n"
+            "  scripts/llama-models.py scan   # refresh the generated model list\n"
+            "  scripts/llama-swap.sh          # listens on 127.0.0.1:8081"
+        )
+    return (
+        "\nllama-swap is not installed - it is what serves several models behind\n"
+        "one endpoint, which is what per-role models need. To fetch it:\n"
+        "  sourcework install-llama-swap\n"
+        "For a single model instead, MODEL=... scripts/llama-serve.sh"
+    )
+
+
+def installer_version() -> str:
+    """The pinned llama-swap version, for the parser's help text."""
+    from sourcework.installer import LLAMA_SWAP_VERSION
+
+    return LLAMA_SWAP_VERSION
+
+
+def cmd_install_llama_swap(args: argparse.Namespace) -> int:
+    """Fetch llama-swap, verified, after saying what it is about to do.
+
+    Deliberately not silent and deliberately not automatic: this puts a binary
+    from the internet on your PATH, and the least it can do is let you read the
+    URL and the digest first.
+    """
+    from shutil import which
+
+    from sourcework import installer
+
+    try:
+        plan = installer.plan_for(args.version)
+    except installer.InstallError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    print(plan.describe())
+    existing = which("llama-swap")
+    if existing and not args.force:
+        print(f"\nAlready installed at {existing}. Pass --force to replace it.")
+        return 0
+    if args.dry_run:
+        print("\n--dry-run: nothing was downloaded.")
+        return 0
+
+    print()
+    try:
+        where = installer.install(args.version, force=args.force)
+    except installer.InstallError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+    print(f"Installed llama-swap {plan.version} at {where}")
+    if not installer.on_path():
+        # An install that "worked" and a command still not found is a common
+        # enough ending on macOS to be worth saying rather than leaving to be
+        # discovered.
+        print(f"\n{where.parent} is not on your PATH. Add it:")
+        print(f'  export PATH="{where.parent}:$PATH"')
+    print("\nNext: scripts/llama-models.py scan, then scripts/llama-swap.sh")
     return 0
 
 
@@ -431,6 +508,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="add SourceWork to the application launcher (Linux)")
     p.add_argument("--remove", action="store_true", help="take it out again")
     p.set_defaults(func=cmd_install_entry)
+
+    p = sub.add_parser("install-llama-swap",
+                       help="download llama-swap (checksum-verified) into ~/.local/bin")
+    p.add_argument("--version", default=installer_version(),
+                   help=f"release to fetch (default {installer_version()})")
+    p.add_argument("--force", action="store_true", help="replace an existing binary")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print the URL and digest source, download nothing")
+    p.set_defaults(func=cmd_install_llama_swap)
 
     p = sub.add_parser("doctor", help="what is configured and what is reachable")
     p.add_argument("--timeout", type=float, default=0.6, help="per-probe seconds")

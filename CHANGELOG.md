@@ -19,7 +19,28 @@ change belongs to.
 
 ### Added
 
-- Nothing yet.
+- **`sourcework install-llama-swap`** fetches the one runtime this project is
+  willing to install for you. llama-swap is what serves several models behind
+  one endpoint, which is what per-role models need — and until now `doctor` and
+  the settings page could tell you precisely that it was missing and then hand
+  you a link. It pins a release rather than following "latest", verifies the
+  SHA-256 against the checksums file published beside the asset, refuses on a
+  mismatch instead of warning, installs per-user into `~/.local/bin`, and will
+  not replace an existing binary without `--force`. `--dry-run` prints the URL
+  and the digest source and downloads nothing.
+
+  Nothing calls it automatically and no HTTP route reaches it: the web UI ships
+  no authentication, and "a web request can cause a binary to be downloaded and
+  executed" is not a trade this program makes. There is deliberately no
+  equivalent for llama.cpp — its releases are a matrix of CUDA, ROCm, Vulkan,
+  Metal and CPU builds, and choosing wrong there does not fail, it silently runs
+  an order of magnitude slower, which is the degradation this project treats as
+  a defect.
+- **`doctor` now says what to do next, and checks before saying it.** It used to
+  end by recommending `scripts/llama-swap.sh` whatever the machine had; on one
+  without llama-swap that script's first act is to fail, so the advice was a
+  dead end. It now names the install command when the tool is missing and the
+  scan-and-serve sequence when it is there.
 
 ## [0.4.1] — 2026-08-20
 

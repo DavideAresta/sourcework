@@ -31,7 +31,9 @@ dependency. A copyleft dependency would change what this project can be.
 
 ## External tools, not distributed here
 
-SourceWork drives programs you install yourself. None of them are bundled,
+SourceWork drives programs you install yourself — with one convenience
+exception, `sourcework install-llama-swap`, which downloads a pinned llama-swap
+release from upstream on request and verifies it. None of them are bundled,
 vendored or redistributed, so **none of them affect SourceWork's own licence**.
 They matter to you for a different reason, set out under *What actually binds
 you* below.
@@ -44,7 +46,11 @@ Spoken to over HTTP, never invoked as code:
   provides the OpenAI-compatible endpoint, grammar-constrained JSON, and the
   Hugging Face downloader behind `llama-models.py add`.
 - **[llama-swap](https://github.com/mostlygeek/llama-swap)** — MIT. Serves
-  several models behind one endpoint so roles can differ.
+  several models behind one endpoint so roles can differ. The one tool
+  `sourcework install-llama-swap` will fetch for you: a pinned release, its
+  SHA-256 checked against the checksums file published beside it, unpacked into
+  `~/.local/bin`. Still not redistributed — the bytes come from the upstream
+  release page at the moment you ask, and nothing here fetches them on its own.
 
 ### Coding CLIs used as generation backends
 

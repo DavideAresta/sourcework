@@ -63,12 +63,23 @@ out-of-memory crash.
 handle the wiring:
 
 ```bash
+sourcework install-llama-swap                     # if you do not have it yet
 export SOURCEWORK_MODEL_DIRS=~/models:/srv/models   # where your GGUFs live
 scripts/llama-models.py list                      # what you have, and what fits
 scripts/llama-models.py scan                      # generate the serving config
 cp scripts/llama-swap.example.yaml scripts/llama-swap.yaml   # then edit its paths
 scripts/llama-swap.sh                             # serve them all on :8081
 ```
+
+`install-llama-swap` fetches a pinned release, checks its SHA-256 against the
+checksums file published beside it, and unpacks the binary into `~/.local/bin`.
+It prints the URL and refuses to replace an existing binary without `--force`;
+`--dry-run` shows what it would do and downloads nothing. Nothing calls it for
+you, and no route in the web UI reaches it — installing something onto your PATH
+is a decision, not a side effect. There is no equivalent for `llama.cpp` itself
+and there will not be: its releases are a matrix of CUDA, ROCm, Vulkan, Metal
+and CPU builds, and a wrong choice there does not fail, it just runs an order of
+magnitude slower.
 
 `scan` pairs vision projectors with their models, collapses split models to one
 entry, and asks for full GPU offload only where it demonstrably fits. Adding a
