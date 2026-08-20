@@ -156,13 +156,38 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"backend    {found['backend']}")
 
     active = found["engine"]
-    if active:
-        where = "configured" if active.configured else "found by probing"
-        print(f"engine     {active.summary()}  [{where}]")
+    configured_base = found["configured_base"]
+    if active and active.configured:
+        print(f"engine     {active.summary()}  [configured]")
         for model in active.models[:8]:
             print(f"             {model}")
         if len(active.models) > 8:
             print(f"             ... and {len(active.models) - 8} more")
+    elif active and configured_base:
+        # The case this whole branch exists for. Something answered, but it is
+        # not the endpoint the backend will call - and presenting it as "the
+        # engine" is how doctor came to report a healthy server while every run
+        # failed against a different, dead one. Say which is which, and do not
+        # dress a suggestion up as a finding.
+        print(f"engine     NOT REACHABLE at {configured_base}  [configured]")
+        print(f"           something else is answering: {active.summary()}")
+        print(
+            f"\n{found['backend']} sends its calls to {configured_base} and will not use\n"
+            "the server above. Start yours there, or point the backend at that one."
+        )
+        return 1
+    elif active:
+        print(f"engine     {active.summary()}  [found by probing]")
+        for model in active.models[:8]:
+            print(f"             {model}")
+        if len(active.models) > 8:
+            print(f"             ... and {len(active.models) - 8} more")
+    elif configured_base:
+        print(f"engine     NOT REACHABLE at {configured_base}  [configured]")
+        print("\nNothing answered there, and nothing answered on:")
+        for url in found["probed"]:
+            print(f"  {url}")
+        return 1
     elif found["hosted_credentials"]:
         print("engine     none local; a hosted API key is present")
     else:

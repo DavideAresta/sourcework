@@ -14,6 +14,7 @@ LM Studio".
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
@@ -109,7 +110,13 @@ def detect(timeout: float = PROBE_TIMEOUT_S) -> Engine | None:
     """
     from sourcework.config import settings
 
-    configured = settings().llm.api_base
+    # The endpoint the *active backend* will use, not `api_base` alone. Reading
+    # only the latter meant an installation on llama-cpp (or azure, or openai)
+    # had no configured endpoint as far as this function was concerned, so it
+    # fell through to the candidate list and reported whatever else was
+    # listening - a server the run would never call. See
+    # `LLMSettings.endpoint_for`.
+    configured = settings().llm.endpoint_for()
     if configured:
         # The configured base already ends in /v1 by convention, so the model
         # list hangs directly off it.
@@ -154,11 +161,70 @@ def report(timeout: float = PROBE_TIMEOUT_S) -> dict[str, object]:
 
     cfg = settings().llm
     engine = detect(timeout)
+    configured = cfg.endpoint_for()
     return {
         "engine": engine,
         "backend": cfg.active_backend,
-        "configured_base": cfg.api_base,
+        "configured_base": configured,
+        # Stated separately from `engine`, because "something answered" and
+        # "the thing you configured answered" are different facts and only the
+        # second one predicts whether a run will work. When they disagree, the
+        # caller has to say so rather than present the stand-in as the answer.
+        "configured_reachable": bool(engine and engine.configured),
         "hosted_credentials": has_hosted_credentials(),
         "roles": {role: cfg.model_for(role) for role in ("default", "reasoning", "vision", "critic")},
         "probed": [c.base_url for c in CANDIDATES],
     }
+
+
+async def preflight(timeout: float = PROBE_TIMEOUT_S) -> str | None:
+    """Why no configured backend can answer this run, or None if one can.
+
+    Run once, before a run touches a source. Without it the first thing a dead
+    model server meets is the extraction of source 1, which spends
+    ``litellm_retries`` attempts at ``timeout_s`` each discovering that nothing
+    is listening, and then does it again for sources 2 to 5 - so "the server is
+    not running" arrives as a wall of stack traces many minutes late. The
+    information was available in two seconds.
+
+    Deliberately conservative: it reports a problem only when *every* backend in
+    the chain is ruled out, and only on evidence. A backend with no endpoint to
+    probe (the CLIs, bedrock, vertex) counts as usable whenever ``available()``
+    says so - guessing beyond that would block runs that would have worked,
+    which is a worse failure than the one this prevents.
+    """
+    from sourcework.backends import BackendUnavailableError, build, resolve_chain
+    from sourcework.config import effective_llm
+
+    cfg = effective_llm()
+    if cfg.active_backend == "stub":
+        return None
+
+    reasons: list[str] = []
+    for backend_id in resolve_chain(cfg):
+        try:
+            backend = build(backend_id, cfg)
+        except BackendUnavailableError as exc:
+            reasons.append(f"{backend_id}: {exc}")
+            continue
+
+        if not backend.available():
+            detail_for = getattr(backend, "unavailable_detail", None)
+            detail = detail_for() if callable(detail_for) else ""
+            reasons.append(f"{backend_id}: {detail or 'not usable here'}")
+            continue
+
+        endpoint = cfg.endpoint_for(backend_id)
+        if endpoint is None:
+            return None  # nothing to probe, and available() already said yes
+
+        # Off the loop: `probe` is synchronous httpx, and this runs inside the
+        # orchestrator's event loop alongside seven live A2A connections.
+        candidate = Candidate(backend_id, endpoint, endpoint.rstrip("/") + "/models")
+        if await asyncio.to_thread(probe, candidate, timeout) is not None:
+            return None
+        reasons.append(f"{backend_id}: nothing is listening at {endpoint}")
+
+    if not reasons:
+        return "no backend is configured for this run"
+    return "no configured backend can answer - " + "; ".join(reasons)

@@ -19,7 +19,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from sourcework import checkpoint, publishers, stream
+from sourcework import checkpoint, engine, publishers, stream
 from sourcework.a2a_common import AgentPool, RemoteAgentError
 from sourcework.agents.schemas import (
     AnalyseRequest,
@@ -173,6 +173,19 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
     if missing:
         raise RuntimeError(f"Required agents unreachable: {missing}. Found: {sorted(available)}")
     await say(f"Mesh online: {', '.join(f'{k}({len(v)})' for k, v in sorted(available.items()))}")
+
+    # The mesh answering says nothing about whether a model will. Checked here,
+    # before a single source is read, because the alternative is what this
+    # replaces: the first thing a dead model server meets is the extraction of
+    # source 1, which retries its way through the full timeout before failing,
+    # and then does it again for every remaining source. The same fact, many
+    # minutes later, wearing five stack traces.
+    unusable = await engine.preflight()
+    if unusable:
+        raise RuntimeError(
+            f"{unusable}. Nothing was read, so no evidence was lost - "
+            "start the model server (or pick a backend that is running) and run this again."
+        )
 
     # -- 1. expand Confluence queries into concrete inputs -----------------
     inputs = list(request.inputs)

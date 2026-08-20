@@ -339,6 +339,32 @@ class LLMSettings(BaseModel):
         api = API_BACKEND_IDS + ("llama-cpp",)
         return self.timeout_s if normalise_backend(backend) in api else self.cli_timeout_s
 
+    def endpoint_for(self, backend: str | None = None) -> str | None:
+        """The base URL ``backend`` will actually send its calls to.
+
+        Each backend reads a *different* setting for this - llama-cpp its own
+        :attr:`llama_cpp_api_base`, the named providers theirs - and everything
+        that wanted to say "here is where your models come from" was reading
+        :attr:`api_base` alone. That is the general litellm setting, and it is
+        empty on every installation that picked one of the others, so a probe
+        starting from it went looking for an endpoint nobody had configured and
+        reported whatever else happened to be listening. `sourcework doctor`
+        would name a server the run would never call.
+
+        None for the CLI backends, which have no endpoint: they start a process,
+        and `available()` checking for the binary is the equivalent question.
+        Bedrock and Vertex are None for the same reason - the SDK resolves a
+        regional host, so there is no single URL to state.
+        """
+        backend = normalise_backend(backend or self.active_backend)
+        base = {
+            "llama-cpp": self.llama_cpp_api_base,
+            "openai": self.openai_api_base,
+            "azure": self.azure_api_base,
+            "litellm": self.api_base,
+        }.get(backend)
+        return base or None
+
 
 class ConfluenceSettings(BaseModel):
     base_url: str = "https://example.atlassian.net/wiki"

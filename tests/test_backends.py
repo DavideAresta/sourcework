@@ -38,7 +38,7 @@ from sourcework.backends.codex import parse_events as codex_events
 from sourcework.backends.copilot import CopilotBackend
 from sourcework.backends.copilot import parse_events as copilot_events
 from sourcework.backends.opencode import OpenCodeBackend, parse_events
-from sourcework.config import LLMSettings
+from sourcework.config import LLMSettings, settings
 
 PIXEL = base64.b64encode(bytes.fromhex("89504e470d0a1a0a")).decode()
 
@@ -1658,3 +1658,70 @@ def test_the_settings_page_still_renders_when_the_model_server_is_down(monkeypat
 
     monkeypatch.setattr(httpx, "get", refuse)
     assert LiteLLMBackend(api_base="http://127.0.0.1:8081/v1").list_models() == []
+
+
+# ---------------------------------------------------------------------------
+# Which endpoint is actually in force, and saying so before a run starts
+# ---------------------------------------------------------------------------
+
+
+def test_each_backend_reports_the_endpoint_it_will_really_call():
+    """`api_base` is the general litellm setting and is empty on an install that
+    picked one of the others.
+
+    Everything wanting to say "here is where your models come from" read that
+    one field, so on a llama-cpp install it found no configured endpoint, probed
+    the conventional ports instead, and reported whatever else was listening -
+    `sourcework doctor` naming a healthy server while every run failed against a
+    different, dead one.
+    """
+    assert LLMSettings(
+        backend="llama-cpp", llama_cpp_api_base="http://127.0.0.1:8081/v1"
+    ).endpoint_for() == "http://127.0.0.1:8081/v1"
+    assert LLMSettings(
+        backend="openai", openai_api_base="http://gw/v1"
+    ).endpoint_for() == "http://gw/v1"
+    assert LLMSettings(backend="litellm", api_base="http://gw/v1").endpoint_for() == "http://gw/v1"
+    # No endpoint to state: the CLIs start a process, and bedrock/vertex let the
+    # SDK resolve a regional host. None means "do not probe", not "unreachable".
+    assert LLMSettings(backend="claude-code").endpoint_for() is None
+    assert LLMSettings(backend="bedrock").endpoint_for() is None
+
+
+async def test_a_dead_model_server_is_reported_before_any_source_is_read(monkeypatch):
+    """The pre-flight must fail on evidence, in seconds, naming the endpoint.
+
+    Without it the first thing a dead server meets is the extraction of source
+    1, which spends its retries at the full timeout discovering nothing is
+    listening and then repeats that for every remaining source. The user sees
+    "extraction failed on 5 of 5 sources" many minutes later, when the fact was
+    available immediately.
+    """
+    from sourcework import engine
+
+    monkeypatch.setenv("SOURCEWORK_LLM__STUB", "0")
+    monkeypatch.setenv("SOURCEWORK_LLM__BACKEND", "llama-cpp")
+    # Port 1 is privileged and unbound: nothing can be listening there.
+    monkeypatch.setenv("SOURCEWORK_LLM__LLAMA_CPP_API_BASE", "http://127.0.0.1:1/v1")
+    settings.cache_clear()
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/llama-server")
+
+    reason = await engine.preflight(timeout=0.2)
+    assert reason is not None
+    assert "http://127.0.0.1:1/v1" in reason
+    settings.cache_clear()
+
+
+async def test_the_pre_flight_never_blocks_a_run_it_cannot_rule_out():
+    """It reports only when every backend in the chain is ruled out, on
+    evidence.
+
+    A pre-flight that guesses is worse than none: blocking a run that would have
+    worked costs more than the minutes the check was added to save. Stub mode
+    has no server by definition, and a CLI backend has no endpoint to probe -
+    neither is a reason to refuse.
+    """
+    from sourcework import engine
+
+    settings.cache_clear()
+    assert await engine.preflight(timeout=0.2) is None  # conftest pins stub mode

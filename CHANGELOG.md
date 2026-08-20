@@ -76,6 +76,26 @@ change belongs to.
   that hung rather than refusing could hold a 30-second-polled status pill for
   the better part of an hour. It now probes all eight at once with three seconds
   of patience.
+- **A dead model server is reported before a run reads anything.** The pipeline
+  now asks once, after mesh discovery and before the first source, whether any
+  backend in the failover chain can actually answer — a two-second check. What
+  it replaces: the first thing an unreachable server met was the extraction of
+  source 1, which spent its retries at the full `timeout_s` discovering nothing
+  was listening, then repeated that for every remaining source, so "the server
+  is not running" arrived many minutes late wearing five stack traces. It
+  reports only when *every* backend is ruled out and only on evidence — stub
+  mode, CLI backends and reachable endpoints all pass — because blocking a run
+  that would have worked costs more than the minutes this saves.
+- **`sourcework doctor` names the endpoint your backend will really call.**
+  Everything asking "where do the models come from" read `SOURCEWORK_LLM__API_BASE`,
+  which is the general litellm setting and is empty on any install that picked
+  llama-cpp, azure or openai. So the probe found no configured endpoint, fell
+  through to the conventional ports, and reported whatever else happened to be
+  listening — doctor announcing a healthy server on one port while every run
+  failed against a dead one on another. `LLMSettings.endpoint_for()` now gives
+  the endpoint in force per backend, and doctor states plainly when the
+  configured one is unreachable and something else answered, without dressing
+  the stand-in up as the answer.
 - **`docker compose up` works again, and the mesh it starts can reach itself.**
   Two separate faults in the compose files, neither covered by any test. The
   `ui` service carried two `command:` keys — the second added to make the
