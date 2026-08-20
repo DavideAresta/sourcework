@@ -105,12 +105,21 @@ def build(backend_id: str, cfg: LLMSettings) -> LLMBackend:
             def unavailable_detail(self) -> str:
                 return "" if which("llama-server") else "llama-server is not installed or is not on PATH"
 
+            #: Which source the last :meth:`list_models` answered from. The
+            #: distinction is the difference between "you can pick this now" and
+            #: "this is a file on your disk that nothing is serving", and the
+            #: page had no way to tell them apart - so an unreachable backend
+            #: showed twenty-one models and looked more ready than a live one.
+            models_from = ""
+
             def list_models(self) -> list[str]:
                 # A running server is authoritative: llama-swap may serve
                 # models that are downloaded on demand and are not on disk yet.
                 served = super().list_models()
                 if served:
+                    self.models_from = "server"
                     return served
+                self.models_from = "disk"
 
                 # When the server is down, still make the Settings picker useful
                 # by discovering the GGUFs the configured scanner will serve.
@@ -188,6 +197,52 @@ def resolve_chain(cfg: LLMSettings, *, needs_vision: bool = False) -> list[str]:
     return chain
 
 
+_REACHABLE_TTL_S = 30.0
+"""How long a reachability answer is reused.
+
+Long enough that opening the settings page twice does not probe twice, short
+enough that starting your model server and refreshing tells you so. The check
+this caches is one GET; the reason it is cached at all is that `probe` runs on
+every page load, which is the same constraint that kept `available()` from
+probing in the first place.
+"""
+
+_reachable_cache: dict[str, tuple[float, bool]] = {}
+
+
+def _reachable(endpoint: str, timeout: float = 2.0) -> bool:
+    """Does anything answer at ``endpoint``? Cached for :data:`_REACHABLE_TTL_S`."""
+    import time
+
+    now = time.monotonic()
+    hit = _reachable_cache.get(endpoint)
+    if hit is not None and now - hit[0] < _REACHABLE_TTL_S:
+        return hit[1]
+
+    import httpx
+
+    try:
+        response = httpx.get(endpoint.rstrip("/") + "/models", timeout=timeout)
+        answered = response.status_code < 500
+    except Exception as exc:  # noqa: BLE001 - every failure means "not answering"
+        logger.debug("nothing answering at %s: %s", endpoint, exc)
+        answered = False
+
+    _reachable_cache[endpoint] = (now, answered)
+    return answered
+
+
+def _model_source(backend: object, models: list[str], endpoint: str | None) -> str:
+    """Where ``models`` came from, so the picker can stop implying they are live."""
+    if not models:
+        return ""
+    # llama-cpp knows: it tries the server and falls back to scanning disk.
+    declared = getattr(backend, "models_from", "")
+    if declared:
+        return str(declared)
+    return "server" if endpoint else "cli"
+
+
 def probe(cfg: LLMSettings, *, allowed: tuple[str, ...] | None = None) -> list[dict[str, object]]:
     """Local availability of the known backends, for the ``backends`` command
     and the settings page.
@@ -206,11 +261,26 @@ def probe(cfg: LLMSettings, *, allowed: tuple[str, ...] | None = None) -> list[d
             rows.append({"id": backend_id, "available": False, "detail": str(exc), "models": []})
             continue
         available = backend.available()
+        models = backend.list_models() if available else []
+        # `available` answers "could this run here" - a binary on PATH, a
+        # library importable - and deliberately says nothing about whether a
+        # server is up. Read as a green light it promised far more than it
+        # checked: llama-server on PATH and twenty-one GGUFs on disk rendered as
+        # "available" while nothing was listening and every run failed.
+        endpoint = cfg.endpoint_for(backend_id)
         row: dict[str, object] = {
             "id": backend_id,
             "available": available,
+            # True/False for a backend that has an endpoint to ask; None for one
+            # that has none, where `available` really is the whole story.
+            "reachable": (_reachable(endpoint) if available else False) if endpoint else None,
+            "endpoint": endpoint,
             "vision": backend.supports_vision,
-            "models": backend.list_models() if available else [],
+            "models": models,
+            # "server" - something is serving these right now. "disk" - they are
+            # files and nothing is serving them. "cli" - the coding CLI listed
+            # its own, which is neither. Empty when there are no models to place.
+            "models_from": _model_source(backend, models, endpoint),
             "configured_model": cfg.model_for("default", backend_id),
         }
         if not available and hasattr(backend, "unavailable_detail"):

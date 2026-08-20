@@ -273,6 +273,27 @@ async function suggestModels() {
   }
 }
 
+
+// Three states, because there are three. `available` answers "could this run
+// here" - a binary on PATH, a library importable - and says nothing about
+// whether a server is up; rendered as a green "available" it promised far more
+// than it checked, and a backend with llama-server installed and nothing
+// listening looked identical to a working one.
+function backendState(backend) {
+  if (!backend.available) return { pill: 'err', label: 'not here', why: backend.detail || '' };
+  // No endpoint to ask (the CLIs, bedrock, vertex): `available` really is the
+  // whole story there, so saying more would be inventing it.
+  if (backend.reachable === null || backend.reachable === undefined) {
+    return { pill: 'ok', label: 'available', why: '' };
+  }
+  if (backend.reachable) return { pill: 'ok', label: 'ready', why: '' };
+  return {
+    pill: 'warn',
+    label: 'not answering',
+    why: `installed, but nothing is listening at ${backend.endpoint}`,
+  };
+}
+
 async function loadBackends() {
   clear(backendsBox);
   try {
@@ -283,17 +304,26 @@ async function loadBackends() {
         data.failover_order.length ? ` · failover: ${data.failover_order.join(' → ')}` : ' · no failover configured'),
     );
     for (const backend of data.backends) {
+      const state = backendState(backend);
       backendsBox.append(
         el('div', { class: 'row', style: 'padding:5px 0;border-top:1px solid var(--line)' },
-          el('span', { class: `pill ${backend.available ? 'ok' : 'err'}` },
-            el('span', { class: 'dot' }), backend.available ? 'available' : 'not here'),
+          el('span', { class: `pill ${state.pill}`, title: state.why },
+            el('span', { class: 'dot' }), state.label),
           el('span', { class: 'mono' }, backend.id),
           el('span', { class: 'small muted' }, backend.vision ? 'vision' : 'text-only'),
+          // Where the model list came from. A picker full of GGUFs that nothing
+          // is serving looks exactly like one backed by a live server, and it
+          // was the more convincing of the two - twenty-one entries against a
+          // running server's handful.
+          backend.models_from === 'disk'
+            ? el('span', { class: 'small ink-warn', title: 'files on disk; nothing is serving them' },
+                `${backend.models.length} on disk`)
+            : null,
           el('span', { style: 'flex:1' }),
           el('span', { class: 'small muted' },
-            backend.detail
-              ? backend.detail
-              : backend.configured_model ? `model: ${backend.configured_model}` : 'backend default'),
+            state.why
+              || backend.detail
+              || (backend.configured_model ? `model: ${backend.configured_model}` : 'backend default')),
         ),
       );
     }

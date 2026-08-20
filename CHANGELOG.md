@@ -76,6 +76,20 @@ change belongs to.
   that hung rather than refusing could hold a 30-second-polled status pill for
   the better part of an hour. It now probes all eight at once with three seconds
   of patience.
+- **The backend list stops calling an unreachable backend "available".** That
+  word answered a narrower question than it looked like: `available()` is
+  deliberately network-free — a binary on PATH, a library importable — and says
+  nothing about whether a server is up. So llama-cpp showed a green pill on a
+  machine where `llama-server` was installed, nothing was listening, and every
+  run failed. The model list made it more convincing still: with the server
+  down, `list_models()` falls back to scanning GGUFs on disk, so the picker
+  offered **21** models where a live server would have listed a handful. Rows
+  now carry `reachable` (True/False, or None for the CLIs and bedrock/vertex,
+  which have no endpoint to ask) and `models_from` (`server`, `disk` or `cli`),
+  and the page renders three states — ready, **installed, not answering**, not
+  here — with disk-scanned models labelled as such. The probe is cached for 30s,
+  because `probe()` runs on every page load and that is the same constraint
+  which kept `available()` from checking in the first place.
 - **A dead model server is reported before a run reads anything.** The pipeline
   now asks once, after mesh discovery and before the first source, whether any
   backend in the failover chain can actually answer — a two-second check. What

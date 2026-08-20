@@ -107,10 +107,15 @@ export function newRunView(onStarted) {
       modelRow.append(field(roleLabel(role), input, roleHelp(role)));
     }
     for (const b of data.backends) {
-      backend.append(el('option', {
-        value: b.id,
-        disabled: !b.available,
-      }, b.available ? b.id : `${b.id} — not available here`));
+      // Not answering is not the same as not installed, and it is the more
+      // useful thing to say: the backend is here, you can still pick it, and
+      // the run will fail in seconds rather than in minutes if you do. Left
+      // selectable on purpose - you may be about to start the server.
+      const dead = b.available && b.reachable === false;
+      const label = !b.available
+        ? `${b.id} — not available here`
+        : dead ? `${b.id} — installed, not answering` : b.id;
+      backend.append(el('option', { value: b.id, disabled: !b.available }, label));
     }
     backend.value = '';
     describeBackend();

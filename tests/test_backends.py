@@ -1725,3 +1725,71 @@ async def test_the_pre_flight_never_blocks_a_run_it_cannot_rule_out():
 
     settings.cache_clear()
     assert await engine.preflight(timeout=0.2) is None  # conftest pins stub mode
+
+
+async def test_an_installed_backend_with_nothing_listening_is_not_reported_ready(monkeypatch):
+    """`available` and `reachable` are different questions, and the page needs
+    both.
+
+    `available()` is deliberately network-free - a binary on PATH, a library
+    importable - and says nothing about whether a server is up. Rendered as a
+    single green light it promised far more than it checked: llama-server on
+    PATH and twenty-one GGUFs found on disk showed as "available", listing more
+    models than a live server would, while nothing was listening and every run
+    failed. The models have to carry their source for the same reason.
+    """
+    from sourcework import backends
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/llama-server")
+    backends._reachable_cache.clear()
+    # Port 1 is privileged and unbound, so nothing can answer there.
+    cfg = LLMSettings(backend="llama-cpp", llama_cpp_api_base="http://127.0.0.1:1/v1")
+    monkeypatch.setattr(backends, "_reachable", lambda endpoint, timeout=2.0: False)
+
+    row = next(r for r in backends.probe(cfg, allowed=("llama-cpp",)) if r["id"] == "llama-cpp")
+    assert row["available"] is True       # the binary really is here
+    assert row["reachable"] is False      # and it really is not answering
+    assert row["endpoint"] == "http://127.0.0.1:1/v1"
+    if row["models"]:
+        assert row["models_from"] == "disk"
+
+
+def test_a_backend_with_no_endpoint_is_never_called_unreachable(monkeypatch):
+    """The CLIs, bedrock and vertex have no single URL to ask.
+
+    `reachable` is None there rather than False, because "we did not check" and
+    "we checked and nothing answered" must not render as the same warning - one
+    of them would be an invented failure on a backend that works.
+    """
+    from sourcework import backends
+
+    monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+    rows = {r["id"]: r for r in backends.probe(LLMSettings(backend="claude-code"),
+                                               allowed=("claude-code",))}
+    assert rows["claude-code"]["reachable"] is None
+    assert rows["claude-code"]["endpoint"] is None
+    if rows["claude-code"]["models"]:
+        # Its own list, which is neither a server's nor a directory listing.
+        assert rows["claude-code"]["models_from"] == "cli"
+
+
+def test_reachability_is_not_re_probed_on_every_page_load(monkeypatch):
+    """`probe` runs on every settings-page and run-form load.
+
+    That is the same constraint that kept `available()` from probing at all, so
+    the answer is cached rather than the check abandoned.
+    """
+    from sourcework import backends
+
+    calls = []
+
+    def counting_get(url, **kwargs):
+        calls.append(url)
+        raise OSError("nothing there")
+
+    monkeypatch.setattr("httpx.get", counting_get)
+    backends._reachable_cache.clear()
+    for _ in range(3):
+        backends._reachable("http://127.0.0.1:1/v1")
+    assert len(calls) == 1
+    backends._reachable_cache.clear()
