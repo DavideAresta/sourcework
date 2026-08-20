@@ -82,6 +82,10 @@ export function runView(runId, { onChanged }) {
   let seen = new Set();
   let lastRun = null;
   let lastMinute = null;
+  // True only while `load` is pushing the stored events through `line`. Those
+  // are history: they must fill the log and advance the rail, but they must not
+  // be mistaken for the run changing state under us.
+  let replaying = false;
 
   // The rail leads: it is the only thing on the page that answers "how far in
   // is this" without reading anything.
@@ -119,6 +123,18 @@ export function runView(runId, { onChanged }) {
     }
     if (seen.has(event.seq)) return;
     seen.add(event.seq);
+    // Every event carries the status it was emitted at. Without reading it here
+    // the header, the rail and the hero all keep rendering the status the page
+    // was *loaded* with — `lastRun` was fetched once and never touched again —
+    // so a run opened while it was `queued` displayed "queued" for its whole
+    // life, pulsing dot and all, while the log beside it scrolled. Replay is
+    // excluded because `load` has already drawn the run it just fetched, and
+    // replaying forty events would redraw the header for each one.
+    if (!replaying && event.status && event.status !== lastRun?.status) {
+      lastRun = { ...lastRun, status: event.status };
+      renderHeader(lastRun);
+      foldLog(lastRun);
+    }
     const nearBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
     // The rail is told, never told twice: `seen` already guards the replay.
     if (rail.sawMessage(event.message, event.kind)) rail.render(lastRun);
@@ -180,7 +196,9 @@ export function runView(runId, { onChanged }) {
     // it there would wipe the reasoning the moment it became worth reading.
     seen = new Set();
     lastMinute = null;
+    replaying = true;
     for (const event of run.events) line(event);
+    replaying = false;
     renderBody(run);
 
     if (run.active || run.status === 'running' || run.status === 'queued') {
@@ -190,6 +208,17 @@ export function runView(runId, { onChanged }) {
           narration.settle();
           setTimeout(load, 250);
         }
+      }, {
+        // The connection dropped and is being retried. The run row is the
+        // source of truth about what happened while we were not listening, so
+        // the header is redrawn from it rather than from the last event we
+        // happened to receive before the wire went.
+        onState: (fresh) => {
+          lastRun = fresh;
+          renderHeader(fresh);
+          foldLog(fresh);
+          rail.render(fresh);
+        },
       });
       stopTicking();
       narration.settle();

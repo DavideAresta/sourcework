@@ -321,6 +321,17 @@ FIELDS: tuple[Field, ...] = (
           help="Retries inside a single API call. Worth lowering for a local server, "
                "where the usual failure is a timeout: 3 attempts at a 20-minute "
                "ceiling is an hour spent learning the same thing once."),
+    Field("SOURCEWORK_MESH__READ_TIMEOUT_S", "Mesh silence timeout (s)", "Limits", "number",
+          help="How long one agent may say nothing before another treats it as gone. "
+               "Not a limit on how long a call may take: a working agent ticks every "
+               "15s whether or not it has anything to report, so reaching this means "
+               "the peer died. Leave it empty and it follows the timeouts above - "
+               "twice the longest call you allow. Set it only to make the mesh less "
+               "patient than that."),
+    Field("SOURCEWORK_MESH__CONNECT_TIMEOUT_S", "Mesh connect timeout (s)", "Limits", "number",
+          help="Opening the socket to another agent. Every peer is local or on the "
+               "same compose network, so a connection not made in ten seconds is not "
+               "going to be."),
 
     # -- Confluence --------------------------------------------------------
     Field("SOURCEWORK_CONFLUENCE__BASE_URL", "Base URL", "Confluence",

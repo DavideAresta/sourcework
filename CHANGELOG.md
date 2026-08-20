@@ -19,7 +19,67 @@ change belongs to.
 
 ### Added
 
-- Nothing yet.
+- **A working agent now says so every 15 seconds**, whether or not it has
+  anything to report (`a2a_common.executor.KEEPALIVE_INTERVAL_S`). Narration was
+  the only thing putting bytes on the A2A channel during a model call, and it is
+  opt-in, requested only for runs somebody is watching, and never emitted at all
+  by the litellm backend or the hosted providers built on it — so a nine-minute
+  analyst call was nine minutes of silence to every idle-connection clock
+  between the agent and the browser. The tick carries no message, so it cannot
+  appear as a line in anybody's progress log.
+- **The run event stream sends a heartbeat every 20 seconds** while a run has
+  nothing to say. It goes out as an SSE comment, which `EventSource` discards
+  without raising an event. nginx and an AWS ALB close an idle connection at
+  60s and Cloudflare at 100s, which is well inside a single pipeline stage.
+- **`SOURCEWORK_MESH__READ_TIMEOUT_S` and `SOURCEWORK_MESH__CONNECT_TIMEOUT_S`**,
+  both on the settings page. The read timeout is left empty by default and
+  derived from the LLM budgets — twice the longest call you allow, at least
+  600s — so raising `SOURCEWORK_LLM__TIMEOUT_S` for a slow local model server
+  raises the transport's patience with it instead of leaving the two to drift.
+
+### Fixed
+
+- **Runs no longer time out at ten minutes of thinking.** The mesh's HTTP client
+  set one flat 600-second timeout for connect, read, write and pool alike. On a
+  streaming response httpx applies the read timeout *per chunk*, so that was not
+  "a call may take ten minutes" but "ten minutes of silence ends this call" —
+  against work `SOURCEWORK_LLM__CLI_TIMEOUT_S` already permits to spend exactly
+  600 seconds in one attempt, before the empty-response retry, the schema
+  retries and the failover chain around it. Anyone who had raised
+  `SOURCEWORK_LLM__TIMEOUT_S` for a local model server was over the line before
+  a run started. The four clocks are now set separately, and connecting to a
+  peer fails in ten seconds rather than ten minutes.
+- **Cancelling a queued run leaves a record.** It used to leave none: the
+  cancellation landed while the run was still waiting for a slot, so the code
+  that writes a terminal status and closes the open streams never ran. The row
+  read `queued` for ever, every watching tab hung on work that was already dead,
+  and only a restart corrected it — filing it under "the UI restarted while this
+  run was in flight", which was not what happened.
+- **The run header, railway and hero follow the run.** They were rendered from
+  the run as fetched when the page loaded and never updated, so a run opened
+  while it was `queued` displayed "queued" for its whole life, pulsing dot and
+  all, while the log beside it scrolled. Every event already carried the status
+  it was emitted at; nothing read it.
+- **A dropped event stream reconnects.** It used to be fatal: the browser closed
+  the connection and re-read the run exactly once, so a run that was still going
+  left the page frozen on its last line with the elapsed clock stopped,
+  recoverable only by a manual reload. Reconnection is backed off, gives up when
+  the run turns out to have finished or been deleted, and re-syncs the header
+  from the run row each time — replayed events are already filtered by `seq`.
+- **Opening the settings page no longer freezes a run in another tab.**
+  `/api/backends` ran the backend probe on the event loop, and that probe shells
+  out to every CLI backend with a 30-second ceiling apiece and opens a socket to
+  the local model server. For as long as the slowest one took, nothing else on
+  the server progressed — including the SSE streams feeding every watched run.
+- **The mesh indicator answers like a health check.** It borrowed the pool's
+  run-length timeouts and probed the eight agents one after another, so a host
+  that hung rather than refusing could hold a 30-second-polled status pill for
+  the better part of an hour. It now probes all eight at once with three seconds
+  of patience.
+- **The event stream tears down cleanly when a browser navigates away.** The
+  `end` frame was emitted from a `finally`, which on generator close raises
+  `async generator ignored GeneratorExit` — over a connection with nobody left
+  to read the frame.
 
 ## [0.4.0] — 2026-08-18
 

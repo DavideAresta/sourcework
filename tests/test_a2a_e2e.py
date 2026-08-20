@@ -202,6 +202,108 @@ async def test_mesh_status_skill(mesh):
 # ---------------------------------------------------------------------------
 
 
+async def test_a_working_agent_says_so_even_with_nothing_to_say(monkeypatch):
+    """An agent must put bytes on the wire while a handler is thinking.
+
+    Narration is the other thing that does, and it is not enough: it is opt-in,
+    requested only for runs somebody is watching, and never emitted at all by
+    the litellm backend or the hosted providers built on it. So a model call was
+    minutes of total silence, which is exactly what httpx's read timeout and
+    every reverse proxy's `proxy_read_timeout` are built to kill.
+    """
+    from sourcework.a2a_common import executor as ex
+
+    monkeypatch.setattr(ex, "KEEPALIVE_INTERVAL_S", 0.02)
+    beats: list[object] = []
+
+    class Updater:
+        async def update_status(self, state, message=None):  # noqa: ANN001, ANN202
+            beats.append(message)
+
+    async with ex._keepalive(Updater()):
+        await asyncio.sleep(0.12)
+
+    assert len(beats) >= 3
+    # Messageless on purpose: `AgentPool.call` forwards only status updates that
+    # carry a message, so this can never surface as a line in anyone's progress
+    # log. It is there to be *bytes*, not to be read.
+    assert all(message is None for message in beats)
+
+
+async def test_a_keepalive_that_fails_does_not_take_the_run_with_it(monkeypatch):
+    """A missed beat is worth strictly less than a run, so it is swallowed.
+
+    The same rule narration follows: this is called from a background task
+    alongside work that has already cost minutes and tokens, and letting it
+    raise would throw that away to report a lost frame.
+    """
+    from sourcework.a2a_common import executor as ex
+
+    monkeypatch.setattr(ex, "KEEPALIVE_INTERVAL_S", 0.01)
+
+    class Broken:
+        async def update_status(self, state, message=None):  # noqa: ANN001, ANN202
+            raise RuntimeError("the event queue is gone")
+
+    done = False
+    async with ex._keepalive(Broken()):
+        await asyncio.sleep(0.05)
+        done = True
+    assert done is True
+
+
+def test_the_transport_outlasts_the_longest_call_it_has_to_carry():
+    """The mesh read timeout is a ceiling on *silence*, and has to sit above the
+    longest a single call may legitimately be silent for.
+
+    They used to be the same number: a flat ``httpx.AsyncClient(timeout=600.0)``
+    against ``llm.cli_timeout_s = 600``. The transport therefore gave up at the
+    exact moment a CLI backend was still entitled to be thinking, never mind the
+    empty-response retry, the schema retries and the failover chain wrapped
+    around it. Connecting is not thinking, and must fail fast instead.
+    """
+    from sourcework.a2a_common import AgentPool
+    from sourcework.config import settings
+
+    timeouts = AgentPool(registry={})._timeouts()
+    assert timeouts.read > settings().llm.cli_timeout_s
+    assert timeouts.read > settings().llm.timeout_s
+    assert timeouts.connect < timeouts.read
+
+
+async def test_every_peer_is_probed_at_once():
+    """Discovery must not cost the sum of the peers.
+
+    This is what the browser's mesh indicator calls every thirty seconds. Walked
+    sequentially, one host that hangs rather than refusing sets the latency of
+    the whole answer - and did it eight times over, at a connect timeout sized
+    for a model call.
+    """
+    from sourcework.a2a_common import AgentPool
+
+    pool = AgentPool(registry={f"a{i}": f"http://127.0.0.1:{9000 + i}" for i in range(8)})
+    in_flight = 0
+    peak = 0
+
+    async def slow_card(agent: str):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.05)
+            raise ConnectionError("nobody home")
+        finally:
+            in_flight -= 1
+
+    pool.card = slow_card
+    started = time.monotonic()
+    assert await pool.discover() == {}  # unreachable is still an answer
+    assert peak == 8
+    # Eight sequential 50ms probes would be 400ms; concurrently it is one.
+    assert time.monotonic() - started < 0.25
+
+
+
 @pytest.fixture
 def narrating_agent():
     """An agent whose only skill reports what the executor installed for it."""

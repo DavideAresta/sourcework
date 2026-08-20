@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from sourcework import __version__
 from sourcework.config import LLMOverrides, LLMSettings, effective_llm, llm_overrides, settings
 from sourcework.llm import LLM
-from sourcework.models import PRDRequest
+from sourcework.models import InputRef, PRDRequest
 from sourcework.ui import env_file
 from sourcework.ui.app import build_app
 from sourcework.ui.runner import RunManager
@@ -800,9 +800,121 @@ def test_the_page_and_static_assets_are_served(client: TestClient):
     assert health["version"] == __version__
 
 
+def test_the_event_stream_says_something_while_the_run_says_nothing(
+    tmp_path: Path, monkeypatch
+):
+    """A silent SSE connection is indistinguishable from a dead one.
+
+    A run has stretches with nothing to report - one analyst call is minutes of
+    a model thinking - and every proxy between this server and the browser
+    closes an idle connection long before that: nginx and an AWS ALB at 60s,
+    Cloudflare at 100s. Without a heartbeat the tab sees an error mid-run rather
+    than an end, and starts recovering from a run that is perfectly fine.
+
+    The run here says nothing for several heartbeat intervals and then finishes,
+    which is the shape of the real thing compressed into a fifth of a second.
+    """
+    monkeypatch.setattr("sourcework.ui.app.SSE_HEARTBEAT_S", 0.02)
+
+    class SlowManager(FakeManager):
+        async def subscribe(self, run_id: str):
+            await asyncio.sleep(0.2)  # many heartbeats' worth of nothing
+            yield {"seq": 0, "t": now_iso(), "kind": "done", "message": "Finished"}
+
+    monkeypatch.setattr("sourcework.ui.app.RunManager", SlowManager)
+    with TestClient(build_app(tmp_path), headers={"X-SourceWork-UI": "1"}) as client:
+        created = client.post("/api/runs", data={"request": json.dumps(
+            {"title": "Quiet", "notes": ["something to work from"]})})
+        body = client.get(f"/api/runs/{created.json()['id']}/events").text
+
+    # An SSE *comment*: EventSource discards it without raising an event, so no
+    # page code has to know this mechanism exists.
+    assert body.count(": heartbeat") >= 2
+    # And the beating did not displace either of the things that do matter.
+    assert '"message": "Finished"' in body
+    assert body.endswith("event: end\ndata: {}\n\n")
+
+
+def test_probing_backends_happens_off_the_event_loop(client: TestClient, monkeypatch):
+    """`probe` is synchronous: it shells out to every CLI backend, each with a
+    30-second ceiling of its own, and opens a socket to the local model server.
+
+    Run on the event loop it stops the entire server for as long as the slowest
+    CLI takes to answer - and the SSE streams feeding every watched run are on
+    that same loop, which is how opening the settings page froze a run in
+    another tab.
+    """
+    seen: dict[str, bool] = {}
+
+    def spy(cfg, *, allowed=None):  # noqa: ANN001, ARG001
+        # A worker thread has no running loop; the loop's own thread does. This
+        # is the guarantee, stated the only way that cannot drift.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            seen["on_loop"] = False
+        else:
+            seen["on_loop"] = True
+        return []
+
+    monkeypatch.setattr("sourcework.ui.app.probe", spy)
+    assert client.get("/api/backends").status_code == 200
+    assert seen["on_loop"] is False
+
+
 # ---------------------------------------------------------------------------
 # Run manager fan-out
 # ---------------------------------------------------------------------------
+
+
+async def test_cancelling_a_queued_run_still_writes_it_an_ending(tmp_path: Path):
+    """A run cancelled before it started must reach a terminal status and close
+    its streams.
+
+    If it does not, the row reads `queued` for ever - `_run_now` never ran, so
+    neither did the `finally` that ends a run - every watching tab hangs on work
+    that is already dead, and the only thing that ever corrects the record is a
+    restart, which then files it under "the UI restarted mid-run" instead.
+    """
+    store = RunStore(tmp_path / "runs.db")
+    manager = RunManager(store, max_concurrent=1)
+    request = PRDRequest(title="Queued", inputs=[InputRef(uri="inline:note", text="x")])
+    try:
+        # Hold the only slot, so the next run can never leave the queue.
+        async def hold() -> None:
+            async with manager._slots:
+                await asyncio.sleep(3600)
+
+        holder = asyncio.create_task(hold())
+        await asyncio.sleep(0.05)
+
+        run = await manager.start(request)
+        await asyncio.sleep(0.05)
+        assert (await store.get(run.id)).status == "queued"
+
+        closed = asyncio.Event()
+
+        async def watch() -> None:
+            async for _ in manager.subscribe(run.id):
+                pass
+            closed.set()  # the generator returning IS the stream closing
+
+        watcher = asyncio.create_task(watch())
+        await asyncio.sleep(0.05)
+
+        assert await manager.cancel(run.id) is True
+        await asyncio.sleep(0.1)
+
+        ended = await store.get(run.id)
+        assert ended.status == "cancelled"
+        assert ended.finished_at is not None
+        await asyncio.wait_for(closed.wait(), timeout=2)
+
+        holder.cancel()
+        watcher.cancel()
+    finally:
+        await manager.shutdown()
+        store.close()
 
 
 async def test_a_late_subscriber_gets_the_backlog_then_the_live_events(tmp_path: Path):

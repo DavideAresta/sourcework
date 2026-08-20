@@ -16,6 +16,7 @@ inlining bytes as base64 in the request - avoids the shared volume but puts a
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -38,6 +39,7 @@ from pydantic import BaseModel, Field, ValidationError
 # declaring it as a parameter) yields Starlette's class, and FastAPI's is a
 # *subclass* of it - so an isinstance check against FastAPI's silently drops
 # every uploaded file and the run proceeds with no sources.
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 
 from sourcework import __version__, audit, auth, checkpoint, readiness
@@ -57,6 +59,27 @@ STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 """Matches the ingest layer's own ceiling - rejecting here gives a clear error
 instead of one buried in a failed extraction."""
+
+SSE_HEARTBEAT_S = 20.0
+"""How often the event stream says something when the run does not.
+
+A run has long stretches with nothing to report - one analyst call can be ten
+minutes of a model thinking - and an SSE connection carrying no bytes is
+indistinguishable from a dead one to everything between here and the browser.
+nginx closes it at 60s (`proxy_read_timeout`), an AWS ALB at 60s, Cloudflare at
+100s; the tab then sees an error rather than an end.
+
+What goes out is an SSE *comment*: EventSource discards it without raising an
+event, so the page cannot tell this exists and no client code has to know.
+"""
+
+MESH_PROBE_TIMEOUT_S = 3.0
+"""Patience for the mesh indicator, which is not a run.
+
+The pool's own clocks are sized for an agent that thinks for minutes. The
+browser polls this every thirty seconds and draws a dot with it - it wants an
+answer or a failure now, and "unreachable" is a perfectly good answer.
+"""
 
 Authorizer = Callable[[Request, auth.Principal, str], Awaitable[bool]]
 """The second gate: having a principal is one thing, being *allowed* another.
@@ -629,13 +652,43 @@ def build_app(
             raise HTTPException(404, "no such run")
 
         async def events() -> AsyncIterator[str]:
+            # The subscription is pumped into a local queue rather than iterated
+            # directly, because the heartbeat needs a timeout and the only way
+            # to put a timeout on `anext()` is to cancel it - which throws into
+            # the generator, unwinds its `finally`, and tears down the very
+            # subscription we were waiting on. Cancelling a `Queue.get()` costs
+            # nothing.
+            outbox: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+            async def pump() -> None:
+                try:
+                    async for event in manager.subscribe(run_id):
+                        await outbox.put(event)
+                finally:
+                    outbox.put_nowait(None)
+
+            worker = asyncio.create_task(pump())
             try:
-                async for event in manager.subscribe(run_id):
+                while True:
+                    try:
+                        event = await asyncio.wait_for(outbox.get(), SSE_HEARTBEAT_S)
+                    except TimeoutError:
+                        yield ": heartbeat\n\n"
+                        continue
+                    if event is None:
+                        break
                     yield f"data: {json.dumps(event)}\n\n"
-            except asyncio.CancelledError:  # browser navigated away
-                raise
             finally:
-                yield "event: end\ndata: {}\n\n"
+                worker.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await worker
+            # Out here rather than in the `finally`, which is the other way this
+            # can be left: the browser navigating away closes the generator, and
+            # a `yield` while it is closing raises "async generator ignored
+            # GeneratorExit" - over a connection with nobody on the far end to
+            # read the frame anyway. `end` belongs only to the stream that
+            # actually ran out of events.
+            yield "event: end\ndata: {}\n\n"
 
         return StreamingResponse(
             events(),
@@ -781,7 +834,7 @@ def build_app(
 
     @app.get("/api/mesh", tags=["ops"])
     async def mesh() -> dict[str, Any]:
-        async with AgentPool() as pool:
+        async with AgentPool(timeout=MESH_PROBE_TIMEOUT_S) as pool:
             found = await pool.discover()
             return {
                 "agents": found,
@@ -793,10 +846,18 @@ def build_app(
     async def backends() -> dict[str, Any]:
         cfg = settings().llm
         allowed = settings_backend.allowed_backends
+        # Off the event loop. `probe` shells out to every CLI backend
+        # (`agy models`, `opencode models`, each with its own 30s ceiling) and
+        # opens a socket to the local model server - all of it synchronous. Run
+        # inline it stopped the entire server for as long as the slowest CLI
+        # took to answer, which is how opening the settings page froze a run
+        # someone was watching in another tab: the SSE stream feeding it is on
+        # this same loop.
+        rows = await run_in_threadpool(probe, cfg, allowed=allowed)
         return {
             "active": cfg.active_backend,
             "failover_order": cfg.failover_order,
-            "backends": probe(cfg, allowed=allowed),
+            "backends": rows,
             # Which backends this distribution offers, rather than a second
             # hand-written list: the run form and the settings page both need to
             # know whether any of the offered backends is a CLI (the copy about

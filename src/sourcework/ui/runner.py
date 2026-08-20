@@ -151,8 +151,38 @@ class RunManager:
         # Acquired before the row is read, so a queued run stays `queued` in the
         # store and the UI can say so honestly instead of showing it as running
         # while it waits.
-        async with self._slots:
-            await self._run_now(run_id, request)
+        try:
+            async with self._slots:
+                await self._run_now(run_id, request)
+        except asyncio.CancelledError:
+            # Cancelled *while still waiting for a slot*, which used to leave no
+            # trace at all: `_run_now` never ran, so neither did the `finally`
+            # that writes the terminal status and closes the open streams. The
+            # row read `queued` for ever, every watching tab hung on a run that
+            # was already dead, and the only thing that ever corrected it was a
+            # restart - which then filed it under the wrong reason entirely.
+            await self._abandon_queued(run_id)
+            raise
+
+    async def _abandon_queued(self, run_id: str) -> None:
+        """Close the books on a run cancelled before it ever started.
+
+        Guarded on the status rather than on where the cancellation arrived,
+        because only the queued case is ours to finish: once `_run_now` owns the
+        run it writes its own ending, and a second one from out here would
+        overwrite it.
+        """
+        run = await self.store.get(run_id)
+        if run is None or run.status != "queued":
+            return
+        run.status = "cancelled"
+        run.error = "Cancelled before it started."
+        run.finished_at = now_iso()
+        # Emitted, not just saved: a tab watching this run is blocked on the
+        # event queue and will not re-read the store on its own.
+        await self._emit(run, "error", "Cancelled")
+        await self._publish(run_id, None)  # close open streams
+        self._tasks.pop(run_id, None)
 
     async def _run_now(self, run_id: str, request: PRDRequest) -> None:
         run = await self.store.get(run_id)

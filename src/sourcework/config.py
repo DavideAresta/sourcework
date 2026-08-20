@@ -370,6 +370,59 @@ class PeerSettings(BaseModel):
         return self.model_dump()
 
 
+class MeshSettings(BaseModel):
+    """How long this process waits on another agent in the mesh.
+
+    Separate from :class:`LLMSettings` because these are transport clocks, not
+    model clocks: they bound how long a *connection* may be quiet, never how
+    long a model may think.
+    """
+
+    connect_timeout_s: float = 10.0
+    """Opening the socket, writing to it, and taking a connection from the pool.
+
+    Every peer is either on this machine or on the same compose network, so a
+    connection that has not been made in ten seconds is not going to be. This
+    used to share the read timeout's ten minutes, which meant an unreachable
+    agent - a wrong hostname, a firewalled port - held the caller for the length
+    of a whole run before admitting it."""
+
+    read_timeout_s: float | None = None
+    """The longest an agent may say *nothing* before we treat it as gone.
+    Unset (the default) derives it - see :meth:`read_timeout_for`.
+
+    httpx applies its read timeout per chunk, so on the A2A stream this is a
+    ceiling on silence rather than on the call. That distinction was the bug: at
+    the old flat 600s the transport gave up at exactly the moment
+    :attr:`LLMSettings.cli_timeout_s` still permitted a single CLI call to be
+    thinking, and long before the retries and failover around it were spent.
+
+    Set this only to make the mesh *less* patient than the derived value. Making
+    it more patient than the calls it carries is the derivation's job, and doing
+    it by hand is how the two drift apart again."""
+
+    def read_timeout_for(self, llm: LLMSettings) -> float:
+        """A silence ceiling that cannot be lower than the work it has to carry.
+
+        Derived rather than defaulted, because a fixed number is the bug in a
+        different costume: this project ships a 180s API budget and a 600s CLI
+        one, and the first person to point it at a local model server raises
+        :attr:`LLMSettings.timeout_s` to twenty minutes - at which point any
+        constant chosen here is below the calls again, and a slow analyst once
+        more looks exactly like a dead one.
+
+        The factor is headroom, not a second budget. Two conditions have to fail
+        together to reach this: the peer stops sending
+        :data:`~sourcework.a2a_common.executor.KEEPALIVE_INTERVAL_S` ticks
+        *and* the call it is making runs to its own timeout. What is left is a
+        peer that is genuinely gone, which is the only thing this should ever
+        report.
+        """
+        if self.read_timeout_s is not None:
+            return self.read_timeout_s
+        return max(600.0, max(llm.timeout_s, llm.cli_timeout_s) * 2)
+
+
 class RunsSettings(BaseModel):
     """The UI's run history."""
 
@@ -525,6 +578,7 @@ class Settings(BaseSettings):
     security: SecuritySettings = Field(default_factory=SecuritySettings)
     quality: QualitySettings = Field(default_factory=QualitySettings)
     runs: RunsSettings = Field(default_factory=RunsSettings)
+    mesh: MeshSettings = Field(default_factory=MeshSettings)
 
     max_concurrent_runs: int = 2
     """Runs executing at once; the rest queue.

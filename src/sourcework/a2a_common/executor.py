@@ -16,10 +16,11 @@ protobuf.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import traceback
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from a2a.helpers import new_task, new_text_message
@@ -41,6 +42,56 @@ Handler = Callable[..., Awaitable[BaseModel]]
 
 class SkillError(RuntimeError):
     """Raised by handlers for an expected, user-facing failure."""
+
+
+KEEPALIVE_INTERVAL_S = 15.0
+"""How often a working agent says "still here" while a handler runs.
+
+The update carries no message, so nothing downstream shows it: the client
+forwards only status updates that have one, and the browser never learns this
+exists. What it carries is *bytes*, and bytes on the wire are the only thing
+that distinguishes a model thinking for nine minutes from a peer that died.
+
+Without it the mesh was silent for the length of every model call, because
+narration - the other thing that puts bytes on this channel - is opt-in, is only
+requested for runs somebody is watching, and is never emitted at all by the
+litellm backend and the hosted providers built on it. Every idle-connection
+clock between the agent and the reader then measured that silence and drew the
+obvious wrong conclusion: httpx's read timeout, and every reverse proxy's
+`proxy_read_timeout`.
+
+Fifteen seconds is well inside the tightest of those defaults (60s) and costs one
+small frame per agent per interval.
+"""
+
+
+@contextlib.asynccontextmanager
+async def _keepalive(updater: TaskUpdater) -> AsyncIterator[None]:
+    """Tick ``TASK_STATE_WORKING`` at the caller for the length of the block.
+
+    Cancelled on the way out, before the handler's own terminal update: the
+    updater refuses to publish anything once a terminal state is reached, and a
+    beat racing `complete()` would raise into the beat task rather than into
+    anything that matters. Failures are logged and end the beating, never the
+    run - the same rule narration follows, for the same reason.
+    """
+
+    async def beat() -> None:
+        while True:
+            await asyncio.sleep(KEEPALIVE_INTERVAL_S)
+            try:
+                await updater.update_status(TaskState.TASK_STATE_WORKING)
+            except Exception:  # noqa: BLE001 - a missed beat is never worth a run
+                logger.debug("keepalive beat failed", exc_info=True)
+                return
+
+    task = asyncio.create_task(beat())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 class Progress:
@@ -139,12 +190,15 @@ class SkillExecutor(AgentExecutor):
 
         try:
             with llm_overrides(overrides), usage.track(skill_id or "") as ledger:
-                if narrator is None:
-                    result = await self._invoke(handler, payload, Progress(updater))
-                else:
-                    async with narrator:
-                        with stream_to(narrator.sink):
-                            result = await self._invoke(handler, payload, Progress(updater))
+                # Outside the narrator, so it covers the calls narration cannot:
+                # an unwatched mesh call, and any backend that does not stream.
+                async with _keepalive(updater):
+                    if narrator is None:
+                        result = await self._invoke(handler, payload, Progress(updater))
+                    else:
+                        async with narrator:
+                            with stream_to(narrator.sink):
+                                result = await self._invoke(handler, payload, Progress(updater))
         except SkillError as exc:
             logger.warning("skill %s rejected input: %s", skill_id, exc)
             await updater.failed(new_text_message(str(exc), role=Role.ROLE_AGENT))

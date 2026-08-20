@@ -51,8 +51,16 @@ class AgentPool:
         *,
         llm: LLMOverrides | None = None,
         narrate: bool = False,
+        timeout: float | None = None,
     ) -> None:
         self.registry = registry or settings().peers.as_map()
+        self._timeout = timeout
+        """A flat override for callers that are not driving a run.
+
+        A health check polled every thirty seconds has nothing in common with a
+        pipeline call that waits on a model: it wants an answer or a failure
+        within a second or two. Left None, the pool uses the mesh's own clocks
+        (:meth:`_timeouts`)."""
         self.usage = UsageLedger()
         """Everything every agent reported spending on this pool's calls. The
         pool is the only object that spans a whole run, which makes it the
@@ -103,11 +111,45 @@ class AgentPool:
 
     # -- discovery ---------------------------------------------------------
 
+    def _timeouts(self) -> httpx.Timeout:
+        """Four clocks, where there used to be one number for all of them.
+
+        ``httpx.AsyncClient(timeout=600.0)`` set connect, read, write and pool
+        alike, and so made two opposite mistakes at once.
+
+        Ten minutes to notice an unreachable peer is nine and a half too many -
+        that is the connect side, and it is why the UI's mesh indicator could
+        hang for the length of a run.
+
+        The read side was worse. On a streaming response httpx applies the read
+        timeout *per chunk*, so 600s did not mean "this call may take ten
+        minutes"; it meant "ten minutes of silence ends this call". Against work
+        that :attr:`LLMSettings.cli_timeout_s` already permits to spend exactly
+        600 seconds in a single attempt - times ``empty_retries``, times
+        ``max_retries``, times the length of the failover chain - the transport
+        was given less rope than the thing it had to carry, and a slow analyst
+        was indistinguishable from a dead one.
+
+        Both halves now come from :class:`~sourcework.config.MeshSettings`, and
+        the silence they measure is the silence
+        :data:`sourcework.a2a_common.executor.KEEPALIVE_INTERVAL_S` exists to
+        prevent.
+        """
+        if self._timeout is not None:
+            return httpx.Timeout(self._timeout)
+        cfg = settings()
+        return httpx.Timeout(
+            connect=cfg.mesh.connect_timeout_s,
+            read=cfg.mesh.read_timeout_for(cfg.llm),
+            write=cfg.mesh.connect_timeout_s,
+            pool=cfg.mesh.connect_timeout_s,
+        )
+
     def _http(self) -> httpx.AsyncClient:
         if self._httpx is None:
             sec = settings().security
             headers = {sec.header: sec.api_key} if sec.enforce else {}
-            self._httpx = httpx.AsyncClient(timeout=600.0, headers=headers)
+            self._httpx = httpx.AsyncClient(timeout=self._timeouts(), headers=headers)
         return self._httpx
 
     async def client(self, agent: str) -> Client:
@@ -132,14 +174,23 @@ class AgentPool:
         return self._cards[agent]
 
     async def discover(self) -> dict[str, list[str]]:
-        """Return ``{agent: [skill ids]}`` for everything reachable."""
+        """Return ``{agent: [skill ids]}`` for everything reachable.
+
+        All eight at once. Sequentially, the answer took as long as the sum of
+        the peers, so one host that hangs rather than refusing set the latency
+        of a status indicator the browser polls every thirty seconds - and did
+        it eight times over. Concurrently it costs the slowest single peer.
+        """
+        names = list(self.registry)
+        cards = await asyncio.gather(
+            *(self.card(name) for name in names), return_exceptions=True
+        )
         found: dict[str, list[str]] = {}
-        for name in self.registry:
-            try:
-                card = await self.card(name)
-                found[name] = [s.id for s in card.skills]
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("agent %s unreachable: %s", name, exc)
+        for name, card in zip(names, cards, strict=True):
+            if isinstance(card, BaseException):
+                logger.warning("agent %s unreachable: %s", name, card)
+                continue
+            found[name] = [s.id for s in card.skills]
         return found
 
     # -- cancellation ------------------------------------------------------

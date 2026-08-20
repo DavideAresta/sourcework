@@ -66,17 +66,54 @@ export const api = {
   artifactUrl: (id, kind) => `/api/runs/${id}/artifact/${kind}`,
   auditUrl: (id) => `/api/runs/${id}/audit`,
 
-  // Resolves when the run ends; `onEvent` fires for every progress line.
-  streamRun(id, onEvent) {
-    const source = new EventSource(`/api/runs/${id}/events`);
+  // Resolves when the run *ends* — not when the connection does.
+  //
+  // `onEvent` fires for every progress line. `onState` fires with a freshly
+  // read run each time the connection drops and is about to be retried, so the
+  // view can re-sync from the source of truth instead of sitting on whatever it
+  // last saw.
+  //
+  // Reconnecting is the whole point of the rewrite. A drop used to resolve this
+  // promise, and the caller re-read the run exactly once and then stopped — so a
+  // run that was still going left the page frozen on its last line, ticker
+  // stopped, header stale, recoverable only by a manual reload. Drops are not
+  // rare: a run is minutes long and the server only sends bytes when something
+  // happens, which is precisely what an idle-connection timeout kills.
+  //
+  // Reconnecting is safe because `subscribe` replays the run's stored events and
+  // `result.js` filters them by `seq`.
+  streamRun(id, onEvent, { onState } = {}) {
+    const BACKOFF_MS = [1000, 2000, 5000, 10_000];
+    let attempt = 0;
+
     return new Promise((resolve) => {
-      source.onmessage = (message) => {
-        try { onEvent(JSON.parse(message.data)); } catch { /* keepalive */ }
+      const open = () => {
+        const source = new EventSource(`/api/runs/${id}/events`);
+        // A connection that lived is not a failing one: the backoff counts
+        // consecutive failures, so it has to reset when one succeeds.
+        source.onopen = () => { attempt = 0; };
+        source.onmessage = (message) => {
+          try { onEvent(JSON.parse(message.data)); } catch { /* not an event */ }
+        };
+        // The server closing the stream is the only authoritative "it is over".
+        source.addEventListener('end', () => { source.close(); resolve(); });
+        source.onerror = async () => {
+          source.close();
+          // The run row decides whether to try again. Gone (deleted) or
+          // terminal (it finished while we were disconnected) means there is
+          // nothing left to stream; anything else means we lost the wire, not
+          // the run.
+          const run = await request(`/api/runs/${id}`).catch(() => null);
+          if (!run || (!run.active && run.status !== 'running' && run.status !== 'queued')) {
+            if (run) onState?.(run);
+            resolve();
+            return;
+          }
+          onState?.(run);
+          setTimeout(open, BACKOFF_MS[Math.min(attempt++, BACKOFF_MS.length - 1)]);
+        };
       };
-      source.addEventListener('end', () => { source.close(); resolve(); });
-      // A network drop looks the same as a finished stream from here; the
-      // caller re-reads the run, which is the source of truth either way.
-      source.onerror = () => { source.close(); resolve(); };
+      open();
     });
   },
 };

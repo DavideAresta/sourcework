@@ -285,8 +285,12 @@ citation rule bounds fabrication structurally, which is a genuine defence — bu
 it does not stop a document instructing a model to write something plausible and
 wrong, and the review pass now matters more than it did on a laptop.
 
-**Long runs meet HTTP timeouts.** A run is minutes. SSE through a load balancer
-needs idle timeouts raised and buffering disabled; several platforms make this
+**Long runs meet HTTP timeouts.** A run is minutes. Both long-lived connections
+now defend themselves: the event stream sends a heartbeat every 20 seconds and
+each agent ticks every 15, which is inside the 60-second idle timeout nginx and
+an AWS ALB ship with, and buffering is already disabled by
+`X-Accel-Buffering: no`. What is left is a platform whose idle timeout is
+shorter than that, or one that will not stream at all — several make this
 annoying and one or two make it impossible.
 
 **Cost is unbounded per request.** A large PDF pack is a large token bill. The
