@@ -624,6 +624,13 @@ class Settings(BaseSettings):
     """The file the settings page edits. Explicit because the UI writes to it,
     and writing to a path you inferred is how you overwrite the wrong one."""
 
+    model_dirs: str = ""
+    """Colon-separated directories holding GGUFs, for the local-model tooling.
+
+    A plain string rather than a list: it is a PATH-shaped value and every place
+    a user writes it - the shell, `.env`, a compose file - writes it that way.
+    Read through :func:`sourcework.localmodels.model_dirs`."""
+
     log_level: str = "INFO"
     public_host: str = "localhost"
     """Hostname advertised in agent cards. In docker-compose this is the

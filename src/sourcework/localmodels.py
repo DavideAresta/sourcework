@@ -95,9 +95,22 @@ def slugify(name: str) -> str:
 
 
 def model_dirs() -> list[Path]:
-    """Where to look for GGUFs: ``SOURCEWORK_MODEL_DIRS``, colon-separated."""
-    raw = os.environ.get("SOURCEWORK_MODEL_DIRS", "")
-    return [Path(p).expanduser() for p in raw.split(":") if p.strip()]
+    """Where to look for GGUFs: ``SOURCEWORK_MODEL_DIRS``, colon-separated.
+
+    The environment first, then the settings - which is what reads the ``.env``
+    file. Reading only ``os.environ`` made this the one documented setting that
+    did not work from the place the documentation puts it: ``.env.example`` has
+    carried ``SOURCEWORK_MODEL_DIRS`` all along, and a value written there was
+    invisible here unless something else in the process happened to have called
+    ``load_dotenv`` first. Importing litellm does, which is why this appeared to
+    work from inside the app and not from ``scripts/llama-models.py``.
+    """
+    raw = os.environ.get("SOURCEWORK_MODEL_DIRS")
+    if raw is None:
+        from sourcework.config import settings
+
+        raw = settings().model_dirs
+    return [Path(p).expanduser() for p in (raw or "").split(":") if p.strip()]
 
 
 def discover(roots: list[Path]) -> tuple[list[LocalModel], list[str]]:
@@ -186,11 +199,23 @@ def curated_ids(config: Path) -> set[str]:
 
 
 HARMONY = re.compile(r"gpt-?oss", re.IGNORECASE)
-"""Models whose chat format ignores ``-rea off``.
+"""Models whose chat format ignores a plain "stop thinking" instruction.
 
 Named by id, which is a heuristic and will miss a model this list has not heard
 of. It is worth having anyway: the alternative is the failure it prevents, which
 is silent at the server and arrives as "the backend said nothing" a layer away.
+"""
+
+REQUIRED_FLAGS = ("--reasoning-budget",)
+"""Flags every generated entry uses, so a caller can check the binary takes them.
+
+The generated config used to say ``-rea off``. That short form exists only in
+newer llama.cpp builds, and the generator resolves ``llama-server`` from PATH -
+so on a machine with an older build first on PATH it wrote a command that binary
+rejects outright. llama-server then exited in a quarter of a second, llama-swap
+reported "upstream command exited prematurely", and every probe upstream of it
+stayed green: the endpoint was up, the model list was real, and nothing failed
+until a model was actually requested.
 """
 
 
@@ -199,12 +224,20 @@ def _reasoning_args(model_id: str) -> list[str]:
 
     Hybrid reasoning models answer an 8k-token budget with 8k tokens of
     scratchpad and empty content, which the pipeline can only report as an empty
-    response. `-rea off` fixes it for most; harmony-format models ignore that
-    flag entirely and take a *budget* instead, so they are told separately.
+    response.
+
+    ``--reasoning-budget 0`` rather than ``-rea off``: it is the long form, it is
+    accepted by every build that has the feature at all, and it says the thing
+    actually meant. ``-rea`` is an alias newer builds added for a *different*
+    option (``--reasoning-format``, which controls where thoughts are put, not
+    whether they happen). Harmony-format models ignore the budget-0 route and
+    need their effort capped in the template instead, so they are told
+    separately - the branch below already used a budget, which is what makes the
+    two consistent now.
     """
     if HARMONY.search(model_id):
         return ['--chat-template-kwargs \'{"reasoning_effort":"low"}\'', "--reasoning-budget 2048"]
-    return ["-rea off"]
+    return ["--reasoning-budget 0"]
 
 
 def swap_config(

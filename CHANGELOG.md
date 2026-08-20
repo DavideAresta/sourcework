@@ -36,6 +36,36 @@ change belongs to.
   Metal and CPU builds, and choosing wrong there does not fail, it silently runs
   an order of magnitude slower, which is the degradation this project treats as
   a defect.
+- **The local-model scan stops generating a config that cannot run.** Three
+  faults, found by following one failure all the way down. It emitted `-rea
+  off`, a short form only newer llama.cpp builds have, while resolving
+  `llama-server` from `PATH` — so on a machine whose first build was older,
+  llama-server rejected the flag and exited in a quarter of a second and
+  llama-swap reported only `upstream command exited prematurely`. It is now
+  `--reasoning-budget 0`: the long form, accepted by every build that has the
+  feature, and the flag that says the thing meant (`-rea` is an alias for
+  `--reasoning-format`, which decides where thoughts go, not whether they
+  happen). The scan also checks that the binary it is writing commands for
+  actually lists the flags those commands use, and says so loudly when it does
+  not.
+
+  It also ignored the `server` macro in `llama-swap.yaml` — the place someone
+  has already written down *which* build to run — and resolved `PATH`
+  independently, so on a machine with two builds the generated entries and the
+  hand-tuned ones pointed at different binaries. The macro now wins.
+
+  What made this expensive to find is that every check upstream stayed green:
+  the endpoint was up, `/v1/models` listed everything, `doctor` said
+  `[configured]`, the pre-flight passed. All true. It only failed when a model
+  was actually requested and the process behind it died — which no probe can
+  detect without loading a model, and none should.
+- **`SOURCEWORK_MODEL_DIRS` works from `.env`.** It has been documented in
+  `.env.example` all along, and `localmodels.model_dirs()` read only
+  `os.environ` — so a value written where the documentation puts it was
+  invisible unless something in the process had already called `load_dotenv`.
+  Importing litellm does, which is why this appeared to work from inside the app
+  and not from `scripts/llama-models.py`. It is now a real setting, read through
+  the settings object, with the environment still winning when set.
 - **`doctor` now says what to do next, and checks before saying it.** It used to
   end by recommending `scripts/llama-swap.sh` whatever the machine had; on one
   without llama-swap that script's first act is to fail, so the advice was a

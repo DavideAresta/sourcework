@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,6 +29,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from sourcework.localmodels import (  # noqa: E402
     DEFAULT_CTX,
+    REQUIRED_FLAGS,
     LocalModel,
     curated_ids,
     discover,
@@ -56,17 +58,97 @@ def llama_bin() -> Path:
     )
 
 
+def curated_server(config: Path) -> str | None:
+    """The ``server`` macro from the hand-written config, if it defines one.
+
+    llama-swap macros do not cross config files, so the generated entries cannot
+    write ``${server}`` and inherit it - they have to inline the same command.
+    Which is exactly why this has to be read: the macro is where somebody has
+    already written down *which llama.cpp build to run*, and the generator used
+    to ignore it and resolve `llama-server` from PATH instead. A machine with
+    two builds installed then got generated entries pointing at one and
+    hand-tuned entries pointing at the other, which is how a flag that the
+    curated build accepts ended up in front of a build that rejects it.
+    """
+    if not config.is_file():
+        return None
+    lines = config.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("macros:"):
+            continue
+        for offset in range(index + 1, len(lines)):
+            entry = lines[offset]
+            if entry and not entry.startswith((" ", "#")):
+                return None  # left the macros block without finding one
+            match = re.match(r"^  server:\s*(.*)$", entry)
+            if not match:
+                continue
+            inline = match.group(1).strip()
+            if inline and inline not in (">", "|", ">-", "|-"):
+                return inline
+            # A block scalar: every following, more-indented line, folded to one.
+            body: list[str] = []
+            for tail in lines[offset + 1:]:
+                if tail.strip() and not tail.startswith("    "):
+                    break
+                if tail.strip():
+                    body.append(tail.strip())
+            return " ".join(body) or None
+    return None
+
+
 def server_command() -> str:
     """The invocation every generated entry starts with.
 
-    LD_LIBRARY_PATH because prebuilt llama.cpp ships its shared objects next to
-    the binary and will not find them otherwise.
+    The curated macro wins when there is one, so generated and hand-tuned
+    entries cannot disagree about which binary they run. Otherwise it is built
+    from ``llama_bin()`` - LD_LIBRARY_PATH included, because prebuilt llama.cpp
+    ships its shared objects next to the binary and will not find them
+    otherwise.
     """
+    curated = curated_server(CURATED)
+    if curated:
+        return curated
     binary = llama_bin()
     return (
         f"/usr/bin/env LD_LIBRARY_PATH={binary} {binary}/llama-server "
         "--host 127.0.0.1 --port ${PORT} --jinja --metrics"
     )
+
+
+def check_flags(server: str) -> None:
+    """Confirm the binary these entries will run accepts the flags they carry.
+
+    Generating a command and never asking whether it can run is how the whole
+    config became unusable over one short flag: llama-server rejected it and
+    exited in a quarter of a second, and every check above it stayed green
+    because the endpoint really was up and the model list really was real.
+    Nothing failed until a model was requested.
+
+    A warning rather than a refusal: this parses a command line to find the
+    binary, and being wrong about that should not stop somebody generating a
+    config that would have worked.
+    """
+    match = re.search(r"(\S*llama-server)", server)
+    if not match:
+        return
+    binary = match.group(1)
+    try:
+        helped = subprocess.run(  # noqa: S603 - path comes from our own config
+            [binary, "--help"], capture_output=True, text=True, timeout=30, check=False
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"  ! could not ask {binary} which flags it takes: {exc}", file=sys.stderr)
+        return
+    missing = [flag for flag in REQUIRED_FLAGS if flag not in helped]
+    if missing:
+        print(
+            f"  ! {binary} does not list {', '.join(missing)}. The generated config "
+            "uses it, so llama-server will exit immediately and llama-swap will "
+            "report 'upstream command exited prematurely'. Point LLAMA_BIN at a "
+            "newer build, or set the `server` macro in llama-swap.yaml.",
+            file=sys.stderr,
+        )
 
 
 def detect_vram_gb() -> float:
@@ -142,9 +224,12 @@ def cmd_scan(args: argparse.Namespace) -> int:
         print(f"No .gguf files under: {', '.join(str(r) for r in roots)}", file=sys.stderr)
         return 1
 
+    server = server_command()
+    check_flags(server)
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
-        swap_config(models, server=server_command(), vram_gb=vram, ctx=args.ctx),
+        swap_config(models, server=server, vram_gb=vram, ctx=args.ctx),
         encoding="utf-8",
     )
     print(f"Wrote {OUT} — {len(models)} model(s), {vram:.1f} GB VRAM assumed.")
