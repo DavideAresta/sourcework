@@ -12,9 +12,15 @@
  * the page a moment after it was already visible.
  */
 
+import { svg } from "./icons.js";
+
 const KEY = "sourcework.theme";
 const ORDER = ["auto", "light", "dark"];
 const LABEL = { auto: "Auto", light: "Light", dark: "Dark" };
+// The icon is the state, so the control says "follow the system" / "light" /
+// "dark" without a word, and the label moves to the tooltip and the accessible
+// name where there is room for a sentence.
+const ICON = { auto: "auto", light: "sun", dark: "moon" };
 
 function stored() {
   try {
@@ -41,7 +47,8 @@ function apply(mode) {
 
   const button = document.getElementById("theme");
   if (button) {
-    button.textContent = LABEL[mode];
+    button.innerHTML = svg(ICON[mode]);
+    button.title = `Theme: ${LABEL[mode]} — click to change`;
     button.setAttribute(
       "aria-label",
       `Theme: ${LABEL[mode].toLowerCase()}. Activate to change it.`,

@@ -1,72 +1,79 @@
 # SourceWork as a desktop app
 
-`sourcework app` runs the whole mesh and the web UI in one process; on Linux,
-`sourcework install-desktop-entry` puts it in the application launcher with an
-icon. That is the entire desktop story: one Python process you can start from a
-menu. No Electron, no webview, no second language, no packaged runtime.
+`sourcework app` runs the whole mesh and the web UI in one process. It is still
+the whole application; what `desktop/` adds is a **shell** around it: a real
+window with SourceWork's name on it, a tray icon, and native notifications —
+so the local app is an app, not a Python process you talk to through a browser
+tab.
 
-It can be that small because the pieces were already the right shape — the front
-end is plain ES modules with no build step, and `serve-all` already runs all
-eight agents as threads in one process. This page records what the launcher
-does, and why it is not the other things it could have been.
+The browser path did not go away. `sourcework app` (or `--browser`),
+`sourcework ui`, `docker compose` and the hosted service all still serve the
+same UI to a browser. The shell is an outer lifecycle owner; the page inside it
+is the ordinary web front end.
 
 ---
 
-## 1. The shell: no browser wrapper, and no tray either
-
-| | Ships | Costs |
-|---|---|---|
-| **Launcher only** (what exists) | ~300 MB Python, no UI runtime at all | The interface is a browser tab, not a window with your name on it |
-| Tauri window | + ~10 MB shell | A Rust toolchain and an IPC layer to maintain |
-| Electron | + ~150 MB Chromium | A second browser, bundled to render HTML the first one already renders |
-
-Electron is the heaviest option and buys a title bar. The front end is plain ES
-modules with no build step, so there is nothing a renderer process would do that
-loopback does not.
-
-**A tray icon was in the first draft and was removed.** Its three jobs are
-covered without a GUI toolkit:
-
-| Tray job | What does it instead |
-|---|---|
-| "Is it running / let me back in" | A second `sourcework app` re-opens the browser rather than starting a rival |
-| "My run finished while I was away" | A browser notification from the page — which names the document and says whether it worked, where an icon turning amber says only "something happened" |
-| "Quit" | A control in the interface, against an endpoint that exists only in app mode |
-
-The deciding argument was licensing. No permissive cross-platform tray library
-exists for Python: `pystray` is LGPL-3.0 and pulls LGPL `python-xlib` on Linux,
-and the permissive alternatives are per-platform (`rumps` for macOS,
-`infi.systray` for Windows) with nothing for Linux. Importing LGPL is fine;
-bundling it in a distributable binary is a relink obligation. For a project
-whose whole argument is that you can audit what it does, carrying that for a
-coloured dot was the wrong trade.
-
-## 2. What the launcher does
+## 1. What the shell does
 
 ```
-sourcework app
-  ├─ already answering on 8080? → open the browser, exit            (no rival instance)
-  ├─ resolve config dir                                             (per-user, not cwd)
-  ├─ start the mesh: 8 agents, threads, loopback only
-  ├─ start the UI, handing it a shutdown callback
-  ├─ wait for /healthz, print status, open the browser
-  └─ block until Quit or Ctrl-C
+installer (.deb/.AppImage, .msi/.dmg on those platforms)
+└─ SourceWork (Tauri: Rust + the OS webview)
+     ├─ tray icon: Show · New PRD · Quit
+     ├─ starts, watches and stops the backend
+     └─ webview → http://127.0.0.1:<ephemeral port>/?shell=1
+                    (the same pages a browser gets)
 ```
 
-The single-instance check asks `/healthz` for the service name rather than
-trying to bind: a second launch should raise what someone already has, and an
-unrelated process on 8080 must not be mistaken for us.
+- **It owns the process.** Closing the window hides it to the tray; **Quit**
+  asks the backend to stop (`POST /api/shutdown`) and then ends it, so no
+  half-dead mesh holds ports.
+- **A second launch raises the first window** rather than starting a rival
+  backend (Tauri's single-instance plugin).
+- **Native notifications** when a run finishes, and only when the window is not
+  focused — the page already shows the result, so notifying about it would be
+  noise. Inside the shell the page's own browser notifications stand down
+  (it sees `?shell=1`); a browser keeps them.
+- **The page calls no Tauri APIs.** The shell drives it with host-side
+  JavaScript (`location.hash = '#/new'`) and reads runs over the backend's HTTP
+  API. That is what keeps the front end binding-free and identical in a browser.
 
-Status is printed once, flushed — a launcher's stdout is never a terminal, and
-buffered output means silence until exit. After that the interface carries its
-own state, which is where there is room to explain it.
+The shell is Rust, but the front end still has **no build step** and no npm:
+Tauri's CLI is used as a Rust crate (`cargo tauri`), not the npm package,
+because nothing here needs the JavaScript bindings.
 
-**Config and workspace live per user, not per working directory** (`paths.py`,
-via `platformdirs`), because an app launched from a menu has no meaningful cwd:
+## 2. Starting the backend
+
+`sourcework app` is unchanged, but the shell runs it non-interactively:
+
+```
+python -m sourcework app --no-browser --port <ephemeral>
+```
+
+- **Ephemeral port.** The shell asks the OS for a free port rather than
+  fighting over 8080, so the app and a development `serve-all` can coexist.
+- **Discovery order** for the interpreter:
+  1. `SOURCEWORK_BACKEND_CMD`, if set (the escape hatch);
+  2. a `python3`/`python`/`py` that can `import sourcework`;
+  3. a `sourcework` console script on `PATH`.
+  If none is found, the window says so and names the log, rather than dying
+  silently.
+- The child inherits the shell's environment, so any `SOURCEWORK_*` you export
+  still wins over `.env` (pydantic-settings' order), and its working directory
+  decides which `.env` is read — the checkout's when launched from one, the
+  per-user file otherwise (see §3).
+
+A first run **requires Python with SourceWork installed**. Bundling a Python
+runtime as a Tauri *sidecar* is planned; until then the shell is a window onto
+an installed backend, not a self-contained runtime.
+
+## 3. Where config and work live
+
+Per user, not per working directory (`paths.py`, via `platformdirs`), because an
+app launched from a menu has no meaningful cwd:
 
 | | Path |
 |---|---|
-| Linux | `~/.config/sourcework/`, data in `~/.local/share/sourcework/` |
+| Linux | `~/.config/SourceWork/`, data in `~/.local/share/SourceWork/` |
 | macOS | `~/Library/Application Support/SourceWork/` |
 | Windows | `%APPDATA%\SourceWork\` |
 
@@ -74,10 +81,50 @@ A `.env` in the working directory still wins, so a developer checkout and a
 launcher-started app coexist on one machine without fighting over the same
 database.
 
-## 3. Finding an inference server
+## 4. Building it
 
-This is the part that decides whether a first-time user succeeds. The
-backend probe (`sourcework.backends.probe`) tries each configured backend in
+Prebuilt, unsigned installers for Linux (`.deb`, `.AppImage`), Windows (`.msi`,
+`-setup.exe`) and macOS (`.dmg`) are attached to every release by the `Desktop`
+workflow (`.github/workflows/desktop.yml`); the README names them. They expect
+Python with SourceWork installed. The rest of this section is for building from
+source.
+
+The shell lives in `desktop/`. Rust only — no Node.
+
+```bash
+# once: Rust and the Linux webview/appindicator development libraries
+rustup default stable
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+cd desktop/src-tauri
+cargo tauri build          # bundles for the current OS
+cargo tauri dev            # a window against your checkout's backend
+```
+
+Tauri produces the formats the current platform supports: `deb`/`AppImage` on
+Linux, `msi`/`nsis` on Windows, `dmg`/`app` on macOS. The bundles are **not
+code-signed** for now, so Windows SmartScreen and macOS Gatekeeper will warn on
+first open.
+
+## 5. Licensing
+
+Tauri, `tauri-plugin-notification`, `tauri-plugin-single-instance` and
+`notify-rust` are MIT/Apache-2.0 — compatible with this project's MIT licence
+and recorded in `THIRD_PARTY.md`. On Linux the OS webview (WebKitGTK) and the
+tray's AppIndicator library are **LGPL system libraries** the shell links
+against but does not redistribute; a *bundled* build would make that a relink
+obligation, which is why the shell depends on the system's copies.
+
+This is the one place the earlier design note changed. That note chose a
+browser tab to avoid a shell dependency at all; the trade became worth making
+once "the app should be an app" was the goal — a window is what lets the
+process have a visible lifecycle, which a browser tab cannot give it.
+
+## 6. Finding an inference server
+
+Unchanged, and still the part that decides whether a first-time user succeeds.
+The backend probe (`sourcework.backends.probe`) tries each configured backend in
 order and takes the first that answers; `sourcework doctor` prints what it
 found.
 

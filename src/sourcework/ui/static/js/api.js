@@ -40,7 +40,9 @@ export const api = {
 
   mesh: () => request('/api/mesh'),
   health: () => request('/healthz'),
-  shutdown: () => request('/api/shutdown', { method: 'POST' }),
+  // No `shutdown` here: stopping the app is the desktop shell's window/tray or
+  // the browser tab's close. The endpoint still exists for the shell, which
+  // calls it directly - there is just no page control that needs it.
   dashboard: () => request('/api/dashboard'),
   // `refresh` asks the server to re-probe instead of reusing its short
   // reachability cache: the model lists change outside this app (a new CLI

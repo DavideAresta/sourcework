@@ -23,6 +23,12 @@ what those don't make obvious at the moment you're editing code.
 - Run the system: `sourcework serve-all` (dev, all agents in one process),
   `sourcework serve <name>` (names in `cli.py:AGENTS`), `sourcework doctor`
   (configured vs. reachable), `sourcework app` (mesh + web UI).
+- The desktop shell lives in `desktop/` (Rust/Tauri, no npm): `cargo tauri dev`
+  from `desktop/src-tauri` opens a window against the checkout's `.venv`;
+  `cargo tauri build` produces the OS bundles. It starts the backend as
+  `python -m sourcework app --no-browser --port <ephemeral>`; `SOURCEWORK_BACKEND_CMD`
+  overrides which command that is. Rust deps pass `cargo deny check licenses`
+  (`desktop/src-tauri/deny.toml`), the Rust half of the licence gate.
 
 ## CI parity
 

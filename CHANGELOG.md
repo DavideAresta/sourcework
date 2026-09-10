@@ -15,6 +15,61 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
+## [0.6.0] — 2026-09-10
+
+The local app becomes an app: `desktop/` is a Rust/Tauri shell — a window, a
+tray and native notifications — around the same backend and the same web UI,
+and this release ships installers for Linux, Windows and macOS. The header
+became a real navigation bar with icon controls, and the critic now reviews a
+long PRD in sections instead of truncating it.
+
+### Added
+
+- **A desktop shell, so the local app is an app and not a browser tab.**
+  `desktop/` is a Rust/Tauri window around the same backend and the same web
+  UI: a tray icon (Show · New PRD · Quit), close-to-tray, single-instance, and
+  native notifications when a run finishes and the window is not focused. It
+  starts `python -m sourcework app --no-browser --port <ephemeral>` and points
+  the webview at loopback, so the browser path (`sourcework app`, `--browser`,
+  `sourcework ui`, compose, hosted) is untouched and the front end still has no
+  build step and calls no Tauri APIs. Bundles for the current OS (`deb`/
+  `AppImage`, `msi`/`nsis`, `dmg`), unsigned for now. Bundling a Python runtime
+  as a sidecar, to drop the "Python must be installed" requirement, is planned.
+- `python -m sourcework` as an entry point alongside the `sourcework` console
+  script, so a launcher that only knows an interpreter can start the app.
+
+### Changed
+
+- **The header is a real nav, and the Quit control is gone.** The sections are
+  now one segmented control of `<a>` links — the old markup wrapped a
+  `<button>` in an `<a>`, which is invalid HTML and behaves differently across
+  browsers — the brand links home, and the page you are on is marked with
+  `aria-current` so the selected style and the accessibility signal cannot
+  disagree. Stopping the app is the window's or the tray's job, so the in-page
+  Quit button (and its `/api/shutdown` page call) is removed; the endpoint
+  stays for the shell. The theme control and the dashboard's refresh are icon
+  buttons (sun/moon/auto, and a refresh that spins while it reads), named by
+  `aria-label` and `title` rather than by visible words.
+- Inside the shell the page sees `?shell=1` and stands down its own browser
+  notifications, so there is exactly one for a finished run: the shell's.
+
+### Fixed
+
+- **The critic reviews a long PRD in sections instead of truncating it.** A
+  92 KB document was cut at the prompt cap, and the run said so: the tail was
+  not reviewed adversarially. That warning was honest and the gap was real. The
+  review now splits on `## ` section boundaries and reads every part in
+  several passes, merging and de-duplicating the findings and folding the
+  verdicts (the worst section wins); the split is a partition, so no character
+  is dropped. The progress line says how many sections, in place of the old
+  "the tail was not reviewed".
+
+#### Hosted — `sourcework-cloud` 0.2.0 (unchanged)
+
+The hosted package's own code did not change, so its version does not move. It
+mounts core's web UI, so the new header, the icon controls and the
+notification guard arrive with the core it is built against.
+
 ## [0.5.0] — 2026-09-10
 
 A hardening and ergonomics release. A security pass closed a run-id path

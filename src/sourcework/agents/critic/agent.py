@@ -33,15 +33,18 @@ PORT = 8007
 MAX_PROMPT_FINDINGS = 200
 MAX_PROMPT_MARKDOWN_CHARS = 60_000
 MAX_PROMPT_EVIDENCE = 250
-"""Caps on what the reviewer is shown. Each is reported when it bites: a
-review performed on a truncated document cannot honestly claim to cover it."""
-"""How many deterministic findings are shown to the model.
+"""Caps on what the reviewer is shown in one pass.
 
-They are in the prompt for one reason - so the model does not spend its answer
-repeating them - and the wording rules can fire several times per requirement,
-so on a large PRD the list grows without bound inside a prompt every other part
-of which is capped. Every finding stays in the report either way; only this
-copy is trimmed, and never quietly."""
+The markdown cap is not a truncation point: a PRD larger than it is split on
+section boundaries and reviewed in several passes, so every part is read
+adversarially - a review that saw only the first N characters could not honestly
+claim to have covered the document. The evidence and findings caps are still
+reported when they bite.
+
+The findings cap is the one that grows without bound on a large PRD: the wording
+rules can fire several times per requirement, and the list is in the prompt only
+so the model does not spend its answer repeating it. Every finding stays in the
+report either way; only this copy is trimmed, and never quietly."""
 
 VAGUE = re.compile(
     r"\b(fast|slow|easy|simple|intuitive|robust|scalable|user-friendly|seamless|"
@@ -117,38 +120,61 @@ class CriticExecutor(SkillExecutor):
                 f"{len(findings) - len(shown)} deterministic finding(s) left out of the "
                 f"review prompt (showing {len(shown)}); all of them stay in the report"
             )
-        if len(markdown) > MAX_PROMPT_MARKDOWN_CHARS:
-            await progress(
-                f"PRD is {len(markdown)} characters; the review prompt shows the first "
-                f"{MAX_PROMPT_MARKDOWN_CHARS} - the tail was not reviewed adversarially"
-            )
         evidence_shown = prd.evidence[:MAX_PROMPT_EVIDENCE]
         if len(prd.evidence) > len(evidence_shown):
             await progress(
                 f"{len(prd.evidence) - len(evidence_shown)} evidence item(s) left out of the "
                 f"review prompt (showing {len(evidence_shown)})"
             )
-        user = (
-            f"PRD under review:\n\n{markdown[:MAX_PROMPT_MARKDOWN_CHARS]}\n\n"
-            "---\nDETERMINISTIC FINDINGS ALREADY RECORDED (do not repeat):\n"
-            + ("\n".join(f"- [{f.severity.value}] {f.location}: {f.detail}" for f in shown) or "none")
-            + "\n\n---\nEVIDENCE AVAILABLE TO THE WRITER:\n"
-            + "\n".join(f"- {e.id} [{e.kind}] {e.text}" for e in evidence_shown)
-        )
 
-        await progress("Adversarial review")
-        draft = await self.llm.structured(system, user, CriticDraft, role="critic")
-        findings.extend(draft.findings)
+        # The document is reviewed in passes, not cut at a character count. The
+        # splits fall on `## ` boundaries, so a pass sees whole sections and
+        # every part of the PRD is read by someone.
+        chunks = _split_markdown(markdown, MAX_PROMPT_MARKDOWN_CHARS)
+        if len(chunks) > 1:
+            await progress(
+                f"PRD is {len(markdown)} characters; reviewing it in {len(chunks)} sections"
+            )
+
+        findings_block = (
+            "\n".join(f"- [{f.severity.value}] {f.location}: {f.detail}" for f in shown) or "none"
+        )
+        evidence_block = "\n".join(f"- {e.id} [{e.kind}] {e.text}" for e in evidence_shown)
+
+        drafts: list[CriticDraft] = []
+        for index, chunk in enumerate(chunks, start=1):
+            scope = (
+                ""
+                if len(chunks) == 1
+                else f"\n\n(This is section {index} of {len(chunks)} of the PRD - "
+                "review what is shown and do not assume what the rest says.)"
+            )
+            user = (
+                f"PRD under review:\n\n{chunk}{scope}\n\n"
+                "---\nDETERMINISTIC FINDINGS ALREADY RECORDED (do not repeat):\n"
+                f"{findings_block}\n\n---\nEVIDENCE AVAILABLE TO THE WRITER:\n{evidence_block}"
+            )
+            label = (
+                "Adversarial review"
+                if len(chunks) == 1
+                else f"Adversarial review ({index}/{len(chunks)})"
+            )
+            await progress(label)
+            drafts.append(await self.llm.structured(system, user, CriticDraft, role="critic"))
+
+        for draft in drafts:
+            findings.extend(draft.findings)
+        findings = _dedupe(findings)
 
         report = ReviewReport(
             findings=findings,
             coverage=coverage,
-            verdict=_verdict(findings, draft.verdict),
+            verdict=_verdict(findings, _fold_verdict(drafts)),
             standards=quality.standards_line(ears=settings().quality.ears),
             # The reviewer's prose, kept rather than dropped on the floor: the
             # findings are the itemised part, this is the sentence that frames
             # them - and in stub mode it is the marker saying no model ran.
-            summary=draft.notes.strip(),
+            summary=" ".join(d.notes.strip() for d in drafts if d.notes.strip()),
         )
         return ReviewResponse(
             report=report,
@@ -311,6 +337,92 @@ def _verdict(findings: list[ReviewFinding], model_verdict: str) -> str:
     if any(f.severity == Severity.MAJOR for f in findings):
         return "needs_revision"
     return model_verdict if model_verdict in ("approved", "needs_revision", "reject") else "approved"
+
+
+def _fold_verdict(drafts: list[CriticDraft]) -> str:
+    """One verdict from per-section ones: the worst wins.
+
+    A section the reviewer called `reject` makes the document that; any
+    `needs_revision` makes it that if nothing is worse. A section that looked
+    clean cannot cancel one that did not.
+    """
+    verdict = "approved"
+    for draft in drafts:
+        if draft.verdict == "reject":
+            return "reject"
+        if draft.verdict == "needs_revision":
+            verdict = "needs_revision"
+    return verdict
+
+
+def _dedupe(findings: list[ReviewFinding]) -> list[ReviewFinding]:
+    """Drop exact repeats, which sections can produce over shared boilerplate."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[ReviewFinding] = []
+    for finding in findings:
+        key = (finding.category, finding.location, finding.detail)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(finding)
+    return out
+
+
+def _split_markdown(markdown: str, limit: int) -> list[str]:
+    """Split a document into review-sized passes on section boundaries.
+
+    `## ` starts a section; consecutive sections are packed until the next would
+    cross ``limit``. A single section larger than ``limit`` is split on its own
+    lines, and only then on character count, so no part is ever dropped - the
+    reviewer reads all of it across several passes rather than the first
+    ``limit`` characters in one.
+    """
+    if len(markdown) <= limit:
+        return [markdown]
+
+    sections: list[str] = []
+    current: list[str] = []
+    for line in markdown.splitlines(keepends=True):
+        if line.startswith("## ") and current:
+            sections.append("".join(current))
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sections.append("".join(current))
+
+    chunks: list[str] = []
+    for section in sections:
+        if len(section) > limit:
+            chunks.extend(_hard_split(section, limit))
+        elif chunks and len(chunks[-1]) + len(section) <= limit:
+            chunks[-1] += section
+        else:
+            chunks.append(section)
+    # Only truly empty chunks go; a chunk of pure whitespace is still part of
+    # the document and dropping it would break the partition.
+    return [chunk for chunk in chunks if chunk]
+
+
+def _hard_split(text: str, limit: int) -> list[str]:
+    """The last resort for one section bigger than a whole pass: by lines, then
+    characters. Only ever reached by a single section that is itself huge."""
+    parts: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        if len(line) > limit:
+            if current:
+                parts.append(current)
+                current = ""
+            parts.extend(line[i : i + limit] for i in range(0, len(line), limit))
+            continue
+        if current and len(current) + len(line) > limit:
+            parts.append(current)
+            current = ""
+        current += line
+    if current:
+        parts.append(current)
+    return parts
 
 
 def card():  # noqa: ANN201

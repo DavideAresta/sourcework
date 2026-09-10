@@ -7,6 +7,7 @@
 
 import { el, clear, mount, ago, toast } from './dom.js';
 import { api } from './api.js';
+import { svg } from './icons.js';
 
 const STATE = {
   ready: { label: 'Ready', cls: 'pill ok' },
@@ -148,9 +149,21 @@ async function load() {
   }
 }
 
-document.getElementById('refresh').addEventListener('click', () => {
-  load().then(() => toast('Refreshed', 'ok'));
-});
+// A refresh that shows it is working. The icon spins while the read is in
+// flight, so a slow dashboard is not indistinguishable from a dead button.
+const refreshButton = document.getElementById('refresh');
+if (refreshButton) {
+  refreshButton.innerHTML = svg('refresh');
+  refreshButton.addEventListener('click', async () => {
+    refreshButton.classList.add('is-busy');
+    try {
+      await load();
+      toast('Refreshed', 'ok');
+    } finally {
+      refreshButton.classList.remove('is-busy');
+    }
+  });
+}
 
 load();
 setInterval(load, 60_000);

@@ -15,6 +15,8 @@
 //   * Nothing is raised while you are looking at the page. If the tab is
 //     visible, the UI already shows the result and a notification is noise.
 
+import { inShell } from './dom.js';
+
 const TITLES = {
   ok: 'PRD ready',
   failed: 'Run failed',
@@ -22,6 +24,10 @@ const TITLES = {
 };
 
 export function supported() {
+  // Inside the desktop shell the shell raises a native notification instead, so
+  // the page's own must not also fire - two notifications for one finished run
+  // is exactly the kind of app people mute.
+  if (inShell()) return false;
   return typeof Notification !== 'undefined';
 }
 

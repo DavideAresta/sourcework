@@ -2,6 +2,14 @@
 // so there is exactly one place where untrusted text could become markup — and
 // it doesn't.
 
+// True when the page is inside the desktop shell, which marks the URL with
+// `?shell=1`. There the shell owns the window, the tray and the finished-run
+// notifications, so the page stands those down; in a browser the page owns
+// them. One flag, read by both `app.js` (the Quit control) and `notify.js`.
+export function inShell() {
+  return new URLSearchParams(location.search).has('shell');
+}
+
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {

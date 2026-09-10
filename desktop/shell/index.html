@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SourceWork</title>
+  <link rel="icon" href="favicon.svg">
+  <style>
+    /* The shell's own page, shown while the backend starts and if it cannot.
+       Kept plain: it must render before the Python process exists, and with
+       no network, so it carries its own styling and no scripts beyond the
+       one function the shell calls. */
+    :root { color-scheme: light dark; --bg: #e4e6ea; --panel: #fafafb; --ink: #16171f;
+            --ink-2: #5e626f; --line: #d3d6dd; --accent: #b4562a; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #17171a; --panel: #1e1e22; --ink: #ececea; --ink-2: #a9a9a4;
+              --line: #33333a; }
+    }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: grid; place-items: center; background: var(--bg); color: var(--ink);
+      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+      padding: 28px 30px; max-width: 520px; box-shadow: 0 10px 30px rgb(0 0 0 / 10%);
+    }
+    .brand { font-weight: 650; letter-spacing: -0.01em; margin-bottom: 14px; }
+    .brand b { color: var(--accent); }
+    .muted { color: var(--ink-2); }
+    #spinner {
+      width: 22px; height: 22px; border: 2px solid var(--line); border-top-color: var(--accent);
+      border-radius: 50%; display: inline-block; vertical-align: -4px; margin-right: 10px;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #error { display: none; }
+    pre {
+      white-space: pre-wrap; word-break: break-word; background: var(--bg);
+      border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 12px 0 0;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">Source<b>Work</b></div>
+    <div id="starting"><span id="spinner"></span>Starting SourceWork…</div>
+    <div id="error">
+      <div><b>SourceWork could not start.</b></div>
+      <div class="muted" id="error-detail"></div>
+      <pre id="error-log" class="muted"></pre>
+    </div>
+  </main>
+
+  <script>
+    // Called by the Rust shell when the backend fails to come up. Kept here so
+    // the failure is visible in the window rather than only in a log nobody
+    // packaged a way to read.
+    window.showStartError = function (detail, logPath) {
+      document.getElementById('starting').style.display = 'none';
+      document.getElementById('error').style.display = '';
+      document.getElementById('error-detail').textContent = detail || '';
+      document.getElementById('error-log').textContent =
+        logPath ? 'Log: ' + logPath : '';
+    };
+  </script>
+</body>
+</html>

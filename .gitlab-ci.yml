@@ -58,6 +58,33 @@ cloud:
     - pip install -q -e ".[ingest,dev]" "psycopg[binary]" psycopg_pool
     - pytest -q cloud/tests
 
+desktop:
+  # The Tauri shell. GitHub's workflow builds the Windows and macOS bundles;
+  # GitLab's OS runners are deployment-specific, so here the shell is compiled
+  # and the Linux bundles are built - what the shared runner can do.
+  stage: test
+  image: rust:1-bookworm
+  before_script:
+    - apt-get update
+    - apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file
+      libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+    - cargo install tauri-cli --version "^2" --locked
+  script:
+    - cd desktop/src-tauri && cargo tauri build --bundles deb
+  artifacts:
+    paths: [desktop/src-tauri/target/release/bundle/deb/*.deb]
+    expire_in: 30 days
+
+rust-licences:
+  # The Rust half of the licence gate, mirroring the `rust-licences` job in
+  # .github/workflows/desktop.yml.
+  stage: licences
+  image: rust:1-bookworm
+  before_script:
+    - cargo install cargo-deny --locked
+  script:
+    - cd desktop/src-tauri && cargo deny --config deny.toml check licenses
+
 licences:
   stage: licences
   before_script:

@@ -41,6 +41,28 @@ of the hosted service (see *What actually binds you*) is the case to check.
 Re-check with `pip-licenses` (or the audit in `CONTRIBUTING.md`) before adding a
 dependency. A copyleft dependency would change what this project can be.
 
+## The desktop shell (Rust, Tauri)
+
+`desktop/` is the optional Tauri shell that gives the local app a window, a
+tray and native notifications. Its Rust tree is permissive:
+
+| Licence | Crates |
+|---|---|
+| MIT / Apache-2.0 | tauri, tauri-build, tauri-plugin-notification, tauri-plugin-single-instance, ureq, serde, serde_json |
+
+On Linux the shell links against libraries the operating system provides, not
+copies it ships:
+
+| Library | Licence | Note |
+|---|---|---|
+| WebKitGTK (`libwebkit2gtk-4.1`) | LGPL-2.1+ | the webview Tauri renders in |
+| libayatana-appindicator3 | LGPL-3.0 | the tray icon on Linux desktops |
+
+Both are system libraries: the shell depends on them being installed, and does
+not redistribute them, so they impose no relink obligation on this project's own
+MIT distribution. A build that *bundled* either would change that — see
+*What actually binds you*.
+
 ## External tools, not distributed here
 
 SourceWork drives programs you install yourself — with one convenience

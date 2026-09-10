@@ -6,7 +6,7 @@ it — and no model can invent a citation.**
 
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Version: 0.5.0](https://img.shields.io/badge/version-0.5.0-success.svg)](https://github.com/DavideAresta/sourcework/releases/tag/v0.5.0)
+[![Version: 0.6.0](https://img.shields.io/badge/version-0.6.0-success.svg)](https://github.com/DavideAresta/sourcework/releases/tag/v0.6.0)
 [![A2A v1.0](https://img.shields.io/badge/A2A-v1.0-4b32c3.svg)](https://a2a-protocol.org)
 [![No API key required](https://img.shields.io/badge/API%20key-optional-success.svg)](#an-api-key-is-optional)
 
@@ -177,6 +177,31 @@ The UI binds `127.0.0.1` and has no authentication — see
 [Security](#security) before you change that.
 [docs/using-it.md](docs/using-it.md) is the longer version of this section.
 
+## The desktop app
+
+The local app also runs as a desktop application, not only a browser tab. A
+Rust/[Tauri](https://tauri.app) shell wraps the same backend and the same web
+UI in a real window: a **tray** (Show · New PRD · Quit), **close-to-tray**, a
+single instance, and a **native notification** when a run finishes and the
+window is not focused — so the app has a visible lifecycle a browser tab cannot
+give it, and quitting is real.
+
+Prebuilt, unsigned installers are attached to every
+[release](https://github.com/DavideAresta/sourcework/releases/latest):
+
+| Platform | Package |
+|---|---|
+| Linux | `.deb` (Debian/Ubuntu/Mint) or `.AppImage` (any) |
+| Windows | `.msi` or `-setup.exe` (Windows 10+; WebView2 is already present or fetched) |
+| macOS | `.dmg` (Apple silicon; Intel where built) |
+
+They expect **Python with SourceWork installed** — the shell starts
+`python -m sourcework app --no-browser`, so install the package first
+(`pip install sourcework`); bundling a Python runtime into the installer is
+planned. The packages are unsigned for now, so Windows SmartScreen and macOS
+Gatekeeper will warn on first open. See [docs/desktop.md](docs/desktop.md) for
+what the shell does and how to build it.
+
 ## An API key is optional
 
 If you are signed into a coding CLI, the entire pipeline runs on that
@@ -276,7 +301,7 @@ written in the present tense about a system nobody can run reads as a promise.
 | [docs/local-models.md](docs/local-models.md) | Local inference end to end: context windows, constrained JSON, llama-swap, large inputs |
 | [docs/a2a.md](docs/a2a.md) | Driving the mesh as an A2A client |
 | [docs/extending.md](docs/extending.md) | Adding a publish destination, authentication or a run store from outside the repo |
-| [docs/desktop.md](docs/desktop.md) | Running it as a desktop app, and why not Electron |
+| [docs/desktop.md](docs/desktop.md) | The desktop shell: a real window, tray and notifications around the same UI |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Why it is shaped this way — the design rationale and the message flow |
 | [SECURITY.md](SECURITY.md) | What this software assumes about the machine it runs on |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Getting set up, where things live, what a good change looks like |

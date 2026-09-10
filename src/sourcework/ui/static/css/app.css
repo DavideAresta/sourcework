@@ -155,7 +155,60 @@ header.top .brand .version {
   color: var(--ink-2);
   letter-spacing: 0;
 }
+/* The brand is a link home. It was a plain div, so the one thing everybody
+   tries - clicking the logo - did nothing. */
+header.top a.brand { color: var(--ink); text-decoration: none; }
+header.top a.brand:hover b { color: color-mix(in srgb, var(--accent) 75%, var(--ink)); }
 header.top .spacer { flex: 1; }
+
+/* The sections, as one segmented control. Real <a>s: the old markup wrapped a
+   <button> in an <a>, which is invalid HTML and behaves inconsistently from
+   one browser to the next. `aria-current="page"` is both the accessibility
+   signal and the selected style, so the two cannot disagree. */
+header.top .nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-2);
+  max-width: 100%;
+}
+
+header.top .nav-link {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+header.top .nav-link:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink-3) 14%, transparent);
+}
+
+header.top .nav-link[aria-current="page"] {
+  color: var(--ink);
+  background: var(--panel);
+  font-weight: 550;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+header.top .nav-link:focus-visible,
+header.top a.brand:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+/* On a phone the bar wraps; let the nav keep its shape and scroll if the four
+   names still do not fit, rather than clipping a section away. */
+@media (max-width: 720px) {
+  header.top .nav { overflow-x: auto; }
+}
 
 /* The header's height, written once. It was 49px in three rules, which is a
    measurement of one particular header at one particular font size - and now
@@ -271,6 +324,24 @@ button.primary {
 
 button.ghost { background: transparent; }
 button.danger { color: var(--err); }
+
+/* A square button that is only an icon. Its name lives in `aria-label` and its
+   tooltip in `title`, so it is still announced and explained without visible
+   text — the point of an icon is to be recognised, not to hide the control. */
+button.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+button.icon-btn .ico { width: 18px; height: 18px; display: block; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+/* The refresh spins while its read is in flight, so a slow dashboard is not
+   indistinguishable from a button that did nothing. */
+button.icon-btn.is-busy .ico { animation: spin 0.8s linear infinite; }
 
 .pill {
   display: inline-flex;

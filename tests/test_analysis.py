@@ -251,6 +251,60 @@ async def test_a_big_prd_does_not_grow_the_review_prompt_without_bound(prd: PRDD
     assert any("left out of the review prompt" in m for m in said)
 
 
+def test_splitting_a_prd_into_review_passes_never_drops_text():
+    """The split is a partition: every character is in exactly one pass, so a
+    large PRD is read in full across several passes rather than cut at one."""
+    from sourcework.agents.critic.agent import _split_markdown
+
+    markdown = ("## First\n" + ("alpha " * 40) + "\n"
+                "## Second\n" + ("beta " * 40) + "\n"
+                "## Third\n" + ("gamma " * 40))
+    parts = _split_markdown(markdown, 120)
+
+    assert len(parts) > 1
+    assert "".join(parts) == markdown, "the passes must reconstruct the document"
+    for part in parts:
+        assert len(part) <= 120
+
+
+async def test_a_big_prd_is_reviewed_in_sections_not_truncated(prd: PRDDocument):
+    """A PRD longer than one prompt is read in several passes, and nothing is
+    left out. Demonstrated before the fix: the tail past the cap was reported
+    as not reviewed adversarially - the warning was honest and the gap was
+    real, and the honest fix is to read the rest, not to widen the cap."""
+    from sourcework.agents.critic.agent import (
+        MAX_PROMPT_MARKDOWN_CHARS,
+        CriticDraft,
+        CriticExecutor,
+    )
+
+    markdown = "## Section\n\n" + ("word " * 200) + "\n\n"
+    markdown *= 80
+    assert len(markdown) > MAX_PROMPT_MARKDOWN_CHARS
+
+    executor = CriticExecutor()
+    prompts: list[str] = []
+
+    async def fake_structured(system, user, schema, **kw):  # noqa: ANN001, ANN202
+        prompts.append(user)
+        return CriticDraft(verdict="approved")
+
+    executor.llm.structured = fake_structured
+    said: list[str] = []
+
+    async def say(message: str) -> None:
+        said.append(message)
+
+    await executor.review_prd(
+        {"prd": prd.model_dump(mode="json"), "markdown": markdown}, say
+    )
+
+    assert len(prompts) > 1, "a document over the cap must be reviewed in passes"
+    assert "\n".join(prompts).count("## Section") == markdown.count("## Section")
+    assert any("reviewing it in" in m for m in said)
+    assert not any("not reviewed" in m for m in said)
+
+
 async def test_the_reviewers_own_sentence_reaches_the_report(prd: PRDDocument):
     """The critic writes one line framing the findings; the report used to drop
     it on the floor, and the tab that rendered it showed a permanently empty

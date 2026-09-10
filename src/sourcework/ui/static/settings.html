@@ -18,12 +18,15 @@
 </head>
 <body>
   <header class="top">
-    <div class="brand">Source<b>Work</b><span id="version" class="version"></span></div>
+    <a class="brand" href="/">Source<b>Work</b><span id="version" class="version"></span></a>
     <div class="spacer"></div>
-    <button id="theme" class="ghost">Auto</button>
-    <a href="/architecture"><button class="ghost">Architecture</button></a>
-    <a href="/dashboard"><button class="ghost">Dashboard</button></a>
-    <a href="/"><button class="ghost">← Back</button></a>
+    <nav class="nav" aria-label="Sections">
+      <a href="/" class="nav-link">Runs</a>
+      <a href="/dashboard" class="nav-link">Dashboard</a>
+      <a href="/architecture" class="nav-link">Architecture</a>
+      <a href="/settings" class="nav-link" aria-current="page">Settings</a>
+    </nav>
+    <button id="theme" class="ghost icon-btn" type="button" aria-label="Theme" title="Theme"></button>
   </header>
 
   <main class="settings-layout">

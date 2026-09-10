@@ -34,6 +34,15 @@ const PATHS = {
     + '<path d="M14 3v4h4M8 12h8M8 16h6"/>',
   flag: '<path d="M5 21V4M5 4h11l-2 3.5L16 11H5"/>',
   publish: '<path d="M12 19V6M6 12l6-6 6 6"/><path d="M4 21h16"/>',
+  // Header controls. `auto` is a half-filled disc - the two themes it chooses
+  // between - and `sun`/`moon` say which one is in force.
+  auto: '<circle cx="12" cy="12" r="8"/>'
+    + '<path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/>',
+  sun: '<circle cx="12" cy="12" r="4"/>'
+    + '<path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22'
+    + 'M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
 };
 
 const OPEN = '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
