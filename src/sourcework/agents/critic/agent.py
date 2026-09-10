@@ -22,7 +22,7 @@ from sourcework import quality
 from sourcework.a2a_common import Progress, SkillExecutor, build_card, public_url, skill
 from sourcework.agents.schemas import ReviewRequest, ReviewResponse
 from sourcework.config import settings
-from sourcework.llm import LLM, register_stub
+from sourcework.llm import LLM, LLMError, register_stub
 from sourcework.models import PRDDocument, ReviewFinding, ReviewReport, Severity
 from sourcework.render import to_markdown
 
@@ -142,6 +142,8 @@ class CriticExecutor(SkillExecutor):
         evidence_block = "\n".join(f"- {e.id} [{e.kind}] {e.text}" for e in evidence_shown)
 
         drafts: list[CriticDraft] = []
+        unreviewed: list[str] = []
+        last_error: LLMError | None = None
         for index, chunk in enumerate(chunks, start=1):
             scope = (
                 ""
@@ -160,10 +162,41 @@ class CriticExecutor(SkillExecutor):
                 else f"Adversarial review ({index}/{len(chunks)})"
             )
             await progress(label)
-            drafts.append(await self.llm.structured(system, user, CriticDraft, role="critic"))
+            try:
+                drafts.append(await self.llm.structured(system, user, CriticDraft, role="critic"))
+            except LLMError as exc:
+                # One section failing its model call must not discard the rest.
+                # The other sections were read and their findings are real; the
+                # failed section is a gap that has to be reported, because a
+                # review that quietly skipped part of the document is the one
+                # outcome this must never produce. Recorded as an unreviewed
+                # section below, not swallowed.
+                name = f"section {index}/{len(chunks)}" if len(chunks) > 1 else "the PRD"
+                logger.warning("adversarial review of %s failed: %s", name, exc)
+                await progress(f"{name} could not be reviewed: {exc}")
+                unreviewed.append(name)
+                last_error = exc
+
+        if not drafts and last_error is not None:
+            # Not one section was read. There is no partial review to return,
+            # and a report that only says "unreviewed" would dress a dead
+            # backend up as a finished review. Re-raise so the stage fails
+            # loudly, which is the only honest outcome when nothing ran.
+            raise last_error
 
         for draft in drafts:
             findings.extend(draft.findings)
+        for name in unreviewed:
+            findings.append(
+                ReviewFinding(
+                    severity=Severity.MAJOR,
+                    category="unreviewed",
+                    location=name,
+                    detail=f"The adversarial review of {name} did not run: the model call "
+                    "failed. Findings for this part of the document are missing, not absent.",
+                    suggested_fix="Re-run the review; this part has not been checked adversarially.",
+                )
+            )
         findings = _dedupe(findings)
 
         report = ReviewReport(

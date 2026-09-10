@@ -305,6 +305,88 @@ async def test_a_big_prd_is_reviewed_in_sections_not_truncated(prd: PRDDocument)
     assert not any("not reviewed" in m for m in said)
 
 
+async def test_a_failed_section_does_not_discard_the_rest_of_the_review(prd: PRDDocument):
+    """One dead model call must not throw away a review that otherwise ran.
+
+    The sections that answered still contribute their findings, and the one that
+    failed is reported as unreviewed rather than silently passed. Before this, a
+    single 600s CLI timeout on a long PRD failed the whole critic stage and lost
+    every section already read."""
+    from sourcework.agents.critic.agent import (
+        MAX_PROMPT_MARKDOWN_CHARS,
+        CriticDraft,
+        CriticExecutor,
+    )
+    from sourcework.llm import LLMError
+    from sourcework.models import ReviewFinding
+
+    markdown = "## Section\n\n" + ("word " * 200) + "\n\n"
+    markdown *= 80
+    assert len(markdown) > MAX_PROMPT_MARKDOWN_CHARS
+
+    executor = CriticExecutor()
+    calls = 0
+
+    async def fake_structured(system, user, schema, **kw):  # noqa: ANN001, ANN202
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise LLMError("opencode-cli timed out after 600s")
+        return CriticDraft(
+            verdict="approved",
+            findings=[
+                ReviewFinding(
+                    severity=Severity.MINOR,
+                    category="ambiguous",
+                    location="Section",
+                    detail="read by the section that answered.",
+                )
+            ],
+        )
+
+    executor.llm.structured = fake_structured
+    said: list[str] = []
+
+    async def say(message: str) -> None:
+        said.append(message)
+
+    response = await executor.review_prd(
+        {"prd": prd.model_dump(mode="json"), "markdown": markdown}, say
+    )
+
+    assert calls > 1, "the remaining sections must still be attempted"
+    assert any(f.category == "unreviewed" for f in response.report.findings), (
+        "the skipped section must be recorded, not silently passed"
+    )
+    assert any(f.detail == "read by the section that answered." for f in response.report.findings), (
+        "findings from the sections that answered must survive"
+    )
+    assert response.verdict == "needs_revision"
+    assert any("could not be reviewed" in m for m in said)
+
+
+async def test_a_review_that_read_nothing_fails_instead_of_passing(prd: PRDDocument):
+    """If every pass fails, there is no partial review to return, and the stage
+    must fail rather than report a document as reviewed with nothing in it."""
+    import pytest
+
+    from sourcework.agents.critic.agent import CriticExecutor
+    from sourcework.llm import LLMError
+
+    executor = CriticExecutor()
+
+    async def fake_structured(system, user, schema, **kw):  # noqa: ANN001, ANN202
+        raise LLMError("opencode-cli timed out after 600s")
+
+    executor.llm.structured = fake_structured
+
+    async def say(message: str) -> None:
+        return None
+
+    with pytest.raises(LLMError):
+        await executor.review_prd({"prd": prd.model_dump(mode="json")}, say)
+
+
 async def test_the_reviewers_own_sentence_reaches_the_report(prd: PRDDocument):
     """The critic writes one line framing the findings; the report used to drop
     it on the floor, and the tab that rendered it showed a permanently empty

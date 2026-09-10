@@ -15,6 +15,28 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
+## [0.6.1] — 2026-09-10
+
+A repair release for the critic: a long PRD reviewed in several sections no
+longer fails the whole stage when one section's model call dies.
+
+### Fixed
+
+- **One dead section no longer discards the rest of the review.** Reviewing a
+  long PRD in sections made a single slow or failed model call (a CLI timing out
+  at `cli_timeout_s`, a provider blip) fail `review_prd` outright, throwing away
+  every section that had already been read. A failed section is now reported as
+  an `unreviewed` major finding and the findings from the sections that answered
+  are kept; the review degrades to a partial one that says which part was not
+  read, rather than passing silently or losing the work. If *no* section could be
+  reviewed the stage still fails loudly, because there is no partial review to
+  stand behind.
+
+#### Hosted — `sourcework-cloud` 0.2.0 (unchanged)
+
+The hosted package's own code did not change, so its version does not move. It
+mounts core's critic, so the fix arrives with the core it is built against.
+
 ## [0.6.0] — 2026-09-10
 
 The local app becomes an app: `desktop/` is a Rust/Tauri shell — a window, a
