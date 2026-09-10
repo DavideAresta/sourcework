@@ -91,6 +91,40 @@ guarantee this project makes.
   since the front end has no build step and the back end has few dependencies on
   purpose.
 
+## Releasing
+
+There is no manual release step. A push to `main` that passes CI is released
+automatically by `.github/workflows/release.yml`:
+
+1. it bumps the patch version, writes it to every file that carries it, prepends
+   a changelog section from the commit subjects, commits with `[skip ci]` and
+   pushes the tag;
+2. builds the `sourcework` and `sourcework-cloud` distributions and publishes
+   them to PyPI;
+3. builds the desktop installers for Linux, Windows and macOS (via the reusable
+   `.github/workflows/desktop.yml`);
+4. creates the GitHub Release and attaches every package.
+
+The version itself lives in `src/sourcework/__init__.py`; `scripts/bump_version.py`
+is the only thing that should ever change it (plus the PRD default, the README
+badge, the desktop manifest/crate/lockfile and the changelog). Its tests walk the
+real tree and fail if a new file starts naming the version without the bumper
+knowing, which is how the README badge drifted once.
+
+**One-time setup.** On PyPI, add a *trusted publisher* for both `sourcework` and
+`sourcework-cloud`: owner `DavideAresta`, repository `sourcework`, workflow
+`release.yml`, environment `pypi`. No API token is stored anywhere. Until this is
+done, set the repository variable `PUBLISH_PYPI` to `false` so the workflow
+skips the publish step instead of failing after it has already tagged.
+
+Branch protection on `main` has to allow the workflow's own token to push the
+bump commit; if it does not, the release stops with the tag already created, and
+re-running the workflow rebuilds that same tag rather than minting a new version.
+
+The release workflow is intentionally GitHub-only and has no `.gitlab-ci.yml`
+mirror: GitLab keeps building and testing, but publishing lives where the
+trusted publisher is.
+
 ## Scope
 
 Happily accepted: backends, ingestion formats, rendering, local-model

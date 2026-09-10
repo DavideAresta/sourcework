@@ -34,6 +34,12 @@ what those don't make obvious at the moment you're editing code.
 
 - `.github/workflows/ci.yml` and `.gitlab-ci.yml` are deliberate mirrors —
   change one, change the other, both must stay green.
+- `.github/workflows/release.yml` is deliberately **GitHub-only** (the PyPI
+  trusted publisher is bound to that filename); do not mirror it. On every green
+  push to `main` it bumps the version with `scripts/bump_version.py`, builds the
+  Python distributions and the desktop installers (reusing `desktop.yml` via
+  `workflow_call`), publishes to PyPI and attaches everything to a GitHub
+  Release. `tests/test_bump_version.py` guards the version locations.
 - CI = ruff, pytest on 3.11/3.12/3.13, the demo smoke test, and a **licence
   gate** (`scripts/check_licences.py`, itself covered by `tests/test_licences.py`).
   The project is MIT; a copyleft dependency — even transitive — fails CI. Check

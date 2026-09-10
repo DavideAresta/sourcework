@@ -1,0 +1,202 @@
+name: Release
+
+# Every push to main that passes CI becomes a release: the version is bumped,
+# tagged, the Python distributions and the desktop installers are built, the
+# packages go to PyPI, and everything is attached to a GitHub Release. No manual
+# step, and no release of a red main.
+#
+# It hangs off CI's completion rather than the push itself for exactly that
+# reason: `workflow_run` lets the release wait for the whole test suite. The
+# bump commit is pushed by this workflow's own token with `[skip ci]`, so it
+# starts no CI run and the release cannot recurse.
+#
+# Re-running it is safe. If the version at HEAD is already tagged, it skips the
+# bump and rebuilds the same tag - which is how a release that failed in the
+# PyPI step is retried without minting a second version.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Releases are serialised, never cancelled: by the time a second one arrives,
+  # the first has already pushed a commit and a tag.
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.plan.outputs.mode != 'none' }}
+      version: ${{ steps.bump.outputs.version || steps.plan.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag || steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The exact commit CI passed, not whatever main points at now.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide whether to bump
+        id: plan
+        run: |
+          set -euo pipefail
+          current=$(python3 - <<'PY'
+          import pathlib, re
+          text = pathlib.Path("src/sourcework/__init__.py").read_text(encoding="utf-8")
+          print(re.search(r'__version__ = "([^"]+)"', text).group(1))
+          PY
+          )
+          # A re-run at the release commit: the tag exists, so rebuild it rather
+          # than bump past a release that may have failed halfway.
+          if git rev-parse -q --verify "refs/tags/v$current" >/dev/null; then
+            echo "mode=retry" >> "$GITHUB_OUTPUT"
+            echo "version=$current" >> "$GITHUB_OUTPUT"
+            echo "tag=v$current" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$last" ]; then
+            git log "$last"..HEAD --no-merges --pretty=format:'%s' > "$RUNNER_TEMP/notes.txt"
+          else
+            git log --no-merges --pretty=format:'%s' > "$RUNNER_TEMP/notes.txt"
+          fi
+          if [ ! -s "$RUNNER_TEMP/notes.txt" ]; then
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The cloud distribution is its own artifact; it only moves when its
+          # own tree changed.
+          if [ -n "$last" ] && git diff --quiet "$last"..HEAD -- cloud/; then
+            echo "cloud_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git log "$last"..HEAD --no-merges --pretty=format:'%s' -- cloud/ \
+              > "$RUNNER_TEMP/cloud-notes.txt" || true
+            echo "cloud_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "mode=bump" >> "$GITHUB_OUTPUT"
+
+      - name: Bump the version and prepend the changelog
+        id: bump
+        if: steps.plan.outputs.mode == 'bump'
+        run: |
+          set -euo pipefail
+          args=(--notes-file "$RUNNER_TEMP/notes.txt")
+          if [ "${{ steps.plan.outputs.cloud_changed }}" = "true" ]; then
+            args+=(--cloud-changed --cloud-notes-file "$RUNNER_TEMP/cloud-notes.txt")
+          fi
+          version=$(python3 scripts/bump_version.py "${args[@]}")
+          tag="v$version"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # `-u`, not `-A`: only the files the bumper touched, so a stray file
+          # on the runner can never find its way into the release commit.
+          git add -u
+          git commit -m "Release $version [skip ci]"
+          git push origin HEAD:main
+          git tag "$tag"
+          git push origin "$tag"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  python:
+    needs: bump
+    if: needs.bump.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/sourcework
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the distributions
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir dist .
+          python -m build --outdir dist cloud
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish to PyPI
+        # Trusted publishing: no token, no secret. Set the repository variable
+        # PUBLISH_PYPI to `false` to skip this while the publishers are being
+        # configured on PyPI (see CONTRIBUTING).
+        if: vars.PUBLISH_PYPI != 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # sourcework-cloud does not move on every push; asking PyPI to accept
+          # the already-published number turns "nothing to do" into a failure.
+          skip-existing: true
+
+  desktop:
+    needs: bump
+    if: needs.bump.outputs.changed == 'true'
+    uses: ./.github/workflows/desktop.yml
+    with:
+      ref: ${{ needs.bump.outputs.tag }}
+
+  release:
+    needs: [bump, python, desktop]
+    if: needs.bump.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create the release and attach every package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # The tag is already pushed; a release is hung on it here, and its
+          # notes are generated by GitHub from the commits since the last one.
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" \
+              --title "SourceWork ${TAG#v}" --generate-notes
+          fi
+
+          files=$(find artifacts -type f \
+            \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.deb' \
+               -o -name '*.AppImage' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.dmg' \) -print)
+          if [ -z "$files" ]; then
+            echo "No packages were produced - that is a failure, not an empty release." >&2
+            exit 1
+          fi
+          echo "$files" | xargs gh release upload "$TAG" --repo "$REPO" --clobber

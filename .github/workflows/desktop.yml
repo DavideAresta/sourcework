@@ -3,10 +3,20 @@ name: Desktop
 # The Tauri shell's build. Kept out of ci.yml because it is a different
 # toolchain on three operating systems, and the Python jobs should not wait for
 # a webview to compile. Mirrored by the `desktop` jobs in .gitlab-ci.yml.
+#
+# It is also the reusable half of the release: `release.yml` calls it with the
+# tag its bump job just created, so the installers are built from the released
+# source rather than from whatever the caller happened to have checked out.
 
 on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit or tag to build. Empty means the triggering ref.
+        type: string
+        required: false
+        default: ""
   push:
-    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -33,6 +43,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Rust
         run: rustup default stable
@@ -70,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - name: Rust
         run: rustup default stable
       - name: cargo-deny
@@ -79,7 +93,8 @@ jobs:
         run: cargo deny --config deny.toml check licenses
 
   attach:
-    # Releases are created by hand; this only hangs the built bundles on one.
+    # For a tag pushed by hand. Automated releases go through release.yml, which
+    # calls this workflow and hangs the bundles on the release itself.
     if: startsWith(github.ref, 'refs/tags/')
     needs: [bundles]
     runs-on: ubuntu-latest
