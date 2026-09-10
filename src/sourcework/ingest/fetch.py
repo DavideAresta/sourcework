@@ -14,7 +14,7 @@ import ipaddress
 import mimetypes
 import socket
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -76,44 +76,137 @@ def guess_media_type(uri: str) -> str:
     return guessed or "application/octet-stream"
 
 
-def _refuse_private_target(host: str | None, uri: str) -> None:
-    """Refuse loopback, link-local, and private-range destinations.
+def _public_addresses(host: str | None, uri: str) -> list[str]:
+    """Resolve ``host`` and refuse unless every address is globally routable.
 
-    Ingestion fetches a URI somebody handed the system, and the ability to make
-    the *server* issue that request is the whole of SSRF: ``169.254.169.254``
-    is cloud credentials, ``127.0.0.1`` is every unauthenticated admin port on
-    the box, and a private range is the rest of the network the server can see
-    and the caller cannot.
-
-    Nothing legitimate ingests a document from a link-local address, so this is
-    a refusal rather than a warning. ``SOURCEWORK_SECURITY__ALLOW_PRIVATE_FETCH``
-    exists for the deployment whose document store genuinely is on 10.x, and it
-    has to be turned on deliberately.
+    Returns the resolved addresses so the caller can connect to one of *these*,
+    rather than letting httpx resolve the name a second time. That second
+    resolution is the gap the old check left open: a name can answer with a
+    public address for the check and ``127.0.0.1`` for the connect (DNS
+    rebinding). Everything that is not globally routable is refused, which
+    covers loopback, link-local, the private ranges, CGNAT ``100.64.0.0/10``
+    and reserved space in one predicate instead of a hand-maintained list.
     """
     from sourcework.config import settings
 
-    if settings().security.allow_private_fetch:
-        return
     if not host:
         raise FetchRefused(f"No host to check in {uri!r}")
 
     try:
-        infos = socket.getaddrinfo(host, None)
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
     except OSError as exc:
         raise FetchError(f"Cannot resolve {host!r}: {exc}") from exc
 
-    for info in infos:
-        address = ipaddress.ip_address(info[4][0])
+    addresses = [info[4][0] for info in infos]
+    if not addresses:
+        raise FetchError(f"Cannot resolve {host!r}")
+
+    if settings().security.allow_private_fetch:
+        return addresses
+
+    for raw in addresses:
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError as exc:  # pragma: no cover - getaddrinfo yields literals
+            raise FetchRefused(f"Refusing to fetch {uri!r}: unparseable address {raw!r}") from exc
         # Checked per resolved address, not on the hostname: a name that
         # resolves to 127.0.0.1 is the standard way around a string-matching
         # blocklist, and a name with several A records only needs one bad one.
-        if (address.is_private or address.is_loopback or address.is_link_local
-                or address.is_reserved or address.is_multicast):
+        if not address.is_global:
             raise FetchRefused(
                 f"Refusing to fetch {uri!r}: {host} resolves to {address}, which is not "
                 "a public address. Set SOURCEWORK_SECURITY__ALLOW_PRIVATE_FETCH=1 if your "
                 "documents really do live there."
             )
+    return addresses
+
+
+def _refuse_private_target(host: str | None, uri: str) -> None:
+    """Refuse a destination that is not globally routable. See :func:`_public_addresses`."""
+    _public_addresses(host, uri)
+
+
+def _pin(uri: str) -> tuple[str, dict[str, str], dict[str, object]]:
+    """Rewrite ``uri`` to connect to the address that was actually vetted.
+
+    Returns ``(url, headers, extensions)``. The URL names the vetted IP so
+    httpx cannot re-resolve to something else; ``Host``/SNI carry the original
+    name so virtual hosting and TLS certificate validation still work.
+    """
+    parsed = urlparse(uri)
+    addresses = _public_addresses(parsed.hostname, uri)
+    host = parsed.hostname or ""
+    ip = addresses[0]
+    port = parsed.port
+    default_port = 443 if parsed.scheme == "https" else 80
+    netloc = f"[{ip}]" if ":" in ip else ip
+    if port and port != default_port:
+        netloc = f"{netloc}:{port}"
+    pinned = parsed._replace(netloc=netloc).geturl()
+    headers = {"Host": host if not port or port == default_port else f"{host}:{port}"}
+    extensions: dict[str, object] = {"sni_hostname": host} if parsed.scheme == "https" else {}
+    return pinned, headers, extensions
+
+
+async def read_capped(
+    resp: httpx.Response, url: str, max_bytes: int = MAX_BYTES
+) -> tuple[bytes, str]:
+    """Read ``resp`` fully but refuse to exceed ``max_bytes``.
+
+    Streams, so the limit is enforced while the body arrives: reading
+    ``resp.content`` first would buffer an unbounded response and only then
+    compare it to the cap, which is not a cap.
+    """
+    declared = resp.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > max_bytes:
+        raise FetchError(f"{url} exceeds the size limit")
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in resp.aiter_bytes():
+        total += len(chunk)
+        if total > max_bytes:
+            raise FetchError(f"{url} exceeds the size limit")
+        chunks.append(chunk)
+    media = resp.headers.get("content-type", "").split(";")[0].strip()
+    return b"".join(chunks), media
+
+
+async def fetch_bytes(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: float = 60.0,
+    max_bytes: int = MAX_BYTES,
+) -> tuple[bytes, str]:
+    """GET ``url`` through the SSRF policy, returning capped ``(data, content_type)``.
+
+    Public so the Confluence client can borrow exactly the same guarantees for
+    its signed media download: every redirect hop is vetted (and pinned to the
+    address that was vetted), and the body is streamed against ``max_bytes``
+    rather than buffered first.
+    """
+    # Redirects are followed one hop at a time so every hop is vetted and
+    # pinned. With `follow_redirects=True` only the first URL is checked, and a
+    # public host that answers 302 -> http://169.254.169.254/ walks straight
+    # past it into the cloud metadata service.
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as http:
+        current = url
+        for _ in range(MAX_REDIRECTS + 1):
+            pinned, host_headers, extensions = _pin(current)
+            request_headers = dict(headers or {})
+            request_headers.update(host_headers)
+            async with http.stream(
+                "GET", pinned, headers=request_headers, extensions=extensions
+            ) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if location:
+                        current = urljoin(current, location)
+                        continue
+                resp.raise_for_status()
+                return await read_capped(resp, current, max_bytes)
+        raise FetchError(f"{url} redirected more than {MAX_REDIRECTS} times")
+
 
 async def fetch(ref: InputRef) -> tuple[bytes, str]:
     """Return ``(data, media_type)`` for an input reference."""
@@ -134,24 +227,7 @@ async def fetch(ref: InputRef) -> tuple[bytes, str]:
         return path.read_bytes(), ref.media_type or guess_media_type(ref.uri)
 
     if scheme in ("http", "https"):
-        _refuse_private_target(parsed.hostname, ref.uri)
-        # Redirects are followed one hop at a time so every hop is checked. With
-        # `follow_redirects=True` the check above guards only the first URL, and
-        # a public host that answers 302 -> http://169.254.169.254/ walks
-        # straight past it into the cloud metadata service.
-        async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as http:
-            url = ref.uri
-            for _ in range(MAX_REDIRECTS + 1):
-                resp = await http.get(url)
-                if resp.is_redirect and resp.headers.get("location"):
-                    url = str(resp.next_request.url if resp.next_request else resp.headers["location"])
-                    _refuse_private_target(urlparse(url).hostname, url)
-                    continue
-                resp.raise_for_status()
-                if len(resp.content) > MAX_BYTES:
-                    raise FetchError(f"{ref.uri} exceeds the size limit")
-                media = resp.headers.get("content-type", "").split(";")[0].strip()
-                return resp.content, ref.media_type or media or guess_media_type(ref.uri)
-            raise FetchError(f"{ref.uri} redirected more than {MAX_REDIRECTS} times")
+        data, media = await fetch_bytes(ref.uri)
+        return data, ref.media_type or media or guess_media_type(ref.uri)
 
     raise FetchError(f"Unsupported URI scheme {scheme!r} for {ref.uri!r}")

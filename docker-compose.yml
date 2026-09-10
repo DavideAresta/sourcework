@@ -21,7 +21,12 @@ x-mesh-env: &mesh-env
 x-common: &common
   build:
     context: .
-  env_file: .env
+  # Optional: .env is gitignored and absent on a fresh clone, and a required
+  # env_file makes `docker compose up` fail before any container starts. The
+  # defaults in `environment` below are enough to bring the mesh up.
+  env_file:
+    - path: .env
+      required: false
   restart: unless-stopped
   networks: [sourcework]
 

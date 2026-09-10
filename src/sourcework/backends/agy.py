@@ -88,7 +88,7 @@ class AgyBackend(LLMBackend):
     def available(self) -> bool:
         return process.which("agy") is not None
 
-    def list_models(self) -> list[str]:
+    def list_models(self, *, refresh: bool = False) -> list[str]:
         """Ask the binary, like the opencode backend does.
 
         Model ids here are versioned and tiered (``gemini-3.6-flash-medium``)

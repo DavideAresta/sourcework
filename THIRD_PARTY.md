@@ -17,14 +17,26 @@ has no build step. The file carries its own licence header; keep it there.
 
 ## Python dependencies
 
-Declared in `pyproject.toml`. Every one is permissive and compatible with MIT
-redistribution — no GPL, LGPL, AGPL or SSPL anywhere in the resolved tree:
+Declared in the root `pyproject.toml`. Every one is permissive and compatible
+with MIT redistribution — no GPL, AGPL or SSPL anywhere in the resolved tree:
 
 | Licence | Packages |
 |---|---|
 | MIT | fastapi, pydantic, pydantic-settings, litellm, python-docx, python-pptx, openpyxl, beautifulsoup4, pytest, ruff |
 | BSD-3-Clause | uvicorn, httpx, python-dotenv, pypdf, lxml |
 | Apache-2.0 | a2a-sdk, tenacity, python-multipart |
+
+The hosted package (`cloud/pyproject.toml`) adds its own dependencies:
+
+| Licence | Packages |
+|---|---|
+| LGPL-3.0-only | psycopg, psycopg-pool |
+| MIT | sourcework (core, above) |
+
+LGPL is not a blocker for an MIT project that *imports* it: the licence
+obliges only that a user who receives a bundled binary can relink against a
+modified psycopg. The import path satisfies that as-is; a self-contained build
+of the hosted service (see *What actually binds you*) is the case to check.
 
 Re-check with `pip-licenses` (or the audit in `CONTRIBUTING.md`) before adding a
 dependency. A copyleft dependency would change what this project can be.

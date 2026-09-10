@@ -77,9 +77,9 @@ def render(prd: PRDDocument, review: ReviewReport | None = None) -> str:
     if prd.requirements.conflicts:
         L += ["## Conflicts to resolve", ""]
         for c in prd.requirements.conflicts:
-            L.append(f"- **{' / '.join(c.requirement_ids)}** — {c.description}")
+            L.append(f"- **{' / '.join(c.requirement_ids)}** — {_tags(c.description)}")
             if c.resolution_hint:
-                L.append(f"  - _Suggested resolution:_ {c.resolution_hint}")
+                L.append(f"  - _Suggested resolution:_ {_tags(c.resolution_hint)}")
         L.append("")
 
     if prd.requirements.open_questions:
@@ -124,12 +124,17 @@ def render(prd: PRDDocument, review: ReviewReport | None = None) -> str:
         L.append("")
 
     for s in prd.extra_sections:
-        L += [f"{'#' * min(max(s.level, 2), 6)} {s.heading}", "", s.body_markdown, ""]
+        L += [
+            f"{'#' * min(max(s.level, 2), 6)} {_tags(s.heading)}",
+            "",
+            _tags(s.body_markdown),
+            "",
+        ]
 
     if prd.requirements.glossary:
         L += ["## Glossary", ""]
         for term, definition in sorted(prd.requirements.glossary.items()):
-            L.append(f"- **{term}** — {definition}")
+            L.append(f"- **{_tags(term)}** — {_tags(definition)}")
         L.append("")
 
     L += ["## Sources", "", "| ID | Title | Type | Location |", "|---|---|---|---|"]
@@ -177,17 +182,28 @@ def render(prd: PRDDocument, review: ReviewReport | None = None) -> str:
 
 def _section(lines: list[str], heading: str, body: str) -> None:
     if body and body.strip():
-        lines += [f"## {heading}", "", body.strip(), ""]
+        lines += [f"## {heading}", "", _tags(body.strip()), ""]
 
 
 def _bullets(lines: list[str], heading: str, items: list[str]) -> None:
     if items:
-        lines += [f"## {heading}", "", *[f"- {i}" for i in items], ""]
+        lines += [f"## {heading}", "", *[f"- {_tags(i)}" for i in items], ""]
+
+
+def _tags(text: str) -> str:
+    """Neutralise raw HTML in free-form text, leaving markdown intact.
+
+    The ``.md`` is a portable artifact rendered by whatever the reader uses, not
+    by the app's own escaper, so model- or source-authored ``<script>`` (or any
+    tag) must not survive as markup. Only the angle brackets are escaped:
+    entities and markdown syntax are untouched.
+    """
+    return (text or "").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _esc(text: str) -> str:
     """Keep markdown tables from exploding on pipes and newlines."""
-    return (text or "").replace("|", "\\|").replace("\n", " ")
+    return _tags(text).replace("|", "\\|").replace("\n", " ")
 
 
 def _table_head(headers: list[str]) -> list[str]:

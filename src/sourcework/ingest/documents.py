@@ -20,15 +20,52 @@ logger = logging.getLogger(__name__)
 
 Block = tuple[str, str]  # (locator, text)
 
+_TRUNCATION_MARKER = "... (truncated at 500 rows)"
+
+MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+"""Cap on what an OOXML archive may expand to before parsing.
+
+The upload cap bounds the *compressed* size, and deflate reaches roughly
+1000:1; without this a 64 MB .docx can expand to tens of GB in memory when the
+parser materialises the inner XML. 512 MB is far above any real document."""
+
 
 class UnsupportedDocument(RuntimeError):
     pass
+
+
+def _refuse_zip_bomb(data: bytes, kind: str) -> None:
+    """Reject an OOXML file whose declared uncompressed size is unreasonable."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            total = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile as exc:
+        raise UnsupportedDocument(f"{kind} is not a valid ZIP/OOXML archive: {exc}") from exc
+    if total > MAX_UNCOMPRESSED_BYTES:
+        raise UnsupportedDocument(
+            f"{kind} expands to {total // (1024 * 1024)} MB, over the "
+            f"{MAX_UNCOMPRESSED_BYTES // (1024 * 1024)} MB limit"
+        )
 
 
 def extract(data: bytes, media_type: str, filename: str = "") -> tuple[list[Block], list[str]]:
     """Dispatch on media type / extension. Returns ``(blocks, warnings)``."""
     warnings: list[str] = []
     kind = _classify(media_type, filename)
+    if not kind:
+        # Deliberately unreachable for recognised text, and deliberately loud
+        # for a binary nobody wrote an extractor for: decoding a .doc or .rtf
+        # as UTF-8 with replacement produces plausible-looking mojibake that
+        # would be cited as evidence.
+        raise UnsupportedDocument(
+            f"No extractor for {media_type!r} ({filename!r}). "
+            "Supported: pdf, docx, pptx, xlsx, csv, html, markdown, text."
+        )
+    if kind in ("docx", "pptx", "xlsx"):
+        _refuse_zip_bomb(data, kind)
+
     try:
         extractor = _EXTRACTORS[kind]
     except KeyError:
@@ -45,6 +82,8 @@ def extract(data: bytes, media_type: str, filename: str = "") -> tuple[list[Bloc
             'Install with: pip install "sourcework[ingest]"'
         ) from exc
 
+    if any(_TRUNCATION_MARKER in text for _, text in blocks):
+        warnings.append(f"{filename or kind}: rows truncated at 500 per sheet")
     blocks = [(loc, _tidy(text)) for loc, text in blocks if text and text.strip()]
     if not blocks:
         warnings.append(f"{filename or kind}: no extractable text (scanned image? OCR not wired up)")
@@ -71,6 +110,17 @@ def _classify(media_type: str, filename: str) -> str:
         return "html"
     if name.endswith((".md", ".markdown")) or "markdown" in mt:
         return "markdown"
+    if name.endswith((".doc", ".rtf", ".odt", ".ods", ".odp")) or mt in (
+        "application/msword",
+        "application/rtf",
+        "text/rtf",
+    ):
+        return ""  # a binary with no extractor; refuse rather than decode as text
+    if name.endswith((".txt", ".text")) or mt.startswith("text/"):
+        return "text"
+    # No recognised type at all (an extensionless upload, an octet-stream):
+    # treating it as text is the historical behaviour and is only wrong for a
+    # binary, which the recognised-binary cases above already catch.
     return "text"
 
 
@@ -137,14 +187,20 @@ def _xlsx(data: bytes) -> Iterator[Block]:
             if cells:
                 rows.append(" | ".join(cells))
             if len(rows) >= 500:
-                rows.append("... (truncated at 500 rows)")
+                rows.append(_TRUNCATION_MARKER)
                 break
         yield f"sheet {sheet.title}", "\n".join(rows)
 
 
 def _csv(data: bytes) -> Iterator[Block]:
     text = data.decode("utf-8", errors="replace")
-    dialect = csv.Sniffer().sniff(text[:4096]) if text[:4096].strip() else csv.excel
+    sample = text[:4096]
+    try:
+        # Sniffing a single-column file is a normal way for this to fail; fall
+        # back to Excel's dialect rather than failing the whole ingestion.
+        dialect = csv.Sniffer().sniff(sample) if sample.strip() else csv.excel
+    except csv.Error:
+        dialect = csv.excel
     reader = csv.reader(io.StringIO(text), dialect)
     rows = [" | ".join(r) for r in reader]
     for start in range(0, len(rows), 200):

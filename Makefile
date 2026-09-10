@@ -51,4 +51,7 @@ logs:
 	docker compose logs -f --tail=100
 
 clean:
-	rm -rf $(VENV) .pytest_cache **/__pycache__ *.egg-info
+	rm -rf $(VENV) .pytest_cache *.egg-info
+	# `sh` does not expand `**` without globstar, so the old `**/__pycache__`
+	# removed only the top level and left stale bytecode behind.
+	find . -name __pycache__ -type d -prune -exec rm -rf {} +

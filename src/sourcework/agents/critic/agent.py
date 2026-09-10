@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 PORT = 8007
 
 MAX_PROMPT_FINDINGS = 200
+MAX_PROMPT_MARKDOWN_CHARS = 60_000
+MAX_PROMPT_EVIDENCE = 250
+"""Caps on what the reviewer is shown. Each is reported when it bites: a
+review performed on a truncated document cannot honestly claim to cover it."""
 """How many deterministic findings are shown to the model.
 
 They are in the prompt for one reason - so the model does not spend its answer
@@ -113,12 +117,23 @@ class CriticExecutor(SkillExecutor):
                 f"{len(findings) - len(shown)} deterministic finding(s) left out of the "
                 f"review prompt (showing {len(shown)}); all of them stay in the report"
             )
+        if len(markdown) > MAX_PROMPT_MARKDOWN_CHARS:
+            await progress(
+                f"PRD is {len(markdown)} characters; the review prompt shows the first "
+                f"{MAX_PROMPT_MARKDOWN_CHARS} - the tail was not reviewed adversarially"
+            )
+        evidence_shown = prd.evidence[:MAX_PROMPT_EVIDENCE]
+        if len(prd.evidence) > len(evidence_shown):
+            await progress(
+                f"{len(prd.evidence) - len(evidence_shown)} evidence item(s) left out of the "
+                f"review prompt (showing {len(evidence_shown)})"
+            )
         user = (
-            f"PRD under review:\n\n{markdown[:60000]}\n\n"
+            f"PRD under review:\n\n{markdown[:MAX_PROMPT_MARKDOWN_CHARS]}\n\n"
             "---\nDETERMINISTIC FINDINGS ALREADY RECORDED (do not repeat):\n"
             + ("\n".join(f"- [{f.severity.value}] {f.location}: {f.detail}" for f in shown) or "none")
             + "\n\n---\nEVIDENCE AVAILABLE TO THE WRITER:\n"
-            + "\n".join(f"- {e.id} [{e.kind}] {e.text}" for e in prd.evidence[:250])
+            + "\n".join(f"- {e.id} [{e.kind}] {e.text}" for e in evidence_shown)
         )
 
         await progress("Adversarial review")

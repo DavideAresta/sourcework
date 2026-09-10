@@ -13,7 +13,13 @@
 // somebody edits this file too. What *is* live is health (`/api/mesh`), the
 // active agent (a run's own event stream) and a finished run's timings.
 
-import { el, clear, mount } from './dom.js';
+import { el, clear, mount, safeHref } from './dom.js';
+
+// An agent card's URL is data, so its `href` goes through the same http(s)
+// allow-list as any other server-supplied link.
+function docsHref(url) {
+  return url ? safeHref(`${url.replace(/\/$/, '')}/docs`) : null;
+}
 import { api } from './api.js';
 import * as Icons from './icons.js';
 import { meshName } from './railway.js';
@@ -256,9 +262,9 @@ function selectNode(id) {
     skills?.length
       ? el('div', { class: 'io' }, el('b', {}, 'skills'), el('code', {}, skills.join(', ')))
       : null,
-    url
+    docsHref(url)
       ? el('p', { class: 'arch-hint' },
-          el('a', { href: `${url.replace(/\/$/, '')}/docs`, target: '_blank', rel: 'noopener' },
+          el('a', { href: docsHref(url), target: '_blank', rel: 'noopener' },
             'Open its API docs ↗'))
       : null,
     mesh && !skills && byId(id).id !== 'publish'

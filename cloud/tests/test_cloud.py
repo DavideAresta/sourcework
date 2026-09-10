@@ -286,7 +286,9 @@ def postgres() -> PostgresStore:
         pytest.skip(f"no reachable Postgres ({exc}); set SOURCEWORK_CLOUD__TEST_DATABASE_URL")
         return None
     with store._pool.connection() as conn:
-        conn.execute("TRUNCATE runs")
+        # Both tables: tenant_settings was never truncated, so settings written
+        # by one test leaked into the next.
+        conn.execute("TRUNCATE runs, tenant_settings")
         conn.commit()
     yield store
     store.close()
@@ -295,7 +297,7 @@ def postgres() -> PostgresStore:
 @pytest.fixture
 def clean_postgres(postgres: PostgresStore) -> PostgresStore:
     with postgres._pool.connection() as conn:
-        conn.execute("TRUNCATE runs")
+        conn.execute("TRUNCATE runs, tenant_settings")
         conn.commit()
     return postgres
 

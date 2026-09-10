@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -271,7 +272,15 @@ def swap_config(
             args.append("-ngl 99")
         args += model.extra_args
 
-        source = f"-hf {model.hf_repo}" if model.hf_repo else f"-m {model.path}"
+        # Quoted: this is a shell line llama-swap executes, and the path or
+        # repo can contain a space or, at worst, shell metacharacters. The rest
+        # of `args` is constructed here (and may deliberately embed quotes for
+        # the harmony template), so it is left as-is.
+        source = (
+            f"-hf {shlex.quote(model.hf_repo)}"
+            if model.hf_repo
+            else f"-m {shlex.quote(str(model.path))}"
+        )
         note = (
             f"  # {model.size_gb:.1f} GB, "
             + ("fits on the card" if fitted else "larger than VRAM - placement left to --fit")
@@ -283,10 +292,10 @@ def swap_config(
         lines.append(f"  {model.id}:")
         lines.append(note)
         lines.append("    cmd: |")
-        lines.append(f"      {server}")
+        lines.append(f"      {shlex.quote(server)}")
         lines.append(f"      {source}")
         if model.mmproj:
-            lines.append(f"      --mmproj {model.mmproj}")
+            lines.append(f"      --mmproj {shlex.quote(str(model.mmproj))}")
         lines.append("      " + " ".join(args))
         lines.append(f"    ttl: {ttl}")
         lines.append("")

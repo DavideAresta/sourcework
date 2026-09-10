@@ -4,7 +4,7 @@
 // requirement shown with the evidence that licenses it, and an explicit warning
 // where there is none. That is the traceability claim, made checkable.
 
-import { el, clear, mount, escape, ago, duration, toast } from './dom.js';
+import { el, clear, mount, escape, ago, duration, toast, safeHref } from './dom.js';
 import { api } from './api.js';
 import { renderMarkdown } from './markdown.js';
 import * as notify from './notify.js';
@@ -16,6 +16,15 @@ const KIND_CLASS = { error: 'error', done: 'done', status: 'status' };
 
 // readiness.py's three states, as the dashboard already colours them.
 const READY_PILL = { ready: 'pill ok', needs_work: 'pill err', unreviewed: 'pill warn' };
+
+// A publish target's URL is server data; keep `javascript:` out of an href by
+// rendering anything that is not http(s) as plain, unclickable text.
+function publishedLink(url) {
+  const href = safeHref(url);
+  return href
+    ? el('a', { href, target: '_blank', rel: 'noopener' }, url)
+    : el('span', {}, url);
+}
 
 // A button that cannot be pressed twice.
 //
@@ -136,8 +145,13 @@ export function runView(runId, { onChanged }) {
       foldLog(lastRun);
     }
     const nearBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 40;
+    // The orchestrator tags a specialist's lines `[analyst] …`. Lift the tag
+    // off *before* the rail sees the line: the rail matches prose, and a tag
+    // glued to the front is prose that matches nothing.
+    const tagged = /^\[([a-z-]+)\]\s*/.exec(event.message ?? '');
+    const text = tagged ? event.message.slice(tagged[0].length) : (event.message ?? '');
     // The rail is told, never told twice: `seen` already guards the replay.
-    if (rail.sawMessage(event.message, event.kind)) rail.render(lastRun);
+    if (rail.sawMessage(text, event.kind)) rail.render(lastRun);
     // One header per minute instead of a timestamp on every row. Forty lines
     // each carrying 12:19:24 is forty repetitions of the same four digits; what
     // a reader actually wants from a log is where the time jumped.
@@ -148,12 +162,8 @@ export function runView(runId, { onChanged }) {
       logBox.append(el('div', { class: 'event-minute' }, minute));
     }
 
-    // The orchestrator tags a specialist's own lines `[analyst] …`; lift the
-    // tag out of the prose so it can be a chip and the message can be the
-    // message.
-    const tagged = /^\[([a-z-]+)\]\s*/.exec(event.message ?? '');
-    const text = tagged ? event.message.slice(tagged[0].length) : (event.message ?? '');
-
+    // The tag is already lifted (above); here it becomes the chip and the
+    // message stays the message.
     const row = el('div', {
       class: `line ${KIND_CLASS[event.kind] ?? ''}`, title: stamp,
     },
@@ -362,7 +372,7 @@ export function runView(runId, { onChanged }) {
       run.error && el('div', { class: 'card', style: 'border-color:var(--err)' },
         el('b', {}, 'Failed. '), run.error),
       run.result?.published_url && el('div', { class: 'card' },
-        'Published: ', el('a', { href: run.result.published_url, target: '_blank', rel: 'noopener' }, run.result.published_url)),
+        'Published: ', publishedLink(run.result.published_url)),
     );
   }
 

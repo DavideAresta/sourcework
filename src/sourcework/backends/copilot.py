@@ -113,7 +113,7 @@ class CopilotBackend(LLMBackend):
     def available(self) -> bool:
         return process.which("copilot") is not None
 
-    def list_models(self) -> list[str]:
+    def list_models(self, *, refresh: bool = False) -> list[str]:
         """Curated - the CLI has no model-listing command.
 
         ``auto`` lets Copilot choose, and is the right default: the concrete ids

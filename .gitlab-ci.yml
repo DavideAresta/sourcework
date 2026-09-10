@@ -14,11 +14,15 @@ default:
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  # Turn the e2e suite's "a port is busy, skip everything" into a failure: in CI
+  # there is no local mesh to collide with, so a skip there would only mean the
+  # end-to-end guarantee quietly stopped running.
+  SOURCEWORK_E2E_STRICT: "1"
 
 lint:
   stage: lint
   script:
-    - ruff check src tests
+    - ruff check src tests cloud
 
 test:
   stage: test

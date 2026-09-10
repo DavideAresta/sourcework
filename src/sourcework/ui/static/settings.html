@@ -26,30 +26,31 @@
     <a href="/"><button class="ghost">← Back</button></a>
   </header>
 
-  <main class="centred narrow-col">
-    <h1>Settings</h1>
-    <p class="muted">
-      Saved defaults, written to <span class="mono" id="env-path">.env</span>.
-      A run can override the model settings for itself without touching any of this.
-    </p>
+  <main class="settings-layout">
+    <nav id="settings-nav" class="settings-nav" role="tablist" aria-label="Settings sections"></nav>
 
-    <div id="restart-note" class="card" style="display:none;border-left:3px solid var(--accent)">
-      <b>The mesh is restarting.</b>
-      <span class="muted">The agents read their configuration once, at start-up, so this page asked each one to restart itself. It will reload when they are back.</span>
+    <div class="settings-body">
+      <h1>Settings</h1>
+      <p class="muted">
+        Saved defaults, written to <span class="mono" id="env-path">.env</span>.
+        A run can override the model settings for itself without touching any of this.
+      </p>
+
+      <div id="restart-note" class="card" style="display:none;border-left:3px solid var(--accent)">
+        <b>The mesh is restarting.</b>
+        <span class="muted">The agents read their configuration once, at start-up, so this page asked each one to restart itself. It will reload when they are back.</span>
+      </div>
+
+      <div id="settings-panels"></div>
     </div>
+  </main>
 
-    <div class="card">
-      <h3 style="margin-top:0">Backends on this machine</h3>
-      <div id="backends"></div>
-    </div>
-
-    <div id="form"></div>
-
-    <div class="row">
+  <footer class="settings-save">
+    <div class="settings-save-inner">
       <button id="save" class="primary">Save</button>
       <span class="muted small">Secrets show as ••••••••; leave them alone to keep the stored value.</span>
     </div>
-  </main>
+  </footer>
 
   <script type="module" src="/static/js/theme.js"></script>
   <script type="module" src="/static/js/settings.js"></script>

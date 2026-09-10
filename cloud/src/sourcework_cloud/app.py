@@ -52,6 +52,7 @@ def build_cloud_app(
     workspace: Path | None = None,
     *,
     executor: object | None = None,
+    bind_host: str | None = None,
 ):
     """The hosted SourceWork service. ``store``/``workspace``/``executor`` are
     injectable for tests; production reads them from the environment."""
@@ -73,6 +74,7 @@ def build_cloud_app(
         settings_backend=TenantSettingsBackend(store),
         authorizer=policy,
         run_id_factory=lambda: str(uuid.uuid4()),
+        bind_host=bind_host,
     )
 
 
@@ -81,4 +83,4 @@ def serve(host: str = "0.0.0.0", port: int = 8080) -> None:
     distribution has exactly one door, and it is the browser."""
     import uvicorn
 
-    uvicorn.run(build_cloud_app(), host=host, port=port)
+    uvicorn.run(build_cloud_app(bind_host=host), host=host, port=port)

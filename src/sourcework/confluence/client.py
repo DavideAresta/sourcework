@@ -19,14 +19,46 @@ import asyncio
 import base64
 import logging
 import random
+import time
+from datetime import UTC
+from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import httpx
 
 from sourcework.config import ConfluenceSettings, settings
+from sourcework.ingest.fetch import MAX_BYTES, FetchError, fetch_bytes, read_capped
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_after(value: str | None, fallback: float) -> float:
+    """Seconds to wait, from either form RFC 7231 allows.
+
+    ``Retry-After`` is either delay-seconds or an HTTP-date. Only the first was
+    handled, so a server sending the date form raised ``ValueError`` out of a
+    path whose callers catch only ``ConfluenceError``. Capped so a hostile or
+    mistaken header cannot park the client for hours.
+    """
+    if value:
+        try:
+            return max(0.0, min(float(value), 60.0))
+        except ValueError:
+            pass
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            when = None
+        if when is not None:
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=UTC)
+            try:
+                delta = when.timestamp() - time.time()
+            except (OverflowError, OSError, ValueError):
+                return fallback
+            return max(0.0, min(delta, 60.0))
+    return fallback
 
 
 class ConfluenceError(RuntimeError):
@@ -79,7 +111,7 @@ class ConfluenceClient:
         for attempt in range(5):
             resp = await self.http.request(method, url, **kwargs)
             if resp.status_code == 429 or 500 <= resp.status_code < 600:
-                wait = float(resp.headers.get("Retry-After", delay))
+                wait = _retry_after(resp.headers.get("Retry-After"), delay)
                 wait += random.uniform(0, 0.5)  # noqa: S311 - jitter, not crypto
                 logger.warning(
                     "Confluence %s %s -> %s, retrying in %.1fs (attempt %d)",
@@ -100,7 +132,6 @@ class ConfluenceClient:
         raise ConfluenceError(f"{method} {url} still failing after retries")
 
     async def _paginate(self, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
-        origin = f"{urlparse(self.base).scheme}://{urlparse(self.base).netloc}"
         out: list[dict[str, Any]] = []
         next_path: str | None = path
         next_params: dict[str, Any] | None = params
@@ -111,7 +142,14 @@ class ConfluenceClient:
             link = body.get("_links", {}).get("next")
             if not link or len(out) >= params.get("_max", 1000):
                 break
-            next_path, next_params = origin + link, None
+            # `_links.next` is server-controlled. Following it with the
+            # authenticated client would send the Atlassian credentials to
+            # whatever host the link names, so only same-origin links continue.
+            candidate = urljoin(self.base, link)
+            if urlparse(candidate).netloc != urlparse(self.base).netloc:
+                logger.warning("Confluence pagination: refusing cross-origin next link %r", link)
+                break
+            next_path, next_params = candidate, None
         return out
 
     # -- read --------------------------------------------------------------
@@ -149,21 +187,36 @@ class ConfluenceClient:
         )
 
     async def download_attachment(self, page_id: str, attachment_id: str) -> bytes:
-        """v1 redirect endpoint; the media host rejects our auth header."""
+        """v1 redirect endpoint; the media host rejects our auth header.
+
+        The first hop carries the Atlassian credentials; the signed redirect is
+        fetched without them, through the same SSRF policy and byte cap as any
+        other remote document (:func:`~sourcework.ingest.fetch.fetch_bytes`).
+        """
         url = (
             f"{self.base}/rest/api/content/{page_id}/child/attachment/"
             f"{attachment_id}/download"
         )
-        resp = await self.http.get(url, follow_redirects=False)
-        if resp.status_code in (301, 302, 303, 307, 308):
-            location = resp.headers["Location"]
-            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as anon:
-                signed = await anon.get(location)
-                signed.raise_for_status()
-                return signed.content
-        if resp.status_code >= 400:
-            raise ConfluenceError(f"attachment download -> {resp.status_code}: {resp.text[:300]}")
-        return resp.content
+        async with self.http.stream("GET", url, follow_redirects=False) as resp:
+            if resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("Location")
+                if not location:
+                    raise ConfluenceError("attachment download redirect had no Location")
+                signed_url = urljoin(url, location)
+            elif resp.status_code >= 400:
+                body = (await resp.aread())[:300]
+                raise ConfluenceError(
+                    f"attachment download -> {resp.status_code}: {body.decode('utf-8', 'replace')}"
+                )
+            else:
+                # Returned inline rather than redirecting: still capped.
+                return (await read_capped(resp, url, MAX_BYTES))[0]
+
+        try:
+            data, _ = await fetch_bytes(signed_url, timeout=120.0, max_bytes=MAX_BYTES)
+        except FetchError as exc:
+            raise ConfluenceError(f"attachment download failed: {exc}") from exc
+        return data
 
     # -- write -------------------------------------------------------------
 
@@ -260,7 +313,13 @@ class ConfluenceClient:
             return parts[0], parts[1]
         parsed = urlparse(uri)
         segments = [s for s in parsed.path.split("/") if s]
-        space = segments[segments.index("spaces") + 1] if "spaces" in segments else None
+        space = None
+        if "spaces" in segments:
+            idx = segments.index("spaces")
+            # Bounds-checked like "pages" below: a URL ending in `/spaces`
+            # used to raise IndexError instead of returning (None, ...).
+            if idx + 1 < len(segments):
+                space = segments[idx + 1]
         page_id = None
         if "pages" in segments:
             idx = segments.index("pages")

@@ -33,6 +33,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import os
 from typing import Any
 
 from sourcework.backends import process
@@ -48,6 +49,31 @@ from sourcework.backends.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+_BILLING_WARNED = False
+
+
+def _warn_if_api_key_billed() -> None:
+    """Say once when Codex will bill the API instead of the subscription.
+
+    Codex prefers ``CODEX_API_KEY``/``OPENAI_API_KEY`` in the environment over
+    its stored login, and `process.run` merges the parent environment. A
+    developer who exported a key for the litellm backend gets charged per call
+    with no other signal, which is the silent degradation this project reports.
+    """
+    global _BILLING_WARNED
+    if _BILLING_WARNED:
+        return
+    _BILLING_WARNED = True
+    for var in ("CODEX_API_KEY", "OPENAI_API_KEY"):
+        if os.environ.get(var):
+            logger.warning(
+                "codex-cli sees %s in the environment and prefers it over the stored "
+                "ChatGPT login, so its calls bill the API. Unset %s to use the subscription.",
+                var,
+                var,
+            )
+            return
 
 # Tool features to switch off for a single-shot generation call. Every name is
 # checked against `codex features list` - an invented one would ride along in
@@ -101,7 +127,7 @@ class CodexBackend(LLMBackend):
     def available(self) -> bool:
         return process.which("codex") is not None
 
-    def list_models(self) -> list[str]:
+    def list_models(self, *, refresh: bool = False) -> list[str]:
         """Deliberately empty: free text.
 
         Codex model ids move with each release and there is no cheap offline
@@ -111,6 +137,7 @@ class CodexBackend(LLMBackend):
         return []
 
     async def generate(self, request: BackendRequest) -> BackendResult:
+        _warn_if_api_key_billed()
         # No --system-prompt flag exists on `codex exec`, so the two halves are
         # folded into one message, as opencode and copilot do.
         prompt = f"SYSTEM:\n{request.system}\n\nUSER:\n{request.user}"

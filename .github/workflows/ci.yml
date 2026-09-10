@@ -36,11 +36,16 @@ jobs:
         run: pip install -e ".[ingest,dev]"
 
       - name: Lint
-        run: ruff check src tests
+        run: ruff check src tests cloud
 
       - name: Test
         # SOURCEWORK_LLM__STUB is set by tests/conftest.py, so the suite needs no
         # API key, no network and no CLI - which is the point of stub mode.
+        # STRICT turns the e2e suite's "a port is busy, skip everything" into a
+        # failure: in CI there is no local mesh to collide with, so a skip there
+        # would only mean the end-to-end guarantee quietly stopped running.
+        env:
+          SOURCEWORK_E2E_STRICT: "1"
         run: pytest -q
 
       - name: Smoke test the whole pipeline

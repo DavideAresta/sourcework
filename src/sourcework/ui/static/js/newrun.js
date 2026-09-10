@@ -92,20 +92,48 @@ export function newRunView(onStarted) {
   const backendHint = el('div', { class: 'small muted' });
 
   let catalogue = {};
+  // The four role cells are shared across backends, but a model id means
+  // nothing outside the backend it belongs to. Remember each backend's own
+  // overrides, so switching away and back neither carries `openai/…` under
+  // claude-code (where it filters the new list to "No match" and would be
+  // submitted as a nonsense model) nor loses what you set for the first one.
+  const modelsByBackend = new Map();
   const cliNote = el('span', { class: 'muted small' }, 'CLI backends take minutes — you can leave this page.');
-  api.backends().then((data) => {
+  const refresh = el('button', {
+    class: 'ghost small',
+    type: 'button',
+    title: 'Re-read every backend and its model list',
+  }, 'Refresh models');
+
+  // Re-runnable, because the model lists live outside this app: a CLI that
+  // gained a model, or a server started since the page opened, should show up
+  // without a reload.
+  async function loadBackends({ force = false } = {}) {
+    let data;
+    try {
+      data = await api.backends({ refresh: force });
+    } catch {
+      backendHint.textContent = 'Could not read backend availability.';
+      return;
+    }
     catalogue = Object.fromEntries(data.backends.map((b) => [b.id, b]));
     // The note is a lie on a hosted install, which offers no CLI backends.
     // `cli_backends` is the offered CLI ids, sent by the server so this page
     // does not carry its own copy of the list.
     const cliOffered = (data.cli_backends ?? [])
       .some((id) => (data.backends ?? []).some((b) => b.id === id));
-    if (!cliOffered) cliNote.style.display = 'none';
+    cliNote.style.display = cliOffered ? '' : 'none';
+    // Cells are created once and kept, so a refresh never discards what was
+    // typed; a role that appears for the first time still gets its cell.
     for (const role of data.roles ?? []) {
+      if (modelInputs[role]) continue;
       const input = el('input', { type: 'text', placeholder: 'backend default' });
       modelInputs[role] = input;
       modelRow.append(field(roleLabel(role), input, roleHelp(role)));
     }
+    const previous = backend.value;
+    clear(backend);
+    backend.append(el('option', { value: '' }, 'configured default'));
     for (const b of data.backends) {
       // Not answering is not the same as not installed, and it is the more
       // useful thing to say: the backend is here, you can still pick it, and
@@ -117,22 +145,49 @@ export function newRunView(onStarted) {
         : dead ? `${b.id} — installed, not answering` : b.id;
       backend.append(el('option', { value: b.id, disabled: !b.available }, label));
     }
-    backend.value = '';
+    // Keep the choice if it is still offered; otherwise fall back to the
+    // configured default rather than leaving the select showing something
+    // that is no longer in it.
+    const stillOffered = [...backend.options].some((o) => o.value === previous && !o.disabled);
+    backend.value = stillOffered ? previous : '';
     describeBackend();
-  }).catch(() => {
-    backendHint.textContent = 'Could not read backend availability.';
+  }
+
+  refresh.addEventListener('click', () => {
+    refresh.disabled = true;
+    loadBackends({ force: true }).finally(() => { refresh.disabled = false; });
   });
+  loadBackends({ force: true });
 
   let pickers = [];
 
+  // Snapshot what is currently typed against the backend it was typed for,
+  // before the select's value moves on. `lastBackend`, not `backend.value`,
+  // because `change` fires after the value has already changed.
+  function rememberModels() {
+    const previous = backend.dataset.lastBackend ?? '';
+    const snapshot = {};
+    for (const [role, input] of Object.entries(modelInputs)) {
+      const value = input.value.trim();
+      if (value) snapshot[role] = value;
+    }
+    modelsByBackend.set(previous, snapshot);
+  }
+
   function describeBackend() {
+    rememberModels();
     const chosen = backend.value;
+    backend.dataset.lastBackend = chosen;
+    const remembered = modelsByBackend.get(chosen) ?? {};
+    for (const [role, input] of Object.entries(modelInputs)) {
+      input.value = remembered[role] ?? '';
+    }
     const info = catalogue[chosen];
     // Offer that backend's models as suggestions; the field stays free text
     // because the CLIs accept ids that no listing knows about.
     for (const picker of pickers) picker.destroy();
     pickers = Object.values(modelInputs)
-      .map((input) => attachModelPicker(input, info?.models ?? []))
+      .map((input) => attachModelPicker(input, info?.models ?? [], info?.model_names ?? {}))
       .filter(Boolean);
     backendHint.textContent = !chosen
       ? 'Uses whatever the mesh was started with.'
@@ -226,7 +281,8 @@ export function newRunView(onStarted) {
       ),
       el('div', { style: 'height:12px' }),
       modelRow,
-      el('div', { style: 'height:8px' }), backendHint,
+      el('div', { class: 'row', style: 'margin-top:8px;align-items:center' },
+        backendHint, el('span', { style: 'flex:1' }), refresh),
     ),
 
     el('details', { class: 'card fold' },

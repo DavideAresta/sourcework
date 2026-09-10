@@ -14,11 +14,13 @@ the bottom of the PRD.
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from sourcework.config import LLMOverrides
 
@@ -29,6 +31,30 @@ def _now() -> datetime:
 
 def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
+
+
+RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+"""A run id becomes a filename under ``workspace/checkpoints``.
+
+It is caller-controlled (:attr:`PRDRequest.run_id`) and reaches the filesystem
+as ``{run_id}.json`` and as a glob pattern, so a value containing ``/``,
+``..``, ``.`` or a glob metacharacter could write or delete outside the run's
+own state. The grammar is deliberately narrow: no path separators, no dots
+(they separate the scope suffix), nothing that resolves as a path.
+"""
+
+
+def _validate_run_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not RUN_ID_PATTERN.match(value):
+        raise ValueError(
+            "run_id must be 1-64 characters of [A-Za-z0-9_-], starting alphanumeric"
+        )
+    return value
+
+
+RunId = Annotated[str | None, AfterValidator(_validate_run_id)]
 
 
 class Modality(str, Enum):
@@ -207,7 +233,7 @@ class PRDDocument(BaseModel):
     id: str = Field(default_factory=lambda: new_id("prd"))
     title: str
     status: str = "draft"
-    version: str = "0.4.1"
+    version: str = "0.5.0"
     generated_at: datetime = Field(default_factory=_now)
     authors: list[str] = Field(default_factory=list)
 
@@ -303,7 +329,7 @@ class PRDBaseline(BaseModel):
     fresh evidence ids, so every citation in the existing PRD would break.
     """
 
-    run_id: str | None = None
+    run_id: RunId = None
     sources: list[SourceDocument] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     requirements: RequirementSet | None = None
@@ -354,7 +380,7 @@ class PRDRequest(BaseModel):
     is carried in, ``inputs`` supplies whatever is new, and the analyst
     reconciles the two."""
 
-    run_id: str | None = None
+    run_id: RunId = None
     """Names the run, so each stage can write down what it produced. Without it
     a run keeps its intermediate state only in memory and an interruption costs
     everything it had already paid for."""

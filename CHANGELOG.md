@@ -15,7 +15,15 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
-## [Unreleased]
+## [0.5.0] — 2026-09-10
+
+A hardening and ergonomics release. A security pass closed a run-id path
+traversal, an environment-injection hole in the settings writer, SSRF and
+unbounded-fetch gaps, and enabled the hosted store's row-level security for
+real; the settings page was cut into tabs and stopped hiding the live model
+lists, which now refresh on entry; and a run's stage railway no longer showed
+the wrong stage for the whole analysis phase. Nothing here changes what a
+citation guarantees.
 
 ### Added
 
@@ -71,6 +79,160 @@ change belongs to.
   without llama-swap that script's first act is to fail, so the advice was a
   dead end. It now names the install command when the tool is missing and the
   scan-and-serve sequence when it is there.
+
+### Changed
+
+- **The settings page is split into tabs.** It had grown into one long scroll:
+  a probe card that repeated the active backend, a routing card, then eleven
+  near-identical backend cards, then a twelve-field "Limits" grab-bag, then
+  ad-hoc cards. It is now **Overview** (active backend, profiles, and what this
+  machine can actually reach), **Models** (the backend cards, each carrying its
+  own status, with shared credentials), **Advanced** ("Limits" split into model
+  calls, analyst slicing, mesh & concurrency, and runs & quality),
+  **Integrations** and **Security**. The tab and each field's tab come from the
+  server (`/api/settings` → `tabs`), so the local and hosted installs share one
+  navigation, and the active tab is in the URL (`/settings#models`). Switching
+  tabs only hides panels — every control stays mounted, so Save still posts
+  them all and a half-typed value survives a look at another section.
+
+### Security
+
+- **A run id is validated before it becomes a path.** `run_id` is
+  caller-controlled and reaches `workspace/checkpoints/{run_id}.json` and a
+  glob pattern, so `../../…` wrote or deleted outside the workspace and `*`
+  made the delete route remove *every* run's checkpoints. It is now constrained
+  to `[A-Za-z0-9_-]`, the checkpoint layer refuses a path outside the
+  checkpoints directory and escapes the glob, and the same rules apply to the
+  route that never passed through `PRDRequest`.
+- **The settings allow-list now governs the value, not only the key.** A value
+  containing a newline ended the line early and the next line was parsed as
+  another key — `SOURCEWORK_SECURITY__ENFORCE=false` injected through a field
+  that was never on the page. Control characters are rejected, and a
+  wrong-typed value (a non-number in a number field) is refused rather than
+  written and turned into a config no later process can load.
+- **SSRF hardening and real size limits on fetched documents.** The private-
+  address check resolved the hostname and httpx resolved it again, so a name
+  could answer publicly for the check and `127.0.0.1` for the connect; the
+  check is now `is_global` and the connection is pinned to the address that was
+  vetted (`Host`/SNI keep TLS and virtual hosting working). Response bodies,
+  Confluence attachments and redirected bodies are streamed against the size
+  cap instead of buffered first. Confluence pagination ignores a cross-origin
+  `_links.next` rather than sending it the account token.
+- **Row-level security is enforced in the hosted store.** The tables were
+  created by the same role that queries them, and Postgres exempts a table's
+  owner from its own policies, so `ENABLE` was decoration; it is now `FORCE`.
+- Cloud bearer-token comparison is constant-time, server-supplied publish URLs
+  are allow-listed to `http(s)` before becoming an `href`, the audit bundle
+  redacts inline bytes and local paths, and OOXML uploads are refused if they
+  expand past a cap.
+
+### Fixed
+
+- **The model picker stops fighting where it opens.** The vendored combobox
+  anchored to the document and only ever opened downward, so a lower model cell
+  got a sliver of a list; it now flips above the field when there is more room
+  there, and the list is wider than the cell so a long model id is not clipped.
+  It no longer opens on focus — clicking a cell dropped sixty rows over the
+  form — opening instead on a click, on typing, or on ArrowDown. The "current"
+  badge, which tested an attribute nothing ever set, now marks the saved value.
+- **Model choices follow the backend on the run form.** Its four role cells are
+  shared across backends, so a model id picked for one was carried into the
+  next: the new backend's list filtered against a foreign id and showed "No
+  match", and the stale id would have been submitted under the wrong backend.
+  Each backend's overrides are now remembered separately and restored when you
+  switch back. The suggestion list also stopped truncating at 60 — opencode-cli
+  reports about 139 ids, and the cap cut them alphabetically, hiding models that
+  were not in the first slice.
+- **The stage railway can no longer be dragged backwards by a specialist's
+  line.** The strip advances by matching progress lines, and the ingest
+  pattern's unanchored `evidence item(s) from ` matched the analyst's own
+  relayed `Analysing 220 evidence item(s) from 5 source(s)` — so after
+  `Normalising requirements` had honestly moved the strip to Analyse, the very
+  next line pulled it back to Ingest, and a run spent its whole analysis phase
+  showing the wrong stage. The page now matches on the line with the
+  specialist's `[agent]` tag lifted off, every alternative is anchored to the
+  line's start, and the analyst's relayed lines (including its slice lines)
+  are what Analyse advances on. Two tests pin it: every pattern still matches
+  something the system says (the corpus now includes the specialists whose
+  lines are relayed), and a relayed line can never move the strip backwards.
+- **The shared Anthropic key no longer reaches the `claude` CLI.** The
+  `claude-code` backend authenticates through the CLI's stored login, but the
+  process also carries `ANTHROPIC_API_KEY` for a different job — litellm's
+  `anthropic/…` ids and the model listing — and the CLI treats it as an auth
+  source that takes precedence over the login and refuses to run, failing whole
+  extraction stages with "claude.ai connectors are disabled because
+  ANTHROPIC_API_KEY … is set". The key is now withheld from the subprocess
+  (`process.run` grew a `without` exclusion), the backend says once that it did
+  so and where the key still applies, and the settings page states the rule
+  where the key is entered.
+- **The model lists can be refreshed, and entering Settings always does.** The
+  lists come from outside the app — a CLI's own catalogue, a model server — so
+  a page opened before `opencode` gained a model, or before a server was
+  started, showed a stale set. Entering Settings now re-probes with
+  `?refresh=1`, which drops the server's 30-second reachability cache and tells
+  a backend with a cache of its own — OpenCode's models.dev registry — to
+  update it (`opencode models --refresh`). The run form's Model section grew a
+  **Refresh models** button, and returning to an open tab re-reads them.
+  `/api/backends` is served `Cache-Control: no-store`, so the browser cannot
+  answer from its own cache either.
+- **Models are offered by name as well as by id, and OpenCode's list is read
+  with `--verbose`.** `opencode-go/deepseek-flash` is what the engine needs, but
+  the model is called **DeepSeek V4.1 Flash**, and a picker showing only ids
+  left no way to find it: the person searching for "v4.1" and the string in the
+  list never met. The picker now searches and displays the display name, with
+  the id beside it, for every backend that knows one (OpenCode does). Model
+  names ride in `/api/backends` as `model_names`, and the ids-and-names lookup
+  is one `opencode models --verbose` call, not a second subprocess.
+
+- **The final PRD is reviewed as the final PRD.** The review loop broke before
+  reviewing the last revision, so the revised document shipped carrying the
+  previous draft's verdict; each draft is now reviewed before the loop decides
+  whether to revise again.
+- **“Nothing enters without a locator” holds at the citation.** Evidence with
+  no locator, and citations inherited from a baseline that name evidence this
+  run does not have, are dropped exactly like an invented id — the requirement
+  renders `derived` rather than sourced against a blank location.
+- **A response truncated at the output limit is reported, not parsed.** Only
+  `claude-code` raised; every backend that reports `finish_reason` through
+  usage is now caught centrally, so a JSON fragment no longer surfaces as a
+  misleading schema error.
+- **Prompts that were shortened say so.** The writer's evidence cap and the
+  critic's markdown/evidence caps now emit a warning instead of quietly
+  reviewing or drafting from a subset.
+- Checkpoint reads and writes run off the event loop (they embed the full
+  source text) and are serialised so the analyst's concurrent slices cannot
+  lose each other's write.
+- Cancelling a run now waits for it to unwind, so deleting a running run cannot
+  have its row re-created by the cancelled task's final save.
+- `sourcework ui --host 0.0.0.0` is detected as a wider bind, so exception
+  detail is withheld as on any other non-loopback bind.
+- Silent drops are reported: Confluence attachments past the cap and each
+  failed attachment, truncated spreadsheet rows, and failed analyst slices all
+  reach the run's warnings.
+- Unsupported binaries (`.doc`, `.rtf`, …) are refused instead of being decoded
+  as text into citable mojibake, and a single-column CSV no longer fails
+  outright on sniffing.
+- The single-model helper and docs use `--reasoning-budget 0`, the long flag the
+  scanner already uses, rather than the `-rea off` short form older
+  `llama-server` builds reject.
+- A Bedrock target credentialed by an IAM role or `AWS_PROFILE` is no longer
+  reported unavailable, `structured()` still makes one attempt when
+  `max_retries` is 0, child process groups are reaped after a clean exit, and
+  staged image extensions are allow-listed.
+- Hosted compose no longer publishes the unauthenticated orchestrator port;
+  the local compose file no longer requires a `.env` that a fresh clone does
+  not have; CI lints `cloud` too and fails (rather than skips) the e2e suite
+  when a port is busy.
+
+#### Hosted — `sourcework-cloud` 0.2.0
+
+The package moved because the shell was hardened, not because it gained a
+feature. Its tables now `FORCE ROW LEVEL SECURITY` — the role that creates them
+owns them, and Postgres exempts a table's owner from its own policies, so the
+tenant policy that was meant to back up the explicit filter had never actually
+run; the development bearer token is compared in constant time; and the app is
+told the host it is bound to, so a wider bind withholds exception detail as on
+a laptop. Its test fixtures also stop leaking `tenant_settings` between tests.
 
 ## [0.4.1] — 2026-08-20
 

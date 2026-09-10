@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 
 PORT = 8006
 
+MAX_PROMPT_EVIDENCE = 200
+"""Evidence items put in front of the writer. Beyond this the prompt would grow
+without bound; the cap is reported rather than applied in silence, because a
+narrative written against a shortened evidence set is a different document."""
+
 TEMPLATES = {
     "standard": (
         "A standard product requirements document: summary, problem, goals, "
@@ -129,6 +134,11 @@ class WriterExecutor(SkillExecutor):
                 + "\n".join(f"- {n}" for n in req.revision_notes)
             )
 
+        if len(req.evidence) > MAX_PROMPT_EVIDENCE:
+            await progress(
+                f"{len(req.evidence) - MAX_PROMPT_EVIDENCE} evidence item(s) left out of the "
+                f"writer prompt (showing {MAX_PROMPT_EVIDENCE}); the PRD still cites the full set"
+            )
         draft = await self.llm.structured(
             system, _context(req), NarrativeDraft, role="reasoning"
         )
@@ -211,7 +221,7 @@ def _context(req: WriteRequest) -> str:
     lines += ["", "SOURCES:"]
     lines += [f"- {s.title} ({s.modality.value})" for s in req.sources]
     lines += ["", "SUPPORTING EVIDENCE (for grounding the narrative only):"]
-    for e in req.evidence[:200]:
+    for e in req.evidence[:MAX_PROMPT_EVIDENCE]:
         lines.append(f"- [{e.kind}] {e.text}")
     return "\n".join(lines)
 

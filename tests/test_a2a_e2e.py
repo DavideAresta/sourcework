@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import os
 import socket
 import threading
 import time
@@ -25,6 +26,13 @@ from sourcework.models import InputRef, Modality, PRDRequest, PRDResult
 SAMPLES = None
 
 
+STRICT = os.environ.get("SOURCEWORK_E2E_STRICT") == "1"
+"""CI sets this. A busy port is normally a skip so a developer running a mesh is
+not blocked - but the skip takes the whole over-the-wire suite with it,
+including the only end-to-end check that citations resolve. In CI there is no
+mesh to collide with, so a busy port is a failure, not a quiet omission."""
+
+
 def _free(port: int) -> bool:
     with socket.socket() as s:
         return s.connect_ex(("127.0.0.1", port)) != 0
@@ -38,7 +46,10 @@ def mesh():
     for name in AGENTS:
         module = importlib.import_module(AGENTS[name])
         if not _free(module.PORT):
-            pytest.skip(f"port {module.PORT} already in use")
+            message = f"port {module.PORT} already in use"
+            if STRICT:
+                pytest.fail(f"{message} (SOURCEWORK_E2E_STRICT=1)")
+            pytest.skip(message)
         app = build_app(module.card(), module.executor())
         server = uvicorn.Server(
             uvicorn.Config(app, host="127.0.0.1", port=module.PORT, log_level="error")

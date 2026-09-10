@@ -44,7 +44,7 @@ from starlette.datastructures import UploadFile
 
 from sourcework import __version__, audit, auth, checkpoint, readiness
 from sourcework.a2a_common import AgentPool
-from sourcework.backends import probe
+from sourcework.backends import clear_reachability_cache, probe
 from sourcework.config import CLI_BACKEND_IDS, LLMOverrides, settings
 from sourcework.models import InputRef, PRDBaseline, PRDRequest
 from sourcework.ui import env_file
@@ -156,16 +156,19 @@ Everything the shell then fetches is guarded, so an unauthenticated visitor gets
 the frame and no data."""
 
 
-def _bound_beyond_loopback() -> bool:
+def _bound_beyond_loopback(host: str | None = None) -> bool:
     """Is this instance reachable from other machines?
 
-    Read from the environment rather than passed in, because `build_app` is
-    called from three places and none of them knows the bind address.
+    The bind host is passed in by :func:`build_app` when it is known ``serve``)
+    and otherwise read from ``SOURCEWORK_UI_HOST`` for a bare ``uvicorn`` run.
+    Keying on the environment alone missed ``sourcework ui --host 0.0.0.0``,
+    which returns exception detail (paths and config values) as if it were on
+    loopback.
     """
     import os
 
-    host = os.environ.get("SOURCEWORK_UI_HOST", "")
-    return bool(host) and host not in ("127.0.0.1", "localhost", "::1")
+    bound = host or os.environ.get("SOURCEWORK_UI_HOST", "")
+    return bool(bound) and bound not in ("127.0.0.1", "localhost", "::1")
 
 
 async def _restart_mesh() -> list[str]:
@@ -201,6 +204,7 @@ def build_app(
     settings_backend: env_file.SettingsBackend | None = None,
     authorizer: Authorizer | None = None,
     run_id_factory: Callable[[], str] = new_run_id,
+    bind_host: str | None = None,
 ) -> FastAPI:
     """The web app. ``on_shutdown``, when given, exposes a way to stop it.
 
@@ -283,7 +287,7 @@ def build_app(
         """
         logger.exception("unhandled error on %s %s", request.method, request.url.path)
         detail = f"{type(exc).__name__}: {exc}"
-        if _bound_beyond_loopback():
+        if _bound_beyond_loopback(bind_host):
             detail = f"{type(exc).__name__} - see the server log"
         return JSONResponse(status_code=500, content={"detail": detail})
 
@@ -843,9 +847,14 @@ def build_app(
             }
 
     @app.get("/api/backends", tags=["ops"])
-    async def backends() -> dict[str, Any]:
+    async def backends(refresh: bool = False) -> JSONResponse:
         cfg = settings().llm
         allowed = settings_backend.allowed_backends
+        # `?refresh=1` is the page asking for the model lists as they are now,
+        # not as a 30-second cache remembers them - starting a model server or
+        # pulling a model in a CLI and re-entering the page should show it.
+        if refresh:
+            clear_reachability_cache()
         # Off the event loop. `probe` shells out to every CLI backend
         # (`agy models`, `opencode models`, each with its own 30s ceiling) and
         # opens a socket to the local model server - all of it synchronous. Run
@@ -853,8 +862,8 @@ def build_app(
         # took to answer, which is how opening the settings page froze a run
         # someone was watching in another tab: the SSE stream feeding it is on
         # this same loop.
-        rows = await run_in_threadpool(probe, cfg, allowed=allowed)
-        return {
+        rows = await run_in_threadpool(probe, cfg, allowed=allowed, refresh=refresh)
+        body = {
             "active": cfg.active_backend,
             "failover_order": cfg.failover_order,
             "backends": rows,
@@ -868,6 +877,9 @@ def build_app(
             # env_file.model_roles for what the two drifting apart cost.
             "roles": env_file.model_roles(),
         }
+        # The lists are the point of the call and they change outside the server;
+        # a browser must never answer it from its own cache.
+        return JSONResponse(content=body, headers={"Cache-Control": "no-store"})
 
     # -- settings ----------------------------------------------------------
 
@@ -878,6 +890,9 @@ def build_app(
             "fields": settings_backend.describe(),
             "profiles": settings_backend.profiles_for(),
             "default_profile": settings_backend.default_profile,
+            # The page's top-level sections, so the nav and the field grouping
+            # come from one source shared with the hosted settings backend.
+            "tabs": env_file.tabs(),
         }
 
     @app.put("/api/settings", tags=["settings"])
@@ -1054,4 +1069,7 @@ def serve(port: int = PORT, host: str = DEFAULT_HOST, workspace: Path | None = N
             host,
             port,
         )
-    uvicorn.run(build_app(workspace), host=host, port=port, log_level=settings().log_level.lower())
+    uvicorn.run(
+        build_app(workspace, bind_host=host), host=host, port=port,
+        log_level=settings().log_level.lower(),
+    )

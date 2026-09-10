@@ -7,25 +7,91 @@
 // running mesh — the agents read their configuration once, at start-up — so the
 // page says "restart" rather than implying it took effect.
 //
-// The models section is shaped around one observation: you run one backend at a
-// time. Each backend is therefore its own card holding its four role cells and
-// the credentials only it reads, the active one open and the rest collapsed;
-// the genuinely shared keys (the gateway, Anthropic's, OpenAI's) sit in their
-// own card. Profiles sit on top because the useful knowledge here — that
-// `opencode/claude-opus-4-6` reasons well, and that an unset opencode model
-// fails outright — belongs in the app rather than in your memory.
+// The controls are cut in two directions. The first is the card: a backend's
+// four role cells and the credentials only it reads live together, and the
+// genuinely shared keys (the gateway, Anthropic's, OpenAI's) sit in their own
+// card. The second is the tab: what you reach for every day (the active
+// backend, its models, the profiles) is in front, and the knobs you set once
+// are behind Advanced. The tab list and each field's tab come from the server,
+// so the local and hosted installs share one navigation. Switching tabs only
+// hides panels — every control stays mounted, so Save still posts them all and
+// a half-typed value survives a look at another section.
+//
+// The profiles are the fastest correct answer here — that `opencode/claude-opus-4-6`
+// reasons well, and that an unset opencode model fails outright — so they live
+// at the top of Overview rather than in memory.
 
 import { el, clear, toast, field } from './dom.js';
 import { api } from './api.js';
 import { attachModelPicker } from './combo.js';
 import { roleLabel, roleHelp } from './roles.js';
 
-const form = document.getElementById('form');
-const backendsBox = document.getElementById('backends');
+const panelsBox = document.getElementById('settings-panels');
+const navBox = document.getElementById('settings-nav');
 const pathLabel = document.getElementById('env-path');
 const saveButton = document.getElementById('save');
 
 const controls = new Map();
+const cells = new Map();
+
+// The page's sections, from the server (`/api/settings` -> `tabs`) so the
+// hosted install's shorter field list and this one share one navigation.
+let tabs = [];
+let activeTab = null;
+
+function panelFor(id) {
+  return document.getElementById(`panel-${id}`);
+}
+
+// Switching tabs only toggles `hidden`: every control stays mounted, so a
+// half-typed value survives a look at another section and Save — which posts
+// every control it built — still sees all of them.
+function setTab(id, { focus = false } = {}) {
+  if (!tabs.some((t) => t.id === id)) return;
+  activeTab = id;
+  for (const t of tabs) {
+    const selected = t.id === id;
+    const tab = document.getElementById(`tab-${t.id}`);
+    const panel = panelFor(t.id);
+    if (tab) {
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+      if (selected && focus) tab.focus();
+    }
+    if (panel) panel.hidden = !selected;
+  }
+  if (location.hash.slice(1) !== id) history.replaceState(null, '', `#${id}`);
+}
+
+function buildNav() {
+  clear(navBox);
+  for (const t of tabs) {
+    navBox.append(el('button', {
+      id: `tab-${t.id}`,
+      class: 'settings-tab',
+      type: 'button',
+      role: 'tab',
+      'aria-controls': `panel-${t.id}`,
+      'aria-selected': 'false',
+      tabIndex: -1,
+      onClick: () => setTab(t.id),
+    }, t.label));
+  }
+}
+
+// Arrow keys move between tabs, as a tablist should. Attached once, reading
+// `tabs` at event time, because `load()` rebuilds the buttons on every save.
+navBox.addEventListener('keydown', (event) => {
+  const order = tabs.map((t) => t.id);
+  const i = order.indexOf(activeTab);
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    setTab(order[(i + 1) % order.length], { focus: true });
+  } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+    event.preventDefault();
+    setTab(order[(i - 1 + order.length) % order.length], { focus: true });
+  }
+});
 
 // Backend-specific gotchas worth surfacing where the model is chosen.
 const HINTS = {
@@ -43,7 +109,9 @@ const HINTS = {
   'openai': 'Plain platform ids: `openai/gpt-5.4`. Needs OPENAI_API_KEY — that one is shared, '
     + 'in Shared credentials.',
   'claude-code': 'Authenticates as you via the `claude` login — no key is needed here. Its '
-    + 'model picker also reads the shared Anthropic key.',
+    + 'model picker also reads the shared Anthropic key, but the key is never passed to '
+    + 'the CLI itself: there it would take precedence over your login and stop the CLI '
+    + 'from running.',
   'opencode-cli': 'opencode needs an explicit model: with none it fails outright with '
     + '"Unexpected server error".',
   'copilot-cli': 'Authenticates as you via the `copilot` login — no key is needed here. '
@@ -79,6 +147,9 @@ function control(field) {
     step: 'any',
   });
   input.dataset.key = field.key;
+  // The saved value, so the picker can badge the row that is actually stored
+  // rather than the in-progress suggestion below (combo.js reads this).
+  if (field.value) input.dataset.current = field.value;
 
   // A suggestion is pre-filled, not just hinted: an empty model cell is a
   // choice nobody made, and on opencode it is the difference between a run and
@@ -95,41 +166,115 @@ function control(field) {
 async function load() {
   const data = await api.readSettings();
   pathLabel.textContent = data.path;
-  clear(form);
+  clear(panelsBox);
+  clear(navBox);
   controls.clear();
+  cells.clear();
 
+  // Fields arrive in FIELDS order; keep that order within each card and each
+  // tab. A group whose every field names a backend is one backend's card: its
+  // four role cells and the credentials only it reads, together.
   const groups = new Map();
   for (const field of data.fields) {
     if (!groups.has(field.group)) groups.set(field.group, []);
     groups.get(field.group).push(field);
   }
 
-  // A group whose every field names a backend is one backend's card: its four
-  // role cells and the credentials only it reads, together. The shared keys
-  // (gateway, Anthropic, OpenAI) are deliberately not backend-tagged, so they
-  // fall out as a plain card. The profiles apply to every backend at once, so
-  // they sit above the cards, and the cards follow FIELDS order — the backend
-  // groups are contiguous there, which is what makes one profiles block cover
-  // them all.
-  const cells = new Map();
-  let backendBlock = null;
-  for (const [group, fields] of groups) {
-    const isBackend = fields.every((f) => f.backend);
-    if (isBackend) {
-      if (!backendBlock) {
-        backendBlock = el('div', {}, profileRow(data.profiles ?? {}, cells));
-        form.append(backendBlock);
-      }
-      backendBlock.append(backendSection(group, fields, cells));
-    } else {
-      backendBlock = null;
-      form.append(el('div', { class: 'card' }, el('h3', { style: 'margin-top:0' }, group), plainGrid(fields)));
-    }
+  // Only tabs that actually have fields survive filtering: the hosted install
+  // offers fewer backends, so a section can end up empty there.
+  const present = new Set([...groups.values()].flat().map((f) => f.tab));
+  tabs = (data.tabs ?? []).filter((t) => present.has(t.id));
+  if (!tabs.length) tabs = [...present].map((id) => ({ id, label: id })); // defensive
+
+  buildNav();
+  const panelOf = new Map();
+  for (const t of tabs) {
+    const panel = el('section', {
+      id: `panel-${t.id}`,
+      class: 'settings-panel',
+      role: 'tabpanel',
+      'aria-labelledby': `tab-${t.id}`,
+      hidden: true,
+    });
+    panelsBox.append(panel);
+    panelOf.set(t.id, panel);
   }
+
+  // Plain cards before backend cards within a tab, so Models shows Shared
+  // credentials above the backend cards. Order inside a tab stays FIELDS order.
+  const plainGroups = [];
+  const backendGroups = [];
+  for (const [group, fields] of groups) {
+    (fields.every((f) => f.backend) ? backendGroups : plainGroups).push([group, fields]);
+  }
+
+  const backendCards = new Map();
+  const append = (group, fields) => {
+    const panel = panelOf.get(fields[0].tab);
+    if (!panel) return;
+    if (fields.every((f) => f.backend)) {
+      const card = backendSection(group, fields, cells);
+      backendCards.set(card.dataset.backend, card);
+      panel.append(card);
+    } else {
+      panel.append(el('div', { class: 'card' },
+        el('h3', { style: 'margin-top:0' }, group), plainGrid(fields)));
+    }
+  };
+  for (const [group, fields] of plainGroups) append(group, fields);
+  for (const [group, fields] of backendGroups) append(group, fields);
+
+  // Overview carries no controls of its own beyond Routing, so it also gets the
+  // two things that make it useful: the profile buttons, and the reachability
+  // table that used to sit above the whole form.
+  const status = el('div', { class: 'small muted' }, 'Checking what this machine can reach…');
+  const refreshButton = el('button', {
+    class: 'ghost small',
+    type: 'button',
+    title: 'Re-read every backend and its model list',
+  }, 'Refresh');
+  const overview = panelOf.get('overview');
+  if (overview) {
+    overview.append(el('div', { class: 'card' },
+      el('h3', { style: 'margin-top:0' }, 'Profiles'),
+      profileRow(data.profiles ?? {}, cells)));
+    overview.append(el('div', { class: 'card' },
+      el('div', { class: 'row' },
+        el('h3', { style: 'margin:0' }, 'Backends on this machine'),
+        el('span', { style: 'flex:1' }),
+        refreshButton),
+      status));
+  }
+
+  // One probe feeds both the table and every model picker. `refresh: true` is
+  // the point: entering Settings should show the lists as they are now, not as
+  // a cache remembers them, so a model added in a CLI or a server started since
+  // the last visit appears without a reload.
+  const refresh = async () => {
+    let data2;
+    try {
+      data2 = await api.backends({ refresh: true });
+    } catch (error) {
+      status.textContent = `Could not probe backends: ${error.message}`;
+      return;
+    }
+    renderStatus(status, backendCards, data2);
+    suggestModels(data2);
+  };
+  refreshBackends = refresh;
+  refreshButton.addEventListener('click', () => {
+    refreshButton.disabled = true;
+    refresh().finally(() => { refreshButton.disabled = false; });
+  });
 
   document.querySelector('[data-key="SOURCEWORK_LLM__BACKEND"]')
     ?.addEventListener('change', syncActive);
   syncActive();
+
+  const wanted = location.hash.slice(1);
+  setTab(tabs.some((t) => t.id === wanted) ? wanted : (tabs[0]?.id ?? 'overview'));
+
+  await refresh();
 }
 
 function plainGrid(fields) {
@@ -188,6 +333,9 @@ function backendSection(group, fields, cells) {
   return el('details', { class: 'backend-card', dataset: { backend } },
     el('summary', {},
       el('span', { class: 'mono', style: 'font-size:15px' }, group),
+      // Filled by `decorateCards` once the probe answers, so a collapsed card
+      // still says whether that backend is reachable without opening it.
+      el('span', { class: 'pill backend-state', dataset: { statePill: backend } }),
       el('span', { class: 'pill ok active-pill' }, 'active')),
     el('div', { class: 'small muted', style: 'margin:2px 0 14px' },
       'Everything runs here unless a run chooses otherwise.'),
@@ -244,9 +392,9 @@ function profileRow(profiles, cells) {
       el('span', { class: 'small muted' }, profile.detail ?? ''),
     ));
   }
-  return el('div', { style: 'margin-bottom:16px' },
+  return el('div', {},
     el('div', { class: 'small muted', style: 'margin-bottom:8px' },
-      'Start from a profile, then adjust anything below.'),
+      'Start from a profile, then adjust anything under Models.'),
     row);
 }
 
@@ -256,18 +404,16 @@ function profileRow(profiles, cells) {
 // only surfaces nine minutes into a run.
 let pickers = [];
 
-async function suggestModels() {
-  let data;
-  try {
-    data = await api.backends();
-  } catch {
-    return;
-  }
+// Set by `load()`, called by the visibility handler at the bottom so returning
+// to the page re-reads the lists.
+let refreshBackends = async () => {};
+
+function suggestModels(data) {
   for (const picker of pickers) picker.destroy();
   pickers = [];
   for (const backend of data.backends ?? []) {
     for (const input of document.querySelectorAll(`input[data-backend="${backend.id}"]`)) {
-      const picker = attachModelPicker(input, backend.models ?? []);
+      const picker = attachModelPicker(input, backend.models ?? [], backend.model_names ?? {});
       if (picker) pickers.push(picker);
     }
   }
@@ -294,54 +440,76 @@ function backendState(backend) {
   };
 }
 
-async function loadBackends() {
-  clear(backendsBox);
-  try {
-    const data = await api.backends();
-    backendsBox.append(
-      el('div', { class: 'small muted', style: 'margin-bottom:10px' },
-        `Active: ${data.active}`,
-        data.failover_order.length ? ` · failover: ${data.failover_order.join(' → ')}` : ' · no failover configured'),
-    );
-    for (const backend of data.backends) {
-      const state = backendState(backend);
-      backendsBox.append(
-        el('div', { class: 'row', style: 'padding:5px 0;border-top:1px solid var(--line)' },
-          el('span', { class: `pill ${state.pill}`, title: state.why },
-            el('span', { class: 'dot' }), state.label),
-          el('span', { class: 'mono' }, backend.id),
-          el('span', { class: 'small muted' }, backend.vision ? 'vision' : 'text-only'),
-          // Where the model list came from. A picker full of GGUFs that nothing
-          // is serving looks exactly like one backed by a live server, and it
-          // was the more convincing of the two - twenty-one entries against a
-          // running server's handful.
-          backend.models_from === 'disk'
-            ? el('span', { class: 'small ink-warn', title: 'files on disk; nothing is serving them' },
-                `${backend.models.length} on disk`)
-            : null,
-          el('span', { style: 'flex:1' }),
-          el('span', { class: 'small muted' },
-            state.why
-              || backend.detail
-              || (backend.configured_model ? `model: ${backend.configured_model}` : 'backend default')),
-        ),
-      );
-    }
-    // The CLI footnote is only true when this distribution actually offers a
-    // CLI backend. The server sends `cli_backends` (the offered CLI ids) so
-    // this page does not carry its own copy of the list - on a hosted install
-    // there are no CLI backends at all, and the footnote would be a lie.
-    const cliOffered = (data.cli_backends ?? [])
-      .some((id) => (data.backends ?? []).some((b) => b.id === id));
-    if (cliOffered) {
-      backendsBox.append(
-        el('div', { class: 'small muted', style: 'margin-top:10px' },
-          'CLI backends authenticate as you — if you are signed into the tool, runs use that subscription and need no API key here.'),
-      );
-    }
-  } catch (error) {
-    backendsBox.append(el('div', { class: 'small muted' }, `Could not probe backends: ${error.message}`));
+// Paint the same probe into two places from one request: the Overview table,
+// and the status pill on each backend's card so a collapsed card still says
+// whether its backend answers.
+function decorateCards(backendCards, backends) {
+  for (const backend of backends) {
+    const pill = backendCards.get(backend.id)?.querySelector('[data-state-pill]');
+    if (!pill) continue;
+    const state = backendState(backend);
+    pill.className = `pill backend-state ${state.pill}`;
+    pill.textContent = state.label;
+    pill.title = state.why || '';
   }
+}
+
+function renderStatus(box, backendCards, data) {
+  clear(box);
+  box.append(
+    el('div', { class: 'small muted', style: 'margin-bottom:10px' },
+      `Active: ${data.active}`,
+      data.failover_order.length ? ` · failover: ${data.failover_order.join(' → ')}` : ' · no failover configured'),
+  );
+  for (const backend of data.backends) {
+    const state = backendState(backend);
+    const card = backendCards.get(backend.id);
+    box.append(
+      el('div', { class: 'row', style: 'padding:5px 0;border-top:1px solid var(--line)' },
+        el('span', { class: `pill ${state.pill}`, title: state.why },
+          el('span', { class: 'dot' }), state.label),
+        el('span', { class: 'mono' }, backend.id),
+        el('span', { class: 'small muted' }, backend.vision ? 'vision' : 'text-only'),
+        // Where the model list came from. A picker full of GGUFs that nothing
+        // is serving looks exactly like one backed by a live server, and it
+        // was the more convincing of the two - twenty-one entries against a
+        // running server's handful.
+        backend.models_from === 'disk'
+          ? el('span', { class: 'small ink-warn', title: 'files on disk; nothing is serving them' },
+              `${backend.models.length} on disk`)
+          : null,
+        el('span', { style: 'flex:1' }),
+        el('span', { class: 'small muted' },
+          state.why
+            || backend.detail
+            || (backend.configured_model ? `model: ${backend.configured_model}` : 'backend default')),
+        card
+          ? el('button', {
+              class: 'ghost',
+              type: 'button',
+              onClick: () => {
+                setTab('models');
+                card.open = true;
+                card.scrollIntoView({ block: 'center' });
+              },
+            }, 'Configure')
+          : null,
+      ),
+    );
+  }
+  // The CLI footnote is only true when this distribution actually offers a
+  // CLI backend. The server sends `cli_backends` (the offered CLI ids) so
+  // this page does not carry its own copy of the list - on a hosted install
+  // there are no CLI backends at all, and the footnote would be a lie.
+  const cliOffered = (data.cli_backends ?? [])
+    .some((id) => (data.backends ?? []).some((b) => b.id === id));
+  if (cliOffered) {
+    box.append(
+      el('div', { class: 'small muted', style: 'margin-top:10px' },
+        'CLI backends authenticate as you — if you are signed into the tool, runs use that subscription and need no API key here.'),
+    );
+  }
+  decorateCards(backendCards, data.backends ?? []);
 }
 
 saveButton.addEventListener('click', async () => {
@@ -357,9 +525,8 @@ saveButton.addEventListener('click', async () => {
       // own probes would race the restart, so let the mesh come back first.
       setTimeout(() => location.reload(), 2500);
     }
+    // `load` rebuilds the form and re-probes the backends itself.
     await load();
-    await suggestModels();
-    await loadBackends();
   } catch (error) {
     toast(error.message, 'err');
   } finally {
@@ -367,10 +534,18 @@ saveButton.addEventListener('click', async () => {
   }
 });
 
-load()
-  .then(suggestModels)
-  .catch((error) => toast(error.message, 'err'));
-loadBackends();
+// Coming back to the tab re-reads the lists: a model added in a CLI while the
+// page sat in the background should be in the picker without a reload.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshBackends();
+});
+
+load().catch((error) => {
+  // Logged as well as toasted: a toast is transient and carries no stack,
+  // which is the wrong shape for "the page did not build".
+  console.error(error);
+  toast(error.message, 'err');
+});
 api.health().then((h) => {
   const version = document.getElementById('version');
   if (version && h.version) version.textContent = h.version;

@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import zipfile
+from pathlib import Path
 from typing import Any
 
 from sourcework import __version__
@@ -29,7 +30,7 @@ def build_bundle(run: Any) -> bytes:  # noqa: ANN401 - ui.store.Run, imported la
     prd = result.get("prd") or {}
 
     members: dict[str, bytes] = {
-        "request.json": _json(run.request),
+        "request.json": _json(_redact_request(run.request)),
         "result.json": _json(result),
         "events.json": _json(run.events),
         # Evidence and sources are also inside result.json; pulled out because
@@ -71,6 +72,26 @@ def build_bundle(run: Any) -> bytes:  # noqa: ANN401 - ui.store.Run, imported la
         for name, data in sorted(members.items()):
             bundle.writestr(name, data)
     return buffer.getvalue()
+
+
+def _redact_request(request: dict[str, Any]) -> dict[str, Any]:
+    """A copy of the request with inline bytes and absolute local paths removed.
+
+    The bundle is made to be attached to a ticket. Base64 of the original
+    document and the operator's home-directory paths should not travel with it;
+    the evidence and the rendered PRD keep every quote that was actually cited,
+    so nothing an auditor greps for is lost.
+    """
+    redacted: dict[str, Any] = json.loads(json.dumps(request, default=str))
+    for item in redacted.get("inputs", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("content_b64"):
+            item["content_b64"] = "(redacted: inline bytes)"
+        uri = item.get("uri")
+        if isinstance(uri, str) and uri.startswith("file://"):
+            item["uri"] = f"file://…/{Path(uri).name}"
+    return redacted
 
 
 def _json(value: Any) -> bytes:  # noqa: ANN401

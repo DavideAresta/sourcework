@@ -120,8 +120,8 @@ def main(argv: list[str]) -> int:
         for name, licence in unverified:
             print(f"  {name:40} {licence}", file=sys.stderr)
         print(
-            "\nUnknown is not permissive. Check each by hand and add it to ALLOWLIST once "
-            "you have, or drop it.",
+            "\nUnknown is not permissive. Check each by hand: if it is genuinely permissive, "
+            "record it in THIRD_PARTY.md; otherwise replace it.",
             file=sys.stderr,
         )
 
@@ -137,7 +137,8 @@ def main(argv: list[str]) -> int:
             )
         return 1
 
-    print(f"{len(rows)} dependencies checked, no copyleft.")
+    note = f" ({len(lesser)} LGPL, noted above)" if lesser else ""
+    print(f"{len(rows)} dependencies checked, no blocking copyleft{note}.")
     return 0
 
 

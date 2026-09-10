@@ -15,8 +15,11 @@ not a ninth agent — the mesh runs fine without it.
   to the evidence that licenses it (and flagging the ones with none), the
   evidence table, the critic's findings, and per-backend token/cost totals.
 - **History** — past runs, kept in SQLite; downloads and Confluence publishing.
-- **Settings** — a form over `.env`, with the backends this machine can
-  actually use probed live.
+- **Settings** — a form over `.env`, split into tabs: **Overview** (the active
+  backend, profiles and what this machine can reach), **Models** (one card per
+  backend, its role cells and its own credentials), **Advanced** (model limits,
+  analyst slicing, mesh timeouts and run retention), **Integrations** and
+  **Security**.
 - **Architecture** — the eight-agent mesh as a live diagram: topology, health,
   and the currently active agent highlighted while a run is in flight.
 
@@ -153,7 +156,8 @@ evidence, sources, every progress event, and a manifest naming the backend,
 models, version and standards basis — with a SHA-256 per member and a
 whole-bundle digest, so an edited bundle no longer matches its own manifest.
 
-**Retention** is `SOURCEWORK_RUNS__RETENTION_DAYS` (settings, "History"):
+**Retention** is `SOURCEWORK_RUNS__RETENTION_DAYS` (settings, Advanced ▸
+"Runs & quality"):
 finished runs older than the limit are deleted when the UI starts. Deleting a
 run by hand returns an erasure record naming what was removed and what was
 left — uploaded files stay in the shared workspace, and the record says so

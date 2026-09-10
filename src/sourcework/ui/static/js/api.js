@@ -42,7 +42,11 @@ export const api = {
   health: () => request('/healthz'),
   shutdown: () => request('/api/shutdown', { method: 'POST' }),
   dashboard: () => request('/api/dashboard'),
-  backends: () => request('/api/backends'),
+  // `refresh` asks the server to re-probe instead of reusing its short
+  // reachability cache: the model lists change outside this app (a new CLI
+  // model, a server started since you last looked) and a page that is being
+  // entered on purpose should see them as they are.
+  backends: ({ refresh = false } = {}) => request(`/api/backends${refresh ? '?refresh=1' : ''}`),
 
   readSettings: () => request('/api/settings'),
   writeSettings: (values) => request('/api/settings', { method: 'PUT', ...json(values) }),

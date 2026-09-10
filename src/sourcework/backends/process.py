@@ -34,7 +34,7 @@ import os
 import shutil
 import signal
 import tempfile
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,6 +92,12 @@ def _kill(proc: asyncio.subprocess.Process) -> None:
         proc.kill()
 
 
+def _kill_group(pgid: int) -> None:
+    """Kill a process group by an id captured at spawn time."""
+    with contextlib.suppress(ProcessLookupError, OSError):
+        os.killpg(pgid, signal.SIGKILL)
+
+
 @dataclass(slots=True)
 class ProcessResult:
     exit_code: int
@@ -109,6 +115,7 @@ async def run(
     *,
     cwd: str | Path | None = None,
     env: Mapping[str, str] | None = None,
+    without: Collection[str] | None = None,
     stdin_text: str | None = None,
     timeout_s: float = 300.0,
     on_line: Callable[[str], None] | None = None,
@@ -117,6 +124,10 @@ async def run(
 
     ``env`` is merged over the parent environment rather than replacing it: the
     CLIs need ``HOME``, ``PATH`` and their own credential paths to work at all.
+    ``without`` removes keys from the merged result, for the backend whose CLI
+    authenticates from its own stored login and which SourceWork nevertheless
+    carries a credential for in the same process (a key meant for another
+    backend must not silently become the CLI's auth source).
 
     ``on_line`` receives each complete stdout line *as it arrives*. Without it
     the whole point of a CLI that streams NDJSON is lost - the events exist,
@@ -124,6 +135,8 @@ async def run(
     full output is still buffered and returned, so parsing is unaffected.
     """
     merged = {**os.environ, **(env or {})}
+    for key in without or ():
+        merged.pop(key, None)
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -139,6 +152,12 @@ async def run(
         )
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"{argv[0]!r} is not on PATH") from exc
+
+    # `start_new_session` makes the child a group leader, so its pid *is* the
+    # pgid. Captured now because once the direct child is reaped `getpgid` can
+    # no longer find it, and the point of the `finally` below is to reach the
+    # helpers it left holding the pipes.
+    pgid = proc.pid
 
     out_buf = bytearray()
     err_buf = bytearray()
@@ -230,6 +249,11 @@ async def run(
             await proc.wait()
         raise
     finally:
+        # Reap the whole group even on a clean exit: the direct CLI can exit
+        # while a helper it spawned keeps the stdout pipe open, which leaves the
+        # readers above hanging and the helper running (and billing). Killing a
+        # group whose members have all exited is a no-op.
+        _kill_group(pgid)
         # The readers finish on their own once the pipes close, which killing
         # the process guarantees. Whatever they gathered is still worth having.
         with contextlib.suppress(Exception):

@@ -33,6 +33,15 @@ export function clear(node) {
   return node;
 }
 
+// An href only ever comes from the server, but "the server" includes a
+// Confluence instance or a plugin publisher. `javascript:` in an href is
+// script execution in this origin, so anything that is not an http(s) URL is
+// returned as inert text instead.
+export function safeHref(url) {
+  const text = String(url ?? '').trim();
+  return /^https?:\/\//i.test(text) ? text : null;
+}
+
 // Append to an existing node with the same skipping rules as `el`. Native
 // `.append(null)` renders the literal text "null", which is how a header with
 // two absent optional rows ends up saying "nullnull".

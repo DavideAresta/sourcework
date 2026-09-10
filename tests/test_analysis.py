@@ -352,11 +352,28 @@ class TestRefinement:
             source_refs=[SourceRef(evidence_id="ev-1", source_id="src-1", locator="p.4")],
         )
         prior = RequirementSet(requirements=[cited])
-        result = _materialise(_draft(("Refund SLA", "REQ-001")), {}, prior)
+        # The evidence the baseline cites is carried into this run (the
+        # orchestrator adds it to the request), so it is in `by_id`.
+        result = _materialise(_draft(("Refund SLA", "REQ-001")), {"ev-1": _ev("ev-1")}, prior)
 
         carried = result.requirements[0]
         assert [r.evidence_id for r in carried.source_refs] == ["ev-1"]
         assert carried.derived is False
+
+    def test_an_inherited_citation_with_no_evidence_is_dropped(self):
+        # A baseline can name evidence this run does not have: a dangling id,
+        # or evidence with no locator. Rendered as provenance it would point at
+        # a quote nobody can find, so it is dropped and the requirement becomes
+        # derived, exactly like a model's invented id.
+        cited = Requirement(
+            id="REQ-001", title="Refund SLA", statement="The system must Refund SLA.",
+            source_refs=[SourceRef(evidence_id="ev-missing", source_id="src-1", locator="p.4")],
+        )
+        prior = RequirementSet(requirements=[cited])
+        result = _materialise(_draft(("Refund SLA", "REQ-001")), {}, prior)
+
+        assert result.requirements[0].source_refs == []
+        assert result.requirements[0].derived is True
 
     def test_a_fresh_citation_wins_over_the_inherited_one(self):
         cited = Requirement(

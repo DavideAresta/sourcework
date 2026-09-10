@@ -167,12 +167,13 @@ def test_a_settings_backend_supplied_to_build_app_is_the_one_served(tmp_path):
             headers={"X-SourceWork-UI": "1"},
         ).json()
 
-    assert read == {
-        "path": "tenant settings",
-        "fields": [],
-        "profiles": {},
-        "default_profile": "balanced",
-    }
+    assert read["path"] == "tenant settings"
+    assert read["fields"] == []
+    assert read["profiles"] == {}
+    assert read["default_profile"] == "balanced"
+    # The tab navigation rides with every settings payload - a settings backend
+    # supplies the fields, not the navigation.
+    assert {t["id"] for t in read["tabs"]} >= {"overview", "models", "advanced"}
     assert written["changed"] == ["SOURCEWORK_LLM__BACKEND"]
     # A backend that resolves settings per request has nothing to restart -
     # the mesh restarting on every tenant's save would take the whole service

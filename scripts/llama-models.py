@@ -151,22 +151,37 @@ def check_flags(server: str) -> None:
         )
 
 
+def _run_smi(argv: list[str]) -> str:
+    """Run a GPU query tool with a timeout.
+
+    No timeout meant a wedged driver hung `list`/`scan`/`add` indefinitely; a
+    missing or broken tool is the same as no tool.
+    """
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def detect_vram_gb() -> float:
     """Usable VRAM on the first GPU. 0 when there is no tool to ask."""
     if shutil.which("rocm-smi"):
-        out = subprocess.run(
-            ["rocm-smi", "--showmeminfo", "vram"], capture_output=True, text=True
-        ).stdout
+        out = _run_smi(["rocm-smi", "--showmeminfo", "vram"])
         for line in out.splitlines():
             if "GPU[0]" in line and "Total Memory" in line:
-                return int(line.split(":")[-1].strip()) / 1024**3
+                try:
+                    return int(line.split(":")[-1].strip()) / 1024**3
+                except ValueError:
+                    return 0.0
     if shutil.which("nvidia-smi"):
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True,
-        ).stdout.strip().splitlines()
+        out = _run_smi(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"]
+        ).strip().splitlines()
         if out:
-            return int(out[0]) / 1024
+            try:
+                return int(out[0]) / 1024
+            except ValueError:
+                return 0.0
     return 0.0
 
 

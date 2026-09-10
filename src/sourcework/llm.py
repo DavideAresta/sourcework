@@ -150,7 +150,9 @@ class LLM:
         enforced = schema_dict if self.cfg.constrained_json else None
 
         last_error: str | None = None
-        for attempt in range(self.cfg.max_retries):
+        # `max(1, ...)`: a configured 0 used to run the body zero times and
+        # raise "Could not obtain valid ...: None", hiding the real cause.
+        for attempt in range(max(1, self.cfg.max_retries)):
             prompt = user if last_error is None else (
                 f"{user}\n\nYour previous answer was rejected: {last_error}\n"
                 "Return corrected JSON only."
@@ -289,6 +291,18 @@ class LLM:
                 continue
 
             usage_ledger.record(backend_id, result.usage)
+            if result.usage is not None and result.usage.truncated:
+                # The backend reached its output limit: the answer is a prefix,
+                # not a finished one. Handing the fragment to the JSON parser
+                # produces a schema error that hides the cause, so report the
+                # real one. `claude-code` raises this itself from its own
+                # stop_reason; this catches every backend that reports it
+                # through usage.
+                raise LLMError(
+                    f"{backend_id} returned a response truncated at the output limit "
+                    f"({result.usage.finish_reason}); raise the max output tokens or "
+                    "shorten the prompt."
+                )
             if index > 0:
                 logger.warning(
                     "backend failover: %s -> %s. Billing differs per backend. Earlier failures: %s",

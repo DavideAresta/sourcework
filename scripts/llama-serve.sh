@@ -50,7 +50,9 @@ args=(
   # No thinking. A hybrid reasoning model otherwise spends the entire output
   # budget in its scratchpad and returns empty content - which SourceWork
   # correctly reports as "the backend said nothing" and cannot recover from.
-  -rea off
+  # The long form, not `-rea off`: `-rea` is an alias for `--reasoning-format`,
+  # and older llama-server builds reject the short spelling.
+  --reasoning-budget 0
   --metrics
 )
 # The vision role needs a projector. Leave MMPROJ unset for a text-only model.

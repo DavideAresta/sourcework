@@ -19,6 +19,7 @@ ordering and anything the UI does not know about survive.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,9 +28,18 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from sourcework.config import BACKEND_IDS
 
+logger = logging.getLogger(__name__)
+
 MASK = "••••••••"
 
 _LINE = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=(?P<value>.*)$")
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+"""A value is a single line. A newline ends it early and the next line is
+parsed as another key - the environment injection the allow-list exists to
+stop, except the injected key is never checked against the allow-list."""
+
+_BOOL_VALUES = frozenset({"1", "0", "true", "false", "yes", "no", "on", "off"})
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,39 @@ of this map are the backend ids (:data:`~sourcework.config.BACKEND_IDS`); the
 values are the card headings. The genuinely shared keys (the gateway, and
 Anthropic's/OpenAI's, which more than one backend reads) deliberately have no
 entry and live in the "Shared credentials" card instead."""
+
+
+TABS: tuple[tuple[str, str], ...] = (
+    ("overview", "Overview"),
+    ("models", "Models"),
+    ("advanced", "Advanced"),
+    ("integrations", "Integrations"),
+    ("security", "Security"),
+)
+"""The page's top-level sections, in order.
+
+The settings page is a form over every key in :data:`FIELDS`, and that is a lot
+of controls; grouping them into cards is not enough on its own. The tabs are
+the second cut: what you reach for every day (the active backend, its models)
+first, and the knobs you set once and forget behind "Advanced". A tab with no
+fields after filtering is dropped by the page, so the hosted install - which
+offers fewer backends - never shows an empty one.
+"""
+
+
+GROUP_TAB: dict[str, str] = {
+    "Routing": "overview",
+    "Shared credentials": "models",
+    "Model calls": "advanced",
+    "Analyst slicing": "advanced",
+    "Mesh & concurrency": "advanced",
+    "Runs & quality": "advanced",
+    "Confluence": "integrations",
+    "Security & logging": "security",
+    **{label: "models" for label in BACKEND_GROUPS.values()},
+}
+"""Which tab each card lives under. A backend card's group is its own label, so
+the comprehension above routes every one of them to Models."""
 
 
 FIELDS: tuple[Field, ...] = (
@@ -288,50 +331,61 @@ FIELDS: tuple[Field, ...] = (
           placeholder="https://llm-gateway.internal/v1"),
     Field("SOURCEWORK_LLM__API_KEY", "LLM gateway key", "Shared credentials", "password"),
 
-    # -- limits --------------------------------------------------------------
-    Field("SOURCEWORK_LLM__EFFORT", "Reasoning effort", "Limits", "select",
+    # -- model calls ---------------------------------------------------------
+    Field("SOURCEWORK_LLM__EFFORT", "Reasoning effort", "Model calls", "select",
           ("", "low", "medium", "high", "xhigh", "max"),
           local_only=True,
           help="CLI backends only; litellm ignores it. `max` is expensive: on one "
                "measured call it cost 13x the wall clock of `high` for an answer "
                "that then hit the output ceiling anyway."),
-    Field("SOURCEWORK_LLM__MAX_TOKENS", "Max output tokens", "Limits", "number"),
-    Field("SOURCEWORK_LLM__TEMPERATURE", "Temperature", "Limits", "number"),
-    Field("SOURCEWORK_LLM__TIMEOUT_S", "API timeout (s)", "Limits", "number",
+    Field("SOURCEWORK_LLM__MAX_TOKENS", "Max output tokens", "Model calls", "number"),
+    Field("SOURCEWORK_LLM__TEMPERATURE", "Temperature", "Model calls", "number"),
+    Field("SOURCEWORK_LLM__TIMEOUT_S", "API timeout (s)", "Model calls", "number",
           help="litellm and the named hosted providers only."),
-    Field("SOURCEWORK_LLM__CLI_TIMEOUT_S", "CLI timeout (s)", "Limits", "number",
+    Field("SOURCEWORK_LLM__CLI_TIMEOUT_S", "CLI timeout (s)", "Model calls", "number",
           local_only=True,
           help="Per call, for the coding CLIs. A large analysis can legitimately "
                "run for minutes."),
-    Field("SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS", "Analyst slice: evidence items", "Limits",
-          "number",
-          help="Above this, the analyst works in slices and merges them. This is "
-               "the limit that usually matters - the answer grows with the item "
-               "count even when the prompt stays small. 0 turns it off."),
-    Field("SOURCEWORK_LLM__ANALYSIS_BATCH_CHARS", "Analyst slice: characters", "Limits",
-          "number",
-          help="The same, measured on the prompt instead. 0 turns it off."),
-    Field("SOURCEWORK_LLM__CONSTRAINED_JSON", "Enforce the JSON schema", "Limits", "bool",
+    Field("SOURCEWORK_LLM__CONSTRAINED_JSON", "Enforce the JSON schema", "Model calls", "bool",
           help="Have the server constrain decoding to the schema rather than just "
                "describing it in the prompt. On llama.cpp, vLLM or Ollama this makes "
                "malformed JSON impossible instead of unlikely, which is what stops a "
                "small local model spending its retries re-answering. Backends that "
                "cannot enforce a schema ignore it."),
-    Field("SOURCEWORK_LLM__LITELLM_RETRIES", "litellm retries per call", "Limits", "number",
+    Field("SOURCEWORK_LLM__LITELLM_RETRIES", "litellm retries per call", "Model calls", "number",
           help="Retries inside a single API call. Worth lowering for a local server, "
                "where the usual failure is a timeout: 3 attempts at a 20-minute "
                "ceiling is an hour spent learning the same thing once."),
-    Field("SOURCEWORK_MESH__READ_TIMEOUT_S", "Mesh silence timeout (s)", "Limits", "number",
+
+    # -- analyst slicing -----------------------------------------------------
+    Field("SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS", "Analyst slice: evidence items",
+          "Analyst slicing", "number",
+          help="Above this, the analyst works in slices and merges them. This is "
+               "the limit that usually matters - the answer grows with the item "
+               "count even when the prompt stays small. 0 turns it off."),
+    Field("SOURCEWORK_LLM__ANALYSIS_BATCH_CHARS", "Analyst slice: characters", "Analyst slicing",
+          "number",
+          help="The same, measured on the prompt instead. 0 turns it off."),
+
+    # -- mesh & concurrency --------------------------------------------------
+    Field("SOURCEWORK_MESH__READ_TIMEOUT_S", "Mesh silence timeout (s)",
+          "Mesh & concurrency", "number",
           help="How long one agent may say nothing before another treats it as gone. "
                "Not a limit on how long a call may take: a working agent ticks every "
                "15s whether or not it has anything to report, so reaching this means "
                "the peer died. Leave it empty and it follows the timeouts above - "
                "twice the longest call you allow. Set it only to make the mesh less "
                "patient than that."),
-    Field("SOURCEWORK_MESH__CONNECT_TIMEOUT_S", "Mesh connect timeout (s)", "Limits", "number",
+    Field("SOURCEWORK_MESH__CONNECT_TIMEOUT_S", "Mesh connect timeout (s)",
+          "Mesh & concurrency", "number",
           help="Opening the socket to another agent. Every peer is local or on the "
                "same compose network, so a connection not made in ten seconds is not "
                "going to be."),
+    Field("SOURCEWORK_MAX_CONCURRENT_RUNS", "Runs at once", "Mesh & concurrency", "number",
+          help="Runs executing at once; the rest queue. A run is a queue of calls "
+               "to one model server, so against a single-GPU local server two runs "
+               "wanting different models make it thrash. A hosted API parallelises "
+               "on its own side; a local one does not."),
 
     # -- Confluence --------------------------------------------------------
     Field("SOURCEWORK_CONFLUENCE__BASE_URL", "Base URL", "Confluence",
@@ -342,18 +396,24 @@ FIELDS: tuple[Field, ...] = (
     Field("SOURCEWORK_CONFLUENCE__DEFAULT_SPACE_KEY", "Default space key", "Confluence"),
     Field("SOURCEWORK_CONFLUENCE__DEFAULT_PARENT_ID", "Default parent page id", "Confluence"),
 
-    # -- mesh --------------------------------------------------------------
-    Field("SOURCEWORK_SECURITY__ENFORCE", "Require the shared secret", "Mesh", "bool"),
-    Field("SOURCEWORK_SECURITY__API_KEY", "Shared secret", "Mesh", "password"),
-    Field("SOURCEWORK_LOG_LEVEL", "Log level", "Mesh", "select",
+    # -- security & logging --------------------------------------------------
+    Field("SOURCEWORK_SECURITY__ENFORCE", "Require the shared secret",
+          "Security & logging", "bool"),
+    Field("SOURCEWORK_SECURITY__API_KEY", "Shared secret", "Security & logging", "password"),
+    Field("SOURCEWORK_SECURITY__ALLOW_PRIVATE_FETCH", "Allow fetches to private addresses",
+          "Security & logging", "bool",
+          help="Off. Making the server issue a request is the whole of SSRF, and "
+               "169.254.169.254 is cloud credentials. Turn on only when your "
+               "document store genuinely lives on the private network."),
+    Field("SOURCEWORK_LOG_LEVEL", "Log level", "Security & logging", "select",
           ("DEBUG", "INFO", "WARNING", "ERROR")),
 
-    # -- quality & history ---------------------------------------------------
-    Field("SOURCEWORK_QUALITY__EARS", "EARS syntax", "Quality", "bool",
+    # -- runs & quality ------------------------------------------------------
+    Field("SOURCEWORK_QUALITY__EARS", "EARS syntax", "Runs & quality", "bool",
           help="Analyst writes requirements in EARS shapes (When/While/If-then/"
-               "Where/ubiquitous) and the critic flags statements that take none "
+               "Where/Ubiquitous) and the critic flags statements that take none "
                "of them. Off: phrasing is free."),
-    Field("SOURCEWORK_RUNS__RETENTION_DAYS", "Run retention (days)", "History", "number",
+    Field("SOURCEWORK_RUNS__RETENTION_DAYS", "Run retention (days)", "Runs & quality", "number",
           help="Finished runs older than this are deleted when the UI starts. "
                "0 keeps everything. The store holds full source text, so a "
                "retention policy belongs here."),
@@ -677,6 +737,15 @@ def profiles_for_values(
     }
 
 
+def tabs() -> list[dict[str, str]]:
+    """The page's top-level sections, in order, as ``{id, label}``.
+
+    Sent to the client rather than hard-coded there, so the local and hosted
+    settings pages agree on the shape and a tab added here needs no JS change.
+    """
+    return [{"id": tid, "label": label} for tid, label in TABS]
+
+
 def describe(path: Path, *, allowed: tuple[str, ...] = BACKEND_IDS) -> list[dict[str, Any]]:
     """The settings form: every allowed field, with its current value masked."""
     return describe_values(read(path), allowed=allowed)
@@ -709,6 +778,7 @@ def describe_values(
             "key": f.key,
             "label": f.label,
             "group": f.group,
+            "tab": GROUP_TAB[f.group],
             "kind": f.kind,
             "options": options,
             "help": f.help,
@@ -739,6 +809,32 @@ def _means_unset(key: str, value: str) -> bool:
     return field is not None and field.kind == "number" and not value.strip()
 
 
+def _invalid_value(field: Field, value: str) -> str | None:
+    """Why ``value`` cannot be stored for ``field``, or ``None`` if it can.
+
+    The allow-list governs which *keys* may be written; this governs what may
+    be written *into* them. A newline would end the line early and inject a
+    second key, which is the environment injection the allow-list exists to
+    prevent. A value of the wrong type would make every process that reads the
+    file afterwards fail to start.
+    """
+    if _CONTROL_CHARS.search(value):
+        return "control characters are not allowed"
+    if value == "":
+        return None
+    if field.kind == "number":
+        try:
+            float(value)
+        except ValueError:
+            return "not a number"
+    elif field.kind == "bool":
+        if value.lower() not in _BOOL_VALUES:
+            return "not a boolean"
+    elif field.kind == "select" and field.options and value not in field.options:
+        return "not one of the offered options"
+    return None
+
+
 def filter_updates(
     current: dict[str, str], updates: dict[str, str], *, allowed: tuple[str, ...] | None = None
 ) -> dict[str, str]:
@@ -765,6 +861,9 @@ def filter_updates(
         if field.secret and value == MASK:
             continue  # untouched masked field
         value = "" if value is None else str(value).strip()
+        if (why := _invalid_value(field, value)) is not None:
+            logger.warning("settings: refusing %s (%s)", key, why)
+            continue
         if (
             allowed is not None
             and key == "SOURCEWORK_LLM__BACKEND"

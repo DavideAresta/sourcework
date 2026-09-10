@@ -33,7 +33,15 @@ DEFAULT_TENANT = "default"
 _tenant: ContextVar[str] = ContextVar("sourcework_cloud_tenant", default=DEFAULT_TENANT)
 """Which tenant the current request is acting for, set by the cloud middleware
 from the resolved session and read by every store call. One value per request,
-never shared."""
+never shared.
+
+It defaults to :data:`DEFAULT_TENANT` because Phase 0 *is* one tenant: the
+startup orphan sweep and any read outside a request run as that tenant. The
+fail-closed property comes from the auth middleware refusing an unauthenticated
+request, not from this default. When the identity pass maps a principal to a
+real tenant, `tenant_for` is called per request and a query that runs before it
+would read the default tenant rather than every tenant - still a leak of one
+tenant's data to another, which is why the RLS policy below is enforced too."""
 
 
 def tenant_for(tenant_id: str) -> None:
@@ -69,14 +77,20 @@ CREATE TABLE IF NOT EXISTS tenant_settings (
 
 RLS = """
 ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runs FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON runs;
 CREATE POLICY tenant_isolation ON runs
     USING (tenant_id = current_setting('app.tenant_id', true));
 ALTER TABLE tenant_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_settings FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_settings ON tenant_settings;
 CREATE POLICY tenant_isolation_settings ON tenant_settings
     USING (tenant_id = current_setting('app.tenant_id', true));
 """
+"""``FORCE`` matters: this same role creates the tables, and Postgres exempts a
+table's owner from its own row-level policies. Without it the policy above was
+decoration - the explicit ``WHERE tenant_id = %s`` was the only wall, which is
+exactly the one a future query can forget."""
 
 
 class PostgresStore:

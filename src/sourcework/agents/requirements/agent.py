@@ -256,6 +256,10 @@ class MergeDecision(BaseModel):
 
 class AnalysisResult(RequirementSet):
     summary: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    """Anything the analyst could not cover - a failed evidence slice, for
+    instance. Carried so the run can report that the requirement set was built
+    from part of the evidence rather than all of it."""
 
 
 class RequirementsExecutor(SkillExecutor):
@@ -307,12 +311,13 @@ class RequirementsExecutor(SkillExecutor):
         batches = _batch(
             req.evidence, source_titles, cfg.analysis_batch_chars, cfg.analysis_batch_items
         )
+        slice_warnings: list[str] = []
         if len(batches) == 1:
             draft = await self.llm.structured(
                 system, prompt_for(rendered), RequirementDraft, role="reasoning"
             )
         else:
-            draft = await self._analyse_in_batches(
+            draft, slice_warnings = await self._analyse_in_batches(
                 batches,
                 source_titles,
                 system,
@@ -326,6 +331,7 @@ class RequirementsExecutor(SkillExecutor):
         await progress(f"Model proposed {len(draft.requirements)} requirement(s); validating citations")
 
         result = _materialise(draft, by_id, req.prior)
+        result.warnings = slice_warnings
         dropped = sum(1 for r in result.requirements if r.derived and not r.source_refs)
         if dropped:
             await progress(f"{dropped} requirement(s) had no valid citation and were marked derived")
@@ -350,7 +356,7 @@ class RequirementsExecutor(SkillExecutor):
         progress: Progress,
         saved: checkpoint.Checkpoint,
         config_fp: str,
-    ) -> RequirementDraft:
+    ) -> tuple[RequirementDraft, list[str]]:
         """Map over slices of the evidence, then reduce to one draft.
 
         The map calls run concurrently but bounded: these are subprocesses on a
@@ -375,12 +381,13 @@ class RequirementsExecutor(SkillExecutor):
         )
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_SLICES)
         drafts: list[RequirementDraft | None] = [None] * len(batches)
+        failures: list[str] = []
 
         async def analyse(index: int, batch: list[Evidence]) -> None:
             prompt = prompt_for(_render_evidence(batch, titles))
             stage = f"slice:{checkpoint.digest(system, prompt, config_fp)}"
 
-            stored = saved.load(stage, config_fp, RequirementDraft.model_validate)
+            stored = await saved.aload(stage, config_fp, RequirementDraft.model_validate)
             if stored is not None:
                 drafts[index] = stored
                 await progress(
@@ -397,11 +404,12 @@ class RequirementsExecutor(SkillExecutor):
                     )
                 except Exception as exc:  # noqa: BLE001 - one slice must not kill the set
                     logger.exception("evidence slice %d failed", index + 1)
+                    failures.append(f"slice {index + 1}: {type(exc).__name__}: {exc}")
                     await progress(f"Slice {index + 1} failed ({type(exc).__name__}); continuing")
                     return
             # Outside the semaphore: writing a file must not hold a slot that
             # another slice is waiting on.
-            saved.save(stage, config_fp, drafts[index])
+            await saved.asave(stage, config_fp, drafts[index])
 
         await asyncio.gather(*(analyse(i, b) for i, b in enumerate(batches)))
 
@@ -434,7 +442,21 @@ class RequirementsExecutor(SkillExecutor):
             f"Merged {total} into {len(merged.requirements)} requirement(s), "
             f"{len(merged.conflicts)} conflict(s)"
         )
-        return merged
+        # A slice that failed is evidence that was never analysed. The run can
+        # carry on, but the result must say so - otherwise the PRD describes a
+        # requirement set built from the surviving slices as if it covered all
+        # of them.
+        warnings = (
+            [f"{len(failures)} evidence slice(s) failed and were not analysed"] + failures
+            if failures
+            else []
+        )
+        if warnings:
+            await progress(
+                f"{len(failures)} of {len(batches)} slice(s) failed; the requirement set "
+                "covers the rest"
+            )
+        return merged, warnings
 
 
 def _batch(
@@ -806,6 +828,15 @@ def _materialise(
             if evidence is None:
                 logger.warning("dropping invented citation %r on %s", ev_id, req_id)
                 continue
+            if not (evidence.locator or "").strip():
+                # No location means a reader cannot go and check the quote,
+                # which is the whole of what a citation is for. Treated exactly
+                # like an invented id: dropped, so the requirement renders
+                # `derived` rather than sourced against a blank cell.
+                logger.warning(
+                    "dropping unlocatable citation %r on %s - it becomes derived", ev_id, req_id
+                )
+                continue
             refs.append(
                 SourceRef(
                     evidence_id=evidence.id,
@@ -832,7 +863,22 @@ def _materialise(
         # word is for.
         if not refs and prior_refs.get(req_id):
             if _same_claim(item.statement, prior_statements.get(req_id, "")):
-                refs = list(prior_refs[req_id])
+                # An inherited citation is only as good as the evidence it
+                # names. A baseline can carry a dangling id or one with no
+                # locator; both would render as provenance for a quote nobody
+                # can find, so both are dropped exactly like a model's invented
+                # id. Whatever survives still resolves to evidence this run has.
+                carried = [
+                    ref
+                    for ref in prior_refs[req_id]
+                    if ref.evidence_id in by_id and (ref.locator or "").strip()
+                ]
+                dropped = len(prior_refs[req_id]) - len(carried)
+                if dropped:
+                    logger.warning(
+                        "dropped %d invalid inherited citation(s) on %s", dropped, req_id
+                    )
+                refs = carried
                 logger.debug("carried %d citation(s) forward onto %s", len(refs), req_id)
             else:
                 logger.info(

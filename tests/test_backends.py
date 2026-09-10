@@ -37,7 +37,7 @@ from sourcework.backends.codex import CodexBackend
 from sourcework.backends.codex import parse_events as codex_events
 from sourcework.backends.copilot import CopilotBackend
 from sourcework.backends.copilot import parse_events as copilot_events
-from sourcework.backends.opencode import OpenCodeBackend, parse_events
+from sourcework.backends.opencode import OpenCodeBackend, _parse_verbose_models, parse_events
 from sourcework.config import LLMSettings, settings
 
 PIXEL = base64.b64encode(bytes.fromhex("89504e470d0a1a0a")).decode()
@@ -49,10 +49,11 @@ def cli(monkeypatch):
     calls: list[dict] = []
     scripted: list[process.ProcessResult] = []
 
-    async def fake_run(argv, *, cwd=None, env=None, stdin_text=None, timeout_s=300.0,
-                       on_line=None):
+    async def fake_run(argv, *, cwd=None, env=None, without=None, stdin_text=None,
+                       timeout_s=300.0, on_line=None):
         calls.append(
             {"argv": list(argv), "cwd": str(cwd) if cwd else None, "env": env or {},
+             "without": tuple(without or ()),
              "stdin": stdin_text, "timeout": timeout_s, "streamed": on_line is not None}
         )
         result = scripted.pop(0) if scripted else process.ProcessResult(0, "", "")
@@ -253,6 +254,17 @@ async def test_claude_code_usage_limit_is_a_quota_error(cli):
         await ClaudeCodeBackend().generate(request())
 
 
+async def test_claude_code_never_hands_the_shared_anthropic_key_to_the_cli(cli, monkeypatch):
+    """The key exists in this process for litellm's `anthropic/…` ids and the
+    model listing; the CLI treats it as an auth source that takes precedence
+    over the stored login and refuses to run - the failure that broke a whole
+    extraction stage. Demonstrated live before the fix."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-invalid-but-present")
+    cli.script(json.dumps({"is_error": False, "result": "ok"}))
+    await ClaudeCodeBackend().generate(request())
+    assert cli.calls[-1]["without"] == ("ANTHROPIC_API_KEY",)
+
+
 # ---------------------------------------------------------------------------
 # opencode-cli
 # ---------------------------------------------------------------------------
@@ -340,6 +352,86 @@ async def test_opencode_empty_stream_is_an_empty_response_error(cli):
     cli.script("")
     with pytest.raises(EmptyBackendResponseError):
         await OpenCodeBackend().generate(request())
+
+
+def test_opencode_verbose_output_yields_names_beside_ids():
+    """The id is what the CLI is invoked with; the name is what a person
+    searches for. `opencode models --verbose` carries both, and without the
+    name "DeepSeek V4.1 Flash" is unreachable behind
+    `opencode-go/deepseek-flash`."""
+    ids, names = _parse_verbose_models(
+        "opencode-go/deepseek-flash\n"
+        "{\n"
+        '  "id": "deepseek-flash",\n'
+        '  "providerID": "opencode-go",\n'
+        '  "name": "DeepSeek V4.1 Flash",\n'
+        '  "cost": {"input": 0.15, "output": 0.6}\n'
+        "}\n"
+        "opencode/x\n"
+        "{\n"
+        '  "id": "x",\n'
+        '  "name": ""\n'
+        "}\n"
+    )
+    assert ids == ["opencode-go/deepseek-flash", "opencode/x"]
+    assert names == {"opencode-go/deepseek-flash": "DeepSeek V4.1 Flash"}
+
+
+def test_opencode_ids_and_names_share_one_subprocess(monkeypatch):
+    """`probe` asks for both; running `opencode models` twice would double the
+    slowest part of opening the settings page."""
+    import sourcework.backends.opencode as oc
+
+    calls = []
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+        stdout = (
+            "opencode-go/deepseek-flash\n"
+            '{\n  "name": "DeepSeek V4.1 Flash"\n}\n'
+        )
+
+    def fake_run(argv, **kwargs):  # noqa: ANN001, ANN202
+        calls.append(argv)
+        return _Done()
+
+    monkeypatch.setattr(oc.process, "which", lambda name: "/usr/bin/opencode")
+    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+
+    backend = oc.OpenCodeBackend()
+    assert backend.list_models() == ["opencode-go/deepseek-flash"]
+    assert backend.model_names() == {"opencode-go/deepseek-flash": "DeepSeek V4.1 Flash"}
+    assert calls == [["opencode", "models", "--verbose"]]
+
+
+def test_opencode_refresh_updates_the_cli_cache_once(monkeypatch):
+    """`?refresh=1` must reach OpenCode's own models.dev cache - otherwise a
+    just-released model stays invisible - and the ids/names pair must not run
+    the (slow) refresh twice."""
+    import sourcework.backends.opencode as oc
+
+    calls = []
+
+    class _Done:
+        returncode = 0
+        stderr = ""
+        stdout = (
+            "opencode-go/deepseek-flash\n"
+            '{\n  "name": "DeepSeek V4.1 Flash"\n}\n'
+        )
+
+    def fake_run(argv, **kwargs):  # noqa: ANN001, ANN202
+        calls.append(argv)
+        return _Done()
+
+    monkeypatch.setattr(oc.process, "which", lambda name: "/usr/bin/opencode")
+    monkeypatch.setattr(oc.subprocess, "run", fake_run)
+
+    backend = oc.OpenCodeBackend()
+    backend.list_models(refresh=True)
+    backend.model_names(refresh=True)
+    assert calls == [["opencode", "models", "--verbose", "--refresh"]]
 
 
 # ---------------------------------------------------------------------------
@@ -1099,6 +1191,23 @@ async def test_run_captures_output_and_exit_code():
     assert result.stderr.strip() == "err"
 
 
+async def test_run_without_removes_a_key_from_the_child_environment():
+    """``env`` merges over the parent, so a credential SourceWork carries for
+    one backend would otherwise reach every CLI subprocess - and the claude CLI
+    refuses to run when ANTHROPIC_API_KEY, held here for litellm and model
+    listing, takes precedence over its stored login."""
+    argv = ["sh", "-c", 'echo "key=${ANTHROPIC_API_KEY:-unset}"']
+
+    inherited = await process.run(argv, env={"ANTHROPIC_API_KEY": "sk-test"}, timeout_s=30)
+    assert inherited.stdout.strip() == "key=sk-test"
+
+    excluded = await process.run(
+        argv, env={"ANTHROPIC_API_KEY": "sk-test"},
+        without=("ANTHROPIC_API_KEY",), timeout_s=30,
+    )
+    assert excluded.stdout.strip() == "key=unset"
+
+
 async def test_run_kills_a_hung_process_and_still_reports_what_it_said():
     result = await process.run(["sh", "-c", "echo partial; sleep 30"], timeout_s=1.5)
     assert result.timed_out
@@ -1220,6 +1329,29 @@ async def test_a_persistently_empty_backend_gives_actionable_advice(monkeypatch)
     with pytest.raises(llm_module.LLMError, match="reasoning effort"):
         await llm_module.LLM(cfg=cfg).text("s", "u")
     assert flaky.calls == 2  # bounded: 1 + empty_retries
+
+
+async def test_a_truncated_answer_is_reported_not_handed_to_the_parser(monkeypatch):
+    """A response cut at the output limit is a prefix, not a finished answer.
+    Every backend that reports `finish_reason` through usage must be caught
+    centrally - previously only claude-code raised, so litellm's fragment went
+    to the JSON parser and surfaced as a misleading schema error."""
+    from sourcework import llm as llm_module
+    from sourcework.config import LLMSettings
+
+    class Truncating(base.LLMBackend):
+        id = "litellm"
+        supports_vision = True
+
+        async def generate(self, req):  # noqa: ANN001, ANN201
+            return base.BackendResult(
+                text='{"requirements": [', usage=base.LLMUsage(finish_reason="length")
+            )
+
+    monkeypatch.setattr(llm_module, "build", lambda backend_id, cfg: Truncating())
+    cfg = LLMSettings(backend="litellm", default_model="m")
+    with pytest.raises(llm_module.LLMError, match="truncated"):
+        await llm_module.LLM(cfg=cfg).text("s", "u")
 
 
 async def test_a_quota_error_is_not_retried_on_the_same_backend(monkeypatch):

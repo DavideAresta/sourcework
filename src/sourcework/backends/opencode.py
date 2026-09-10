@@ -32,6 +32,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -79,6 +80,53 @@ must be that value alone.
 """
 
 
+_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _parse_verbose_models(text: str) -> tuple[list[str], dict[str, str]]:
+    """``opencode models --verbose`` -> ``(ids, {id: display name})``.
+
+    The CLI prints one bare ``provider/model`` line followed by a pretty-printed
+    JSON object per model. The JSON is brace-matched rather than assumed to be a
+    fixed number of lines, because it already carries nested ``cost``/``limit``/
+    ``capabilities`` objects and will grow more.
+    """
+    lines = text.splitlines()
+    ids: list[str] = []
+    names: dict[str, str] = {}
+    i = 0
+    while i < len(lines):
+        candidate = lines[i].strip()
+        if not _MODEL_ID.match(candidate):
+            i += 1
+            continue
+        start = i + 1
+        while start < len(lines) and "{" not in lines[start]:
+            start += 1
+        if start >= len(lines):
+            break
+        depth = 0
+        end = start
+        for k in range(start, len(lines)):
+            depth += lines[k].count("{") - lines[k].count("}")
+            if depth == 0:
+                end = k
+                break
+        try:
+            node = json.loads("\n".join(lines[start : end + 1]))
+        except ValueError:
+            node = None
+        if isinstance(node, dict):
+            ids.append(candidate)
+            name = node.get("name")
+            if isinstance(name, str) and name.strip():
+                names[candidate] = name.strip()
+            i = end + 1
+        else:
+            i += 1
+    return ids, names
+
+
 class OpenCodeBackend(LLMBackend):
     id = "opencode-cli"
     supports_vision = True
@@ -88,28 +136,72 @@ class OpenCodeBackend(LLMBackend):
         """``--pure`` runs OpenCode without external plugins. Off by default
         because it also disables user-global plugins; on, it skips re-installing
         a ~60 MB plugin tree into the working directory on every single call."""
+        self._catalog: tuple[list[str], dict[str, str]] | None = None
+        """(ids, id -> display name), read once per instance. ``probe`` builds a
+        fresh backend per call, so this is a per-probe cache that lets
+        ``list_models`` and ``model_names`` share one subprocess."""
+        self._refreshed = False
+        """True once a call has asked OpenCode to refresh its models.dev cache,
+        so the second call of the pair does not refresh twice."""
 
     def available(self) -> bool:
         return process.which("opencode") is not None
 
-    def list_models(self) -> list[str]:
-        """Live discovery: ``opencode models``, one ``provider/model`` per line."""
+    def _run_models(self, *extra: str) -> str | None:
         if not self.available():
-            return []
+            return None
         try:
             completed = subprocess.run(  # noqa: S603
-                ["opencode", "models"],
+                ["opencode", "models", *extra],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             logger.warning("opencode models failed: %s", exc)
-            return []
+            return None
         if completed.returncode != 0:
-            return []
-        return [line.strip() for line in completed.stdout.splitlines() if "/" in line.strip()]
+            logger.warning("opencode models exited %d: %s", completed.returncode,
+                           (completed.stderr or "").strip()[:200])
+            return None
+        return completed.stdout
+
+    def _discover(self, *, refresh: bool = False) -> tuple[list[str], dict[str, str]]:
+        # A refresh is honoured once per instance; the second half of the
+        # (ids, names) pair reuses the result rather than re-running the CLI.
+        if self._catalog is not None and not (refresh and not self._refreshed):
+            return self._catalog
+        self._catalog = ([], {})
+        extra = ["--refresh"] if refresh else []
+        # --verbose carries the display name ("DeepSeek V4.1 Flash") beside the
+        # id; without it the picker can only offer `opencode-go/deepseek-flash`,
+        # which the person looking for that model has no way to recognise.
+        # --refresh updates OpenCode's own models.dev cache, which is otherwise
+        # what makes a just-released model invisible.
+        text = self._run_models("--verbose", *extra)
+        self._refreshed = self._refreshed or refresh
+        if text is not None:
+            self._catalog = _parse_verbose_models(text)
+        if not self._catalog[0]:
+            # A CLI too old for --verbose, or an output shape that changed:
+            # fall back to the plain, id-only listing.
+            text = self._run_models(*extra)
+            if text is not None:
+                ids = [
+                    line.strip()
+                    for line in text.splitlines()
+                    if _MODEL_ID.match(line.strip())
+                ]
+                self._catalog = (ids, {})
+        return self._catalog
+
+    def list_models(self, *, refresh: bool = False) -> list[str]:
+        """Live discovery, one ``provider/model`` per line."""
+        return self._discover(refresh=refresh)[0]
+
+    def model_names(self, *, refresh: bool = False) -> dict[str, str]:
+        return self._discover(refresh=refresh)[1]
 
     async def generate(self, request: BackendRequest) -> BackendResult:
         cwd = process.neutral_cwd()
@@ -149,6 +241,9 @@ class OpenCodeBackend(LLMBackend):
                     # provide a message or a command".
                     stdin_text=stdin_text,
                     timeout_s=request.timeout_s,
+                    # Keep the stream on the retry too, or a demoted model makes
+                    # the fallback call invisible to a watching user.
+                    on_line=_line_streamer(request.on_chunk),
                 )
                 parsed = parse_events(result.stdout)
 
@@ -366,7 +461,9 @@ def _install_answer_agent(cwd: Path) -> bool:
             target.write_text(_ANSWER_AGENT_BODY, encoding="utf-8")
         return True
     except OSError as exc:
-        logger.debug("could not install the opencode no-narration agent: %s", exc)
+        # Not debug: without this file OpenCode's narration can be glued into
+        # the JSON an agent parses, which is exactly what the agent prevents.
+        logger.warning("could not install the opencode no-narration agent: %s", exc)
         return False
 
 

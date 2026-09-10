@@ -41,6 +41,7 @@ __all__ = [
     "OutputTruncatedError",
     "build",
     "classify",
+    "clear_reachability_cache",
     "looks_like_quota",
     "probe",
     "resolve_chain",
@@ -112,7 +113,7 @@ def build(backend_id: str, cfg: LLMSettings) -> LLMBackend:
             #: showed twenty-one models and looked more ready than a live one.
             models_from = ""
 
-            def list_models(self) -> list[str]:
+            def list_models(self, *, refresh: bool = False) -> list[str]:
                 # A running server is authoritative: llama-swap may serve
                 # models that are downloaded on demand and are not on disk yet.
                 served = super().list_models()
@@ -178,7 +179,15 @@ def resolve_chain(cfg: LLMSettings, *, needs_vision: bool = False) -> list[str]:
     """
     chain: list[str] = [cfg.active_backend]
     chain += [b for b in cfg.failover_order if b not in chain]
-    chain = [b for b in chain if b in BACKEND_IDS]
+    known: list[str] = []
+    for backend_id in chain:
+        if backend_id in BACKEND_IDS:
+            known.append(backend_id)
+        else:
+            # A typo here silently removes a failover backend; the failure then
+            # only shows up when the primary is already down. Say so instead.
+            logger.warning("ignoring %r in the backend chain: not a known backend", backend_id)
+    chain = known
 
     if needs_vision:
         vision_capable = []
@@ -210,6 +219,17 @@ probing in the first place.
 _reachable_cache: dict[str, tuple[float, bool]] = {}
 
 
+def clear_reachability_cache() -> None:
+    """Forget every cached reachability answer.
+
+    A normal probe reuses the 30-second answer so opening the settings page
+    twice is not two rounds of socket opening. A deliberate refresh (the button
+    on the page, or entering it after starting a model server) should not be
+    held back by that window.
+    """
+    _reachable_cache.clear()
+
+
 def _reachable(endpoint: str, timeout: float = 2.0) -> bool:
     """Does anything answer at ``endpoint``? Cached for :data:`_REACHABLE_TTL_S`."""
     import time
@@ -223,12 +243,20 @@ def _reachable(endpoint: str, timeout: float = 2.0) -> bool:
 
     try:
         response = httpx.get(endpoint.rstrip("/") + "/models", timeout=timeout)
-        answered = response.status_code < 500
+        # A 200 is a model list; anything else - 401, 404, a redirect - does not
+        # answer the question "can this serve a call". Treating every non-5xx as
+        # reachable called a wrong-credentials server up.
+        answered = response.status_code == 200
     except Exception as exc:  # noqa: BLE001 - every failure means "not answering"
         logger.debug("nothing answering at %s: %s", endpoint, exc)
         answered = False
 
+    # Bounded: endpoint strings come from settings, which can be edited at
+    # runtime, so an unbounded map is a slow leak across a long-lived process.
     _reachable_cache[endpoint] = (now, answered)
+    if len(_reachable_cache) > 64:
+        for stale in [k for k, (t, _) in _reachable_cache.items() if now - t >= _REACHABLE_TTL_S]:
+            _reachable_cache.pop(stale, None)
     return answered
 
 
@@ -243,25 +271,37 @@ def _model_source(backend: object, models: list[str], endpoint: str | None) -> s
     return "server" if endpoint else "cli"
 
 
-def probe(cfg: LLMSettings, *, allowed: tuple[str, ...] | None = None) -> list[dict[str, object]]:
+def probe(
+    cfg: LLMSettings,
+    *,
+    allowed: tuple[str, ...] | None = None,
+    refresh: bool = False,
+) -> list[dict[str, object]]:
     """Local availability of the known backends, for the ``backends`` command
     and the settings page.
 
     ``allowed`` narrows the probe to one distribution's offer - a hosted
     installation passes :data:`API_BACKEND_IDS` so its page never advertises a
-    CLI backend it cannot run. Does not call anything over the network: a
-    backend is "available" when it could run here, not when it has been proven
-    to answer.
+    CLI backend it cannot run. ``refresh`` asks a backend that keeps its own
+    model cache (OpenCode's models.dev cache) to update it first. Does not call
+    anything over the network otherwise: a backend is "available" when it could
+    run here, not when it has been proven to answer.
     """
     rows: list[dict[str, object]] = []
     for backend_id in allowed or BACKEND_IDS:
         try:
             backend = build(backend_id, cfg)
         except BackendUnavailableError as exc:
-            rows.append({"id": backend_id, "available": False, "detail": str(exc), "models": []})
+            rows.append(
+                {"id": backend_id, "available": False, "detail": str(exc), "models": [],
+                 "model_names": {}}
+            )
             continue
         available = backend.available()
-        models = backend.list_models() if available else []
+        models = backend.list_models(refresh=refresh) if available else []
+        # Display names, where the backend knows them, so the picker can offer
+        # "DeepSeek V4.1 Flash" and not only `opencode-go/deepseek-flash`.
+        model_names = backend.model_names(refresh=refresh) if available else {}
         # `available` answers "could this run here" - a binary on PATH, a
         # library importable - and deliberately says nothing about whether a
         # server is up. Read as a green light it promised far more than it
@@ -277,6 +317,7 @@ def probe(cfg: LLMSettings, *, allowed: tuple[str, ...] | None = None) -> list[d
             "endpoint": endpoint,
             "vision": backend.supports_vision,
             "models": models,
+            "model_names": model_names,
             # "server" - something is serving these right now. "disk" - they are
             # files and nothing is serving them. "cli" - the coding CLI listed
             # its own, which is neither. Empty when there are no models to place.

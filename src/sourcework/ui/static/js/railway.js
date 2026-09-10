@@ -29,13 +29,19 @@ const STOPS = [
   { key: 'done', label: 'Done', agent: 'flag', timings: [] },
 ];
 
-// What the orchestrator says when it enters a stage. Matched against the
-// progress line as sent; `pipeline.py` is the other half of this table, and
-// tests/test_ui.py asserts the two still agree.
+// What announces a stage. Matched against the progress line *after* the
+// specialist's `[agent]` tag is lifted off; `pipeline.py` is the other half of
+// this table, and tests/test_ui.py asserts the two still agree — including
+// that no pattern reaches into the middle of a line, which is how the
+// analyst's "Analysing 220 evidence item(s) from 5 source(s)" once matched the
+// unanchored `evidence item(s) from ` here and dragged a strip that had
+// honestly reached Analyse back to Ingest.
 const ENTERS = [
   [/^Mesh online|^CQL /, 'discover'],
-  [/^Ingesting|^Carrying forward|^Reusing \d+ evidence|^Skipping |evidence item\(s\) from /, 'ingest'],
-  [/^Normalising requirements|^Reusing the requirements/, 'analyse'],
+  [/^Ingesting |^Carrying forward |^Reusing \d+ evidence |^Skipping |^\d+ evidence item\(s\) from \d+ source/, 'ingest'],
+  // The analyst's own relayed lines are the honest "we are in Analyse": the
+  // phase is minutes long and its slices are what the log mostly says.
+  [/^Normalising requirements|^Reusing the requirements|^Analysing |^Evidence is too large|^Slice \d+\/|^Model proposed \d+ requirement/, 'analyse'],
   [/^Drafting|^Revising/, 'write'],
   [/^Reviewing|^Reusing the review|^Review: /, 'review'],
   [/^Publishing to|^Publish failed/, 'publish'],

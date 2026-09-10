@@ -1,15 +1,5 @@
 # Running SourceWork on your own hardware
 
-Every model can be local. The `litellm` backend speaks to any OpenAI-compatible
-server, so [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`
-is a configuration change, not a code change:
-
-```bash
-SOURCEWORK_LLM__BACKEND=litellm
-SOURCEWORK_LLM__API_BASE=http://127.0.0.1:8081/v1
-SOURCEWORK_LLM__API_KEY=local
-SOURCEWORK_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
-SOURCEWORK_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
 Every model can be local. In Settings, choose **llama-cpp** and set its local
 server URL and per-role models. It connects directly to
 [llama.cpp](https://github.com/ggml-org/llama.cpp)'s `llama-server`; LiteLLM is
@@ -22,6 +12,17 @@ SOURCEWORK_LLM__LLAMA_CPP_API_KEY=local
 SOURCEWORK_LLM__LLAMA_CPP_MODELS__DEFAULT=openai/<model-id>
 SOURCEWORK_LLM__LLAMA_CPP_MODELS__REASONING=openai/<model-id>
 SOURCEWORK_LLM__TIMEOUT_S=1200                    # minutes per call, not seconds
+```
+
+The same idea works through the general `litellm` backend, which speaks to any
+OpenAI-compatible server:
+
+```bash
+SOURCEWORK_LLM__BACKEND=litellm
+SOURCEWORK_LLM__API_BASE=http://127.0.0.1:8081/v1
+SOURCEWORK_LLM__API_KEY=local
+SOURCEWORK_LLM__DEFAULT_MODEL=openai/<model-id>   # `openai/` is what points
+SOURCEWORK_LLM__REASONING_MODEL=openai/<model-id> # LiteLLM at API_BASE
 ```
 
 Four things decide whether this works at all, and all four are the difference
@@ -47,9 +48,9 @@ SOURCEWORK_LLM__ANALYSIS_BATCH_ITEMS=30
 **Stop hybrid models from thinking away their output budget.** A reasoning model
 at default effort will spend all 8k tokens in its scratchpad and return *empty
 content*, which the pipeline can only report as "the backend said nothing".
-`-rea off` on llama-server fixes it for most; harmony-format models (gpt-oss)
-ignore that flag and need `--chat-template-kwargs '{"reasoning_effort":"low"}'`
-instead.
+`--reasoning-budget 0` on llama-server fixes it for most; harmony-format models
+(gpt-oss) ignore that flag and need
+`--chat-template-kwargs '{"reasoning_effort":"low"}'` instead.
 
 **Let the model fit.** `--fit` only adjusts arguments you did *not* set, so
 pinning `-ngl 99` on a model larger than your VRAM turns a slow run into an

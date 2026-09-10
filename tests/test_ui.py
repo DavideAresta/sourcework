@@ -17,7 +17,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sourcework import __version__
-from sourcework.config import LLMOverrides, LLMSettings, effective_llm, llm_overrides, settings
+from sourcework.config import (
+    LLMOverrides,
+    LLMSettings,
+    PeerSettings,
+    effective_llm,
+    llm_overrides,
+    settings,
+)
 from sourcework.llm import LLM
 from sourcework.models import InputRef, PRDRequest
 from sourcework.ui import env_file
@@ -158,6 +165,51 @@ def test_saving_an_untouched_secret_keeps_it(env_path: Path):
 def test_a_real_secret_change_is_written(env_path: Path):
     assert env_file.write(env_path, {"ANTHROPIC_API_KEY": "sk-new"}) == ["ANTHROPIC_API_KEY"]
     assert env_file.read(env_path)["ANTHROPIC_API_KEY"] == "sk-new"
+
+
+def test_a_newline_cannot_inject_a_second_env_key(env_path: Path):
+    """The allow-list governs which keys may be written, but a newline ends the
+    line early and the next line is parsed as another key - so it must govern
+    the value too. Demonstrated before the fix: posting a value with a newline
+    wrote ``SOURCEWORK_SECURITY__ENFORCE=false`` into the file."""
+    changed = env_file.write(
+        env_path,
+        {"SOURCEWORK_LLM__MAX_TOKENS": "1024\nSOURCEWORK_SECURITY__ENFORCE=false"},
+    )
+    assert changed == []
+    assert "SOURCEWORK_SECURITY__ENFORCE" not in env_file.read(env_path)
+
+
+def test_a_non_numeric_value_is_refused_before_it_bricks_the_config(env_path: Path):
+    """A wrong-typed value would make every process that reads the file - and
+    the settings backend itself - fail to construct on the next start."""
+    assert env_file.write(env_path, {"SOURCEWORK_LLM__MAX_TOKENS": "abc"}) == []
+    assert "SOURCEWORK_LLM__MAX_TOKENS" not in env_file.read(env_path)
+
+
+# Documented in .env.example but deliberately not editable from the settings
+# page. The mesh peer URLs are deployment topology (compose sets them) and
+# editing them from one machine's page would not reach the others.
+NOT_ON_THE_SETTINGS_PAGE = {
+    "SOURCEWORK_LLM__FAST_MODEL",  # a role no agent uses yet
+    "SOURCEWORK_LLM__OPENCODE_PURE",  # a backend-internal knob
+    "SOURCEWORK_SECURITY__HEADER",  # advanced; the page uses the default
+    *{f"SOURCEWORK_PEERS__{peer.upper()}" for peer in PeerSettings().as_map()},
+}
+
+
+def test_every_documented_setting_is_on_the_page_or_explicitly_exempt():
+    """AGENTS.md: a key the settings page cannot see is one nobody finds. A new
+    `.env.example` entry must come with a `Field`, or with a reason here."""
+    example = (Path(__file__).parent.parent / ".env.example").read_text(encoding="utf-8")
+    documented = {
+        match.group(1)
+        for match in re.finditer(r"^(?:#\s*)?(SOURCEWORK_[A-Z0-9_]+)=", example, re.MULTILINE)
+    }
+    missing = documented - set(env_file.BY_KEY)
+    assert missing <= NOT_ON_THE_SETTINGS_PAGE, (
+        f"documented in .env.example but not on the settings page: {sorted(missing)}"
+    )
 
 
 def test_a_local_endpoint_is_not_offered_hosted_models(tmp_path: Path):
@@ -694,6 +746,12 @@ def test_the_settings_endpoint_masks_and_allow_lists(client: TestClient):
     assert "SOURCEWORK_LLM__BACKEND" in keys
     assert all(f["value"] != "sk-" for f in payload["fields"])
 
+    # The tab navigation is data too, so the page builds its rail from one
+    # source shared with the hosted settings backend.
+    tab_ids = {t["id"] for t in payload["tabs"]}
+    assert {"overview", "models", "advanced"} <= tab_ids
+    assert all(f["tab"] in tab_ids for f in payload["fields"])
+
     result = client.put("/api/settings", json={"NOT_ALLOWED": "x"}).json()
     assert result["changed"] == []
 
@@ -846,7 +904,7 @@ def test_probing_backends_happens_off_the_event_loop(client: TestClient, monkeyp
     """
     seen: dict[str, bool] = {}
 
-    def spy(cfg, *, allowed=None):  # noqa: ANN001, ARG001
+    def spy(cfg, *, allowed=None, refresh=False):  # noqa: ANN001, ARG001
         # A worker thread has no running loop; the loop's own thread does. This
         # is the guarantee, stated the only way that cannot drift.
         try:
@@ -855,11 +913,39 @@ def test_probing_backends_happens_off_the_event_loop(client: TestClient, monkeyp
             seen["on_loop"] = False
         else:
             seen["on_loop"] = True
+        seen["refresh"] = refresh
         return []
 
     monkeypatch.setattr("sourcework.ui.app.probe", spy)
     assert client.get("/api/backends").status_code == 200
     assert seen["on_loop"] is False
+    assert seen["refresh"] is False
+    # The refresh query reaches the probe, so a backend with its own model
+    # cache is told to update it.
+    assert client.get("/api/backends?refresh=1").status_code == 200
+    assert seen["refresh"] is True
+
+
+def test_api_backends_refresh_is_not_stored_and_drops_the_cache(
+    client: TestClient, monkeypatch
+):
+    """Entering Settings asks for the model lists as they are now, so the
+    browser must not answer from its own cache and `?refresh=1` must forget the
+    server's short reachability cache - a model server started since the last
+    look should show as answering."""
+    from sourcework.ui import app as ui_app
+
+    calls = []
+    monkeypatch.setattr(ui_app, "clear_reachability_cache", lambda: calls.append(True))
+
+    plain = client.get("/api/backends")
+    assert plain.status_code == 200
+    assert plain.headers["cache-control"] == "no-store"
+    assert calls == []
+
+    refreshed = client.get("/api/backends?refresh=1")
+    assert refreshed.status_code == 200
+    assert calls == [True]
 
 
 # ---------------------------------------------------------------------------
@@ -1310,12 +1396,35 @@ def test_every_field_belongs_to_a_named_group():
         assert all(f.backend == backend for f in fields), f"{label} mixes backends"
 
     # A card is small (four model cells plus that backend's own credentials), so
-    # no backend card may be the biggest group on the page - a giant backend
-    # group means settings drifted back into a flat list.
-    biggest = Counter(f.group for f in env_file.FIELDS).most_common(1)[0][0]
-    assert biggest not in set(env_file.BACKEND_GROUPS.values()), (
-        f"the biggest group is {biggest!r}; a backend card must stay small"
-    )
+    # it stays small. Some providers carry more credentials than others
+    # (Bedrock: region, key, secret and session token), so guard the bound
+    # rather than a comparison with whichever unrelated card is largest - the
+    # tab split can shuffle the non-backend groups underneath it.
+    sizes = Counter(f.group for f in env_file.FIELDS)
+    biggest_card = max(sizes[label] for label in env_file.BACKEND_GROUPS.values())
+    assert biggest_card <= 8, f"a backend card grew to {biggest_card} fields"
+
+
+def test_every_group_maps_to_a_tab_and_every_tab_has_fields():
+    """A card's tab is data, sent with each field so the local and hosted pages
+    share one navigation. A new group with no mapping would KeyError the page,
+    and a tab with no cards is dead space in the rail."""
+    tab_ids = {t["id"] for t in env_file.tabs()}
+    assert tab_ids
+    for field in env_file.FIELDS:
+        assert field.group in env_file.GROUP_TAB, field.group
+        assert env_file.GROUP_TAB[field.group] in tab_ids, field.group
+
+    used = {env_file.GROUP_TAB[f.group] for f in env_file.FIELDS}
+    assert used == tab_ids
+
+
+def test_describe_sends_a_tab_for_every_field(env_path: Path):
+    tab_ids = {t["id"] for t in env_file.tabs()}
+    rows = env_file.describe(env_path)
+    assert rows
+    for row in rows:
+        assert row["tab"] in tab_ids, row["key"]
 
 
 def test_the_batching_knobs_are_reachable_from_the_ui():
@@ -1635,11 +1744,24 @@ def test_a_run_with_no_result_has_no_verdict_to_give(client: TestClient, tmp_pat
     assert client.get("/api/runs/midflight").json()["readiness"] is None
 
 
-def _js_patterns(source: str, name: str) -> list[str]:
-    """The regex sources out of a `const NAME = [[/…/, 'key'], …]` table."""
-    body = re.search(rf"const {name} = \[(.*?)\n\];", source, re.DOTALL)
-    assert body, f"{name} is no longer a table - update this test with it"
-    return re.findall(r"\[/(.+?)/,", body.group(1))
+def _js_enters(source: str) -> list[tuple[str, str]]:
+    """The (pattern, stage) pairs out of railway.js's `const ENTERS = […]`."""
+    body = re.search(r"const ENTERS = \[(.*?)\n\];", source, re.DOTALL)
+    assert body, "ENTERS is no longer a table - update this test with it"
+    return re.findall(r"\[/(.+?)/,\s*'([a-z]+)'\]", body.group(1))
+
+
+def _railway_corpus() -> list[str]:
+    """Every progress line the system says, quoted strings with the f-string
+    placeholders rendered (as `0`, which is all a pattern's `\\d+` needs)."""
+    base = Path(__file__).resolve().parent.parent / "src" / "sourcework"
+    sources = [(base / "agents" / "orchestrator" / "pipeline.py").read_text(),
+               (base / "ui" / "runner.py").read_text()]
+    sources += [(p).read_text() for p in sorted((base / "agents").glob("*/agent.py"))]
+    said = [m.group(1) for m in re.finditer(r'"([A-Z][^"{]{4,})', "".join(sources))]
+    # A specialist's line reaches the stream through an f-string, so the corpus
+    # the patterns are checked against is the rendered shape, not the source.
+    return [re.sub(r"\{[^}]*\}", "0", s) for s in said if s.strip()]
 
 
 def test_the_railway_still_recognises_the_stages_the_pipeline_announces():
@@ -1651,24 +1773,37 @@ def test_the_railway_still_recognises_the_stages_the_pipeline_announces():
     failure this project treats as worse than a crash. So: every pattern must
     still match something the pipeline actually says.
     """
-    pipeline = (
-        Path(__file__).resolve().parent.parent
-        / "src" / "sourcework" / "agents" / "orchestrator" / "pipeline.py"
-    ).read_text()
-    runner = (
-        Path(__file__).resolve().parent.parent / "src" / "sourcework" / "ui" / "runner.py"
-    ).read_text()
-
-    # Every quoted phrase in the two files, not only the ones passed straight to
-    # `say`: "Drafting" reaches the stream through a local, and a test that only
-    # read call sites would have declared that stage unmatchable.
-    said = [m.group(1) for m in re.finditer(r'"([A-Z][^"{]{4,})', pipeline + runner)]
-    said = [s for s in said if s.strip()]
+    said = _railway_corpus()
     assert said, "found no progress lines to check against"
 
     railway = (STATIC_JS / "railway.js").read_text()
-    for pattern in _js_patterns(railway, "ENTERS"):
+    for pattern, _key in _js_enters(railway):
         compiled = re.compile(pattern.replace("\\\\", "\\"))
         assert any(compiled.search(line) for line in said), (
             f"railway.js matches /{pattern}/, which no line in the pipeline says any more"
         )
+
+
+def test_the_railway_cannot_be_dragged_back_by_a_relayed_line():
+    """A specialist's line may not pull the strip to an earlier stage.
+
+    The analyst relays `Analysing 220 evidence item(s) from 5 source(s)`, which
+    contains the very phrase the ingest rule listened for. Unanchored, it
+    matched - and after `Normalising requirements` had honestly advanced the
+    strip to Analyse, the next line dragged it back to Ingest, which is the
+    screenshot that reported this: strip on Ingest, hero on the analyst's third
+    slice. Anchored, ingest still catches the orchestrator's own summary line
+    and must never catch the analyst's."""
+    railway = (STATIC_JS / "railway.js").read_text()
+    pairs = _js_enters(railway)
+    ingests = [re.compile(p) for p, key in pairs if key == "ingest"]
+    analyst = "Analysing 220 evidence item(s) from 5 source(s)"
+
+    assert not any(p.search(analyst) for p in ingests), "the analyst line re-enters Ingest"
+    assert any(p.search("220 evidence item(s) from 5 source(s)") for p in ingests)
+    assert any(p.search("Ingesting 5 new input(s)") for p in ingests)
+
+    # The relayed analyst lines are what Analyse advances on instead.
+    analyses = [re.compile(p) for p, key in pairs if key == "analyse"]
+    assert any(p.search(analyst) for p in analyses)
+    assert any(p.search("Slice 3/4: 41 evidence item(s)") for p in analyses)

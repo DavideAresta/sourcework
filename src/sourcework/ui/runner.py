@@ -130,6 +130,12 @@ class RunManager:
         if task is None or task.done():
             return False
         task.cancel()
+        # Wait for the task to unwind. Its `finally` saves the run one last
+        # time; returning before that lets a caller delete the run and then
+        # have the save re-create the row (the store's save is an upsert), so
+        # "deleted" would be a lie and the checkpoints would already be gone.
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
         return True
 
     async def shutdown(self) -> None:

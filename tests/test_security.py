@@ -10,12 +10,14 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from sourcework.config import SecuritySettings
 from sourcework.ingest.fetch import FetchError, FetchRefused, _refuse_private_target
 from sourcework.models import (
     Evidence,
     Modality,
+    PRDRequest,
     Priority,
     ReqKind,
     Requirement,
@@ -65,6 +67,35 @@ def test_remote_schemes_are_still_accepted(client: TestClient):
 # ---------------------------------------------------------------------------
 # SSRF
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", ["../../etc/passwd", "a/b", "r*", ".hidden", ""])
+def test_a_run_id_that_is_not_a_plain_name_is_rejected(bad: str):
+    """A run id becomes ``workspace/checkpoints/{run_id}.json`` and a glob
+    pattern. Demonstrated before the fix: `../../tmp/x` resolved outside the
+    workspace and a `*` made the delete route remove every run's checkpoints."""
+    with pytest.raises(ValidationError):
+        PRDRequest(title="x", run_id=bad)
+
+
+def test_a_hostile_run_id_cannot_touch_another_runs_checkpoints(tmp_path: Path, monkeypatch):
+    """The delete route passes the raw path segment to ``discard`` without a
+    model. A traversal id returned a path outside the workspace, and a glob
+    metacharacter made ``discard`` remove *every* run's checkpoints - the run
+    store holds full source text, so that is the most damaging thing a URL can
+    do here."""
+    from sourcework import checkpoint, paths
+
+    monkeypatch.setattr(paths, "workspace", lambda *a, **k: tmp_path)
+    checkpoint.Checkpoint(run_id="keepme").save("ingest", "fp", {"x": 1})
+    checkpoint.Checkpoint(run_id="other").save("ingest", "fp", {"x": 2})
+
+    assert checkpoint.Checkpoint(run_id="../escape").path is None
+    checkpoint.discard("*")
+    checkpoint.discard("../keepme")
+
+    assert checkpoint.Checkpoint(run_id="keepme").path.exists()
+    assert checkpoint.Checkpoint(run_id="other").path.exists()
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "169.254.169.254", "10.0.0.1",

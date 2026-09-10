@@ -119,7 +119,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
     """Execute the full pipeline. ``notify`` is an optional async progress sink."""
     log = RunLog()
     saved = checkpoint.Checkpoint(run_id=request.run_id, resume=request.resume)
-    checkpoint.prune()
+    await checkpoint.aprune()
     # Every stage fingerprint starts here: which models answered is part of what
     # produced the artifact, so changing the backend invalidates the lot.
     config_fp = request.llm.model_dump(mode="json") if request.llm else None
@@ -216,7 +216,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         ingest_fp = checkpoint.digest(
             [checkpoint.input_identity(ref) for ref in inputs], config_fp
         )
-        stored = saved.load("ingest", ingest_fp, _parse_ingest)
+        stored = await saved.aload("ingest", ingest_fp, _parse_ingest)
         if stored is not None:
             reused, routed = stored
             extractions += reused
@@ -233,7 +233,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
             await say(f"Ingesting {len(inputs)} new input(s)")
             with clock("ingest"):
                 fresh = await _ingest(inputs, pool, available, say, relay, log)
-            saved.save("ingest", ingest_fp, {"extractions": fresh, "routed": dict(log.routed)})
+            await saved.asave("ingest", ingest_fp, {"extractions": fresh, "routed": dict(log.routed)})
             extractions += fresh
 
     if not extractions:
@@ -281,7 +281,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
     analyse_fp = checkpoint.digest(
         analyse_request.model_dump(mode="json", exclude={"run_id", "resume"}), config_fp
     )
-    requirement_set = saved.load("analyse", analyse_fp, RequirementSet.model_validate)
+    requirement_set = await saved.aload("analyse", analyse_fp, RequirementSet.model_validate)
     if requirement_set is None:
         await say("Normalising requirements")
         with clock("analyse"):
@@ -289,8 +289,13 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
                 "requirements", "analyse_requirements", analyse_request,
                 on_progress=relay("analyst"),
             )
+        # The analyst reports evidence it could not cover (a failed slice).
+        # RequirementSet has no warnings field, so carry them into the run log
+        # before validating, or they would be dropped on the floor.
+        if isinstance(analysis, dict):
+            log.warnings.extend(str(w) for w in analysis.get("warnings", []))
         requirement_set = RequirementSet.model_validate(analysis)
-        saved.save("analyse", analyse_fp, requirement_set)
+        await saved.asave("analyse", analyse_fp, requirement_set)
     else:
         await say("Reusing the requirements from the interrupted run")
     await say(
@@ -319,7 +324,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
         # fingerprint chains: a different review produces a different draft key
         # and no round can be reused out of the context that produced it.
         write_fp = checkpoint.digest(write_request.model_dump(mode="json"), config_fp)
-        written = saved.load(f"write:{round_no}", write_fp, WriteResult.model_validate)
+        written = await saved.aload(f"write:{round_no}", write_fp, WriteResult.model_validate)
         if written is None:
             await say(label)
             with clock(f"write_{round_no}"):
@@ -328,16 +333,16 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
                         "writer", "write_prd", write_request, on_progress=relay("writer")
                     )
                 )
-            saved.save(f"write:{round_no}", write_fp, written)
+            await saved.asave(f"write:{round_no}", write_fp, written)
         else:
             await say(f"{label}: reusing the draft from the interrupted run")
 
-        if round_no >= request.review_rounds or "critic" not in available:
+        if request.review_rounds < 1 or "critic" not in available:
             break
 
         review_request = ReviewRequest(prd=written.prd, markdown=written.markdown)
         review_fp = checkpoint.digest(review_request.model_dump(mode="json"), config_fp)
-        review = saved.load(f"review:{round_no}", review_fp, ReviewResponse.model_validate)
+        review = await saved.aload(f"review:{round_no}", review_fp, ReviewResponse.model_validate)
         if review is None:
             await say("Reviewing")
             with clock(f"review_{round_no}"):
@@ -346,12 +351,17 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
                         "critic", "review_prd", review_request, on_progress=relay("critic")
                     )
                 )
-            saved.save(f"review:{round_no}", review_fp, review)
+            await saved.asave(f"review:{round_no}", review_fp, review)
         else:
             await say("Reusing the review from the interrupted run")
         blocking = review.report.blocking
         await say(f"Review: {review.verdict}, {len(blocking)} blocking finding(s)")
-        if not blocking:
+        # The review above is of the draft just written, so the report attached
+        # to the result always matches the text it judges. Stop when there is
+        # nothing blocking, or when this was the last revision the caller
+        # allowed - not before reviewing the revision, which is how a final
+        # draft could once ship carrying the previous draft's verdict.
+        if not blocking or round_no >= request.review_rounds:
             break
         write_request = write_request.model_copy(
             update={
@@ -443,7 +453,7 @@ async def run(request: PRDRequest, pool: AgentPool, *, notify=None) -> PRDResult
     # There is a result now, so there is nothing left to resume; refining it is
     # what a baseline is for. Across every scope, or the analyst's slices would
     # outlive the run they belonged to by the whole retention period.
-    checkpoint.discard(request.run_id)
+    await checkpoint.adiscard(request.run_id)
 
     return PRDResult(
         prd=written.prd,

@@ -31,6 +31,21 @@ from sourcework.backends.base import (
 
 logger = logging.getLogger(__name__)
 
+_DROP_PARAMS_SET = False
+
+
+def _ensure_drop_params(litellm: object) -> None:
+    """Set ``litellm.drop_params`` once, not on every call.
+
+    It is a process-wide global: writing it per call is a shared mutable write
+    any other litellm user in the process can race, and the value is the same
+    every time anyway. Guarded so the write happens at most once.
+    """
+    global _DROP_PARAMS_SET
+    if not _DROP_PARAMS_SET:
+        litellm.drop_params = True  # type: ignore[attr-defined]
+        _DROP_PARAMS_SET = True
+
 
 _SCHEMA_REFUSAL = re.compile(
     r"response_format|json_schema|grammar|unsupported.*schema|invalid.*schema",
@@ -100,7 +115,7 @@ class LiteLLMBackend(LLMBackend):
             return False
         return True
 
-    def list_models(self) -> list[str]:
+    def list_models(self, *, refresh: bool = False) -> list[str]:
         """What the configured endpoint says it serves.
 
         Only asked of an explicit ``api_base``: that is a local server or a
@@ -152,7 +167,7 @@ class LiteLLMBackend(LLMBackend):
                 backend=self.id,
             )
 
-        litellm.drop_params = True  # tolerate providers that lack a given knob
+        _ensure_drop_params(litellm)  # tolerate providers that lack a given knob
 
         content: list[dict[str, Any]] | str
         if request.images:
@@ -282,6 +297,11 @@ class _NamedProviderBackend(LiteLLMBackend):
     #: "what is missing" message. OpenAI's key is the bare OPENAI_API_KEY, so
     #: there the label is that variable.
     setting_names: ClassVar[dict[str, str]] = {}
+    #: Credentials that need not be present because the provider's own default
+    #: chain can supply them (Bedrock via an instance profile, AWS_PROFILE or an
+    #: ECS task role). Requiring them marked a correctly credentialed target
+    #: unavailable, so it was skipped from every call.
+    optional_credentials: ClassVar[frozenset[str]] = frozenset()
 
     def _credential(self, name: str) -> str | None:
         value = self.provider_kwargs.get(name) or getattr(self, name, None)
@@ -291,7 +311,7 @@ class _NamedProviderBackend(LiteLLMBackend):
 
     def _credential_missing(self) -> str | None:
         for name in self.env_names:
-            if self._credential(name):
+            if self._credential(name) or name in self.optional_credentials:
                 continue
             setting = self.setting_names.get(name, name)
             return f"set {setting} (or {self.env_names[name]})"
@@ -335,6 +355,11 @@ class BedrockBackend(_NamedProviderBackend):
     e.g. ``bedrock/anthropic.claude-sonnet-5-v1``."""
 
     id = "bedrock"
+
+    # Only the region is required here. boto3 resolves credentials from its own
+    # chain when no key is set, so demanding them reported an IAM-role or
+    # AWS_PROFILE machine as unavailable.
+    optional_credentials = frozenset({"aws_access_key_id", "aws_secret_access_key"})
 
     env_names = {
         "aws_region_name": "AWS_REGION_NAME",

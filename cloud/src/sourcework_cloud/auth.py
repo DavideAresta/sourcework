@@ -16,6 +16,7 @@ login is a hosted service showing strangers everyone's documents.
 
 from __future__ import annotations
 
+import hmac
 import os
 
 from sourcework.auth import Principal
@@ -50,7 +51,9 @@ class TokenAuth:
         if not self.token:
             return None  # unconfigured is locked, not open
         authz = request.headers.get("Authorization", "")
-        if authz != f"Bearer {self.token}":
+        # Constant-time: a plain `!=` leaks the token, byte by byte, to anyone
+        # who can time the response.
+        if not hmac.compare_digest(authz, f"Bearer {self.token}"):
             return None
         return Principal(
             id=self.email, name="Operator", email=self.email, roles=frozenset({"owner"})

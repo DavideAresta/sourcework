@@ -41,6 +41,8 @@ keeping that safe today is a call-ordering invariant in a different process.
 
 from __future__ import annotations
 
+import asyncio
+import glob
 import hashlib
 import json
 import logging
@@ -52,7 +54,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from sourcework import paths
-from sourcework.models import InputRef
+from sourcework.models import RUN_ID_PATTERN, InputRef
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +118,22 @@ def _local_path(uri: str) -> Path | None:
 
 
 def _files_for(run_id: str | None) -> list[Path]:
-    """Every scope's file for one run."""
+    """Every scope's file for one run.
+
+    The run id is caller-controlled on the delete/resume routes, which pass the
+    raw path segment here rather than through :class:`PRDRequest`. Reject
+    anything outside the run-id grammar before it reaches a glob: a separator
+    would traverse the workspace and a metacharacter would match other runs.
+    """
     if not run_id:
         return []
+    if not RUN_ID_PATTERN.fullmatch(run_id):
+        logger.warning("checkpoint: refusing unsafe run id %r", run_id)
+        return []
     try:
-        return sorted(directory().glob(f"{run_id}.json")) + sorted(
-            directory().glob(f"{run_id}.*.json")
+        pattern = glob.escape(run_id)
+        return sorted(directory().glob(f"{pattern}.json")) + sorted(
+            directory().glob(f"{pattern}.*.json")
         )
     except OSError:  # pragma: no cover - unreadable workspace
         return []
@@ -208,6 +220,16 @@ def discard(run_id: str | None) -> None:
             logger.warning("checkpoint %s: could not delete %s", run_id, path.name)
 
 
+async def aprune(max_age_days: int = RETENTION_DAYS) -> int:
+    """``prune`` off the event loop; it globs and stats the whole directory."""
+    return await asyncio.to_thread(prune, max_age_days)
+
+
+async def adiscard(run_id: str | None) -> None:
+    """``discard`` off the event loop; removing many files is still disk I/O."""
+    await asyncio.to_thread(discard, run_id)
+
+
 @dataclass
 class Checkpoint:
     """The saved stages of one run.
@@ -227,12 +249,30 @@ class Checkpoint:
     run's stats: a reader of the PRD is entitled to know which parts of it were
     produced during the run they are looking at."""
 
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+    """Serialises the async wrappers. ``save`` is a read-modify-write of one
+    file, and the analyst's slices call it concurrently; without this, two
+    off-loop saves race and one stage's update is lost."""
+
     @property
     def path(self) -> Path | None:
-        if not self.run_id:
+        if not self.run_id or not RUN_ID_PATTERN.fullmatch(self.run_id):
             return None
         name = f"{self.run_id}.{self.scope}.json" if self.scope else f"{self.run_id}.json"
-        return directory() / name
+        base = directory()
+        candidate = base / name
+        # The run-id grammar on PRDRequest already forbids separators, but this
+        # is the single place a run id becomes a path, and a Checkpoint can be
+        # constructed directly. Keep it inside the workspace regardless.
+        try:
+            if not candidate.resolve().is_relative_to(base.resolve()):
+                logger.warning(
+                    "checkpoint %s: refusing a path outside the workspace", self.run_id
+                )
+                return None
+        except OSError:  # pragma: no cover - an odd path that will not resolve
+            return None
+        return candidate
 
     # -- reading -----------------------------------------------------------
 
@@ -294,6 +334,26 @@ class Checkpoint:
         except OSError:  # pragma: no cover - permissions
             logger.warning("checkpoint %s: could not delete", self.run_id)
 
+    # -- async wrappers ----------------------------------------------------
+    #
+    # ``save``/``load`` read and write JSON that embeds the full text of every
+    # ingested source. Run directly from a coroutine that is the same event
+    # loop every A2A agent and the keepalive ticks use, so a large write stalls
+    # the whole process. These hop to a worker thread. The synchronous methods
+    # stay for tests and CLI code, which have no loop to starve.
+
+    async def aload(self, stage: str, fingerprint: str, parse: Callable[[Any], T]) -> T | None:
+        async with self._lock:
+            return await asyncio.to_thread(self.load, stage, fingerprint, parse)
+
+    async def asave(self, stage: str, fingerprint: str, payload: Any) -> None:  # noqa: ANN401
+        async with self._lock:
+            await asyncio.to_thread(self.save, stage, fingerprint, payload)
+
+    async def aclear(self) -> None:
+        async with self._lock:
+            await asyncio.to_thread(self.clear)
+
     # -- file --------------------------------------------------------------
 
     def _read(self) -> dict[str, Any]:
@@ -303,8 +363,9 @@ class Checkpoint:
         assert self.path is not None  # noqa: S101 - guarded by every caller
         paths.ensure(self.path.parent)
         # Written beside the target and renamed: a crash mid-write must not
-        # leave a truncated file where the resume expects its own state.
-        temporary = self.path.with_suffix(".tmp")
+        # leave a truncated file where the resume expects its own state. The
+        # pid keeps two processes saving the same run from sharing a temp name.
+        temporary = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
         temporary.write_text(json.dumps(document), encoding="utf-8")
         os.replace(temporary, self.path)
 

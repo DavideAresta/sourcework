@@ -68,6 +68,36 @@ common choices."""
 
 _MODEL_ALIASES = ["default", "opus", "sonnet", "haiku"]
 
+_KEY_OVERRIDING_LOGIN = ("ANTHROPIC_API_KEY",)
+"""Credentials kept out of the ``claude`` subprocess.
+
+This backend authenticates as the user through the CLI's stored login - that is
+its whole point. ``ANTHROPIC_API_KEY`` exists in the same process for a
+different job (the litellm backend's ``anthropic/…`` ids, and this backend's
+model listing), and the CLI treats it as an auth source that takes precedence
+over the login, refusing to run: ``claude.ai connectors are disabled because
+ANTHROPIC_API_KEY … is set``. A key meant for one backend must not silently
+become another's auth source, so it does not travel.
+"""
+
+_LOGIN_WARNED = False
+
+
+def _warn_if_key_overrides_login() -> None:
+    """Say once when the environment holds the credential being excluded."""
+
+    global _LOGIN_WARNED
+    if _LOGIN_WARNED:
+        return
+    _LOGIN_WARNED = True
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        logger.warning(
+            "claude-code: ANTHROPIC_API_KEY is set in this process and is NOT passed to "
+            "the CLI - it would take precedence over your claude.ai login and the CLI "
+            "refuses to run. Calls use the stored login. To use that key with Anthropic "
+            "instead, select the litellm backend."
+        )
+
 
 class ClaudeCodeBackend(LLMBackend):
     id = "claude-code"
@@ -76,7 +106,7 @@ class ClaudeCodeBackend(LLMBackend):
     def available(self) -> bool:
         return process.which("claude") is not None
 
-    def list_models(self) -> list[str]:
+    def list_models(self, *, refresh: bool = False) -> list[str]:
         """Aliases first, then the account's live model list when it is readable.
 
         The CLI has no model-listing command and exposes no registry, so the
@@ -151,10 +181,12 @@ class ClaudeCodeBackend(LLMBackend):
             if requested > _DEFAULT_OUTPUT_CAP:
                 env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(requested)
 
+            _warn_if_key_overrides_login()
             result = await process.run(
                 argv,
                 cwd=process.neutral_cwd(),
                 env=env,
+                without=_KEY_OVERRIDING_LOGIN,
                 stdin_text=stdin_text,
                 timeout_s=request.timeout_s,
                 on_line=_line_streamer(request.on_chunk),

@@ -37,6 +37,17 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 
 
+_IMAGE_SUFFIXES = {
+    "png": ".png",
+    "jpeg": ".jpg",
+    "jpg": ".jpg",
+    "gif": ".gif",
+    "webp": ".webp",
+    "bmp": ".bmp",
+    "svg": ".svg",
+}
+
+
 class ImageInput(BaseModel):
     """An image to send alongside the prompt.
 
@@ -63,9 +74,16 @@ class ImageInput(BaseModel):
         return base64.b64decode(self.data_b64)
 
     def suffix(self) -> str:
-        """A plausible file extension, for backends that need a real file."""
+        """A plausible file extension, for backends that need a real file.
+
+        Allow-listed, not derived from the raw media type: this value becomes
+        part of a path in :func:`~sourcework.backends.process.staged_media`,
+        and a media type is caller-controlled, so on Windows a `..\\..\\` in it
+        would otherwise escape the scratch directory. An unknown type becomes
+        ``.png`` rather than being echoed back into a filename.
+        """
         subtype = self.media_type.split("/")[-1].split("+")[0].lower()
-        return {"jpeg": ".jpg", "svg": ".svg"}.get(subtype, f".{subtype or 'png'}")
+        return _IMAGE_SUFFIXES.get(subtype, ".png")
 
 
 # ---------------------------------------------------------------------------
@@ -307,9 +325,23 @@ class LLMBackend(ABC):
         """
         return True
 
-    def list_models(self) -> list[str]:
-        """Selectable model ids, best-effort. Empty means "free-text only"."""
+    def list_models(self, *, refresh: bool = False) -> list[str]:
+        """Selectable model ids, best-effort. Empty means "free-text only".
+
+        ``refresh`` asks a backend that keeps its own cache to update it from
+        source first; backends with nothing to refresh ignore it.
+        """
         return []
+
+    def model_names(self, *, refresh: bool = False) -> dict[str, str]:
+        """Display names for the ids in :meth:`list_models`, where known.
+
+        The picker shows these beside the id, so a model can be found by the
+        name a person knows — "DeepSeek V4.1 Flash" — and not only by the id
+        that means it, ``opencode-go/deepseek-flash``. Default: no names, and
+        the picker falls back to the id alone.
+        """
+        return {}
 
     @abstractmethod
     async def generate(self, request: BackendRequest) -> BackendResult:

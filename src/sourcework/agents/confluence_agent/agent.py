@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 PORT = 8004
 
+MAX_ATTACHMENTS = 10
+"""Document attachments fetched per page. The rest are reported as skipped."""
+
 
 class ConfluenceExecutor(SkillExecutor):
     def __init__(self) -> None:
@@ -87,6 +90,7 @@ class ConfluenceExecutor(SkillExecutor):
             )
 
         await progress(f"Fetching Confluence page {page_id}")
+        attachment_warnings: list[str] = []
         try:
             async with ConfluenceClient() as cc:
                 page = await cc.get_page(page_id)
@@ -97,10 +101,21 @@ class ConfluenceExecutor(SkillExecutor):
                 if req.include_attachments:
                     attachments = await cc.list_attachments(page_id)
                     await progress(f"{len(attachments)} attachment(s)")
-                    for att in attachments[:10]:
+                    # Images belong to the vision agent, so they are not fetched
+                    # here at all; the cap counts the attachments this agent can
+                    # actually read. Anything past it is reported, not dropped in
+                    # silence - a page that was only partly ingested must not be
+                    # described as fully ingested.
+                    readable = [
+                        a for a in attachments if not a.get("mediaType", "").startswith("image/")
+                    ]
+                    if len(readable) > MAX_ATTACHMENTS:
+                        attachment_warnings.append(
+                            f"{len(readable) - MAX_ATTACHMENTS} attachment(s) not fetched "
+                            f"(limit {MAX_ATTACHMENTS})"
+                        )
+                    for att in readable[:MAX_ATTACHMENTS]:
                         media = att.get("mediaType", "")
-                        if media.startswith("image/"):
-                            continue  # images belong to the vision agent
                         try:
                             data = await cc.download_attachment(page_id, str(att["id"]))
                             extra, _ = documents.extract(data, media, att.get("title", ""))
@@ -110,6 +125,9 @@ class ConfluenceExecutor(SkillExecutor):
                             )
                         except Exception as exc:  # noqa: BLE001
                             logger.warning("attachment %s failed: %s", att.get("title"), exc)
+                            attachment_warnings.append(
+                                f"attachment {att.get('title')!r} failed to read: {exc}"
+                            )
         except ConfluenceError as exc:
             raise SkillError(str(exc)) from exc
 
@@ -137,7 +155,7 @@ class ConfluenceExecutor(SkillExecutor):
             source=source,
             evidence=evidence,
             summary=summary or source.title,
-            warnings=warnings,
+            warnings=warnings + attachment_warnings,
         )
 
     # -- write --------------------------------------------------------------

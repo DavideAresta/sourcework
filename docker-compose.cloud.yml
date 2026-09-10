@@ -67,7 +67,10 @@ services:
       <<: *mesh-env
       SOURCEWORK_PUBLIC_HOST: orchestrator
       PORT: 8000
-    ports: ["8000:8000"]
+    # Deliberately not published. The orchestrator has no authentication, and
+    # SECURITY.md says mesh ports stay on the compose network; only the app is
+    # exposed to the host. Publishing 8000 here would put the whole pipeline on
+    # the host's interfaces.
     depends_on: [ingestion, vision, transcript, confluence, requirements, writer, critic]
     volumes: ["./workspace:/workspace:ro"]
 
