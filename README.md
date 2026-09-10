@@ -6,7 +6,7 @@ it — and no model can invent a citation.**
 
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Version: 0.3.0](https://img.shields.io/badge/version-0.3.0-success.svg)](https://github.com/DavideAresta/sourcework/releases/tag/v0.3.0)
+[![Version: 0.4.1](https://img.shields.io/badge/version-0.4.1-success.svg)](https://github.com/DavideAresta/sourcework/releases/tag/v0.4.1)
 [![A2A v1.0](https://img.shields.io/badge/A2A-v1.0-4b32c3.svg)](https://a2a-protocol.org)
 [![No API key required](https://img.shields.io/badge/API%20key-optional-success.svg)](#an-api-key-is-optional)
 
