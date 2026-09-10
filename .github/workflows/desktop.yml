@@ -92,13 +92,17 @@ jobs:
       - name: Attach the bundles to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          # The release is normally created by hand when the tag is cut; create
-          # one if it is not there yet so a build never fails on an empty target.
-          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 \
-            || gh release create "${{ github.ref_name }}" \
-                 --title "SourceWork ${GITHUB_REF_NAME#v}" --generate-notes
+          # `--repo` explicitly: this job has no checkout, so `gh` cannot derive
+          # the repository from a git remote and fails with "not a git
+          # repository" - which is how the first 0.6.0 run lost its attach step
+          # after all three bundles had built.
+          gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$REPO" \
+                 --title "SourceWork ${TAG#v}" --generate-notes
           find artifacts -type f \
             \( -name '*.deb' -o -name '*.AppImage' -o -name '*.msi' \
                -o -name '*.exe' -o -name '*.dmg' \) -print0 \
-            | xargs -0 gh release upload "${{ github.ref_name }}" --clobber
+            | xargs -0 gh release upload "$TAG" --repo "$REPO" --clobber
