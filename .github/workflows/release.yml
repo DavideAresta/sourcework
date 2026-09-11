@@ -60,9 +60,11 @@ jobs:
           print(re.search(r'__version__ = "([^"]+)"', text).group(1))
           PY
           )
-          # A re-run at the release commit: the tag exists, so rebuild it rather
-          # than bump past a release that may have failed halfway.
-          if git rev-parse -q --verify "refs/tags/v$current" >/dev/null; then
+          # A re-run of the release commit: HEAD *is* the tag. Testing only that
+          # the tag exists is wrong - every commit after a release still carries
+          # that version in its files, so the next push would check out the old
+          # release instead of bumping.
+          if git tag --points-at HEAD | grep -qx "v$current"; then
             echo "mode=retry" >> "$GITHUB_OUTPUT"
             echo "version=$current" >> "$GITHUB_OUTPUT"
             echo "tag=v$current" >> "$GITHUB_OUTPUT"
