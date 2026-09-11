@@ -332,7 +332,7 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
     <a class="mark" href="#top"><span class="mark__tick"></span>sourcework</a>
     <nav class="bar__meta">
       <span class="hide-sm">MIT</span>
-      <span class="hide-sm">v0.6.0</span>
+      <span class="hide-sm" data-version>v0.6.7</span>
       <a href="https://github.com/DavideAresta/sourcework">GitHub&nbsp;↗</a>
     </nav>
   </div>
@@ -359,12 +359,12 @@ figcaption code{font-family:var(--mono);font-size:.86em;color:var(--ink)}
         </div>
         <div class="downloads">
           <span class="downloads__label">Desktop app · download</span>
-          <a class="btn btn--ghost" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.0/SourceWork_0.6.0_amd64.deb">Linux <span class="btn__note">.deb</span></a>
-          <a class="btn btn--ghost" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.0/SourceWork_0.6.0_amd64.AppImage">Linux <span class="btn__note">.AppImage</span></a>
-          <a class="btn btn--ghost" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.0/SourceWork_0.6.0_x64_en-US.msi">Windows <span class="btn__note">.msi</span></a>
-          <a class="btn btn--ghost" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.0/SourceWork_0.6.0_x64-setup.exe">Windows <span class="btn__note">.exe</span></a>
-          <a class="btn btn--ghost" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.0/SourceWork_0.6.0_aarch64.dmg">macOS <span class="btn__note">.dmg</span></a>
-          <span class="downloads__note">A real window, a tray and native notifications around the same UI. Unsigned; needs Python with SourceWork installed.</span>
+          <a class="btn btn--ghost" data-asset=".deb" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.7/SourceWork_0.6.7_amd64.deb">Linux <span class="btn__note">.deb</span></a>
+          <a class="btn btn--ghost" data-asset=".AppImage" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.7/SourceWork_0.6.7_amd64.AppImage">Linux <span class="btn__note">.AppImage</span></a>
+          <a class="btn btn--ghost" data-asset=".msi" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.7/SourceWork_0.6.7_x64_en-US.msi">Windows <span class="btn__note">.msi</span></a>
+          <a class="btn btn--ghost" data-asset=".exe" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.7/SourceWork_0.6.7_x64-setup.exe">Windows <span class="btn__note">.exe</span></a>
+          <a class="btn btn--ghost" data-asset=".dmg" href="https://github.com/DavideAresta/sourcework/releases/download/v0.6.7/SourceWork_0.6.7_aarch64.dmg">macOS <span class="btn__note">.dmg</span></a>
+          <span class="downloads__note">A real window, a tray and native notifications around the same UI. Self-contained: each installer embeds its own Python. Unsigned, so Windows SmartScreen and macOS Gatekeeper warn on first open.</span>
         </div>
       </div>
 
@@ -915,7 +915,7 @@ git clone https://github.com/DavideAresta/sourcework
       </table>
     </div>
     <div class="colophon">
-      <span>MIT · v0.6.0 · pre-1.0, so a minor bump may break things</span>
+      <span>MIT · <span data-version>v0.6.7</span> · pre-1.0, so a minor bump may break things</span>
       <span><a href="https://github.com/DavideAresta/sourcework">github.com/DavideAresta/sourcework</a></span>
     </div>
   </footer>
@@ -951,6 +951,32 @@ git clone https://github.com/DavideAresta/sourcework
       note.textContent = 'select it';
     });
   });
+
+  // A release is cut on every green push to main, so the version badge and the
+  // download buttons read the latest one from the API rather than going stale
+  // between hand edits. The markup above is the fallback: if this call is
+  // rate-limited or the reader is offline, the page still offers v0.6.7.
+  fetch('https://api.github.com/repos/DavideAresta/sourcework/releases/latest', {
+    headers: {Accept: 'application/vnd.github+json'}
+  }).then(function(res){
+    return res.ok ? res.json() : null;
+  }).then(function(rel){
+    if (!rel || !rel.tag_name) return;
+    var version = String(rel.tag_name).replace(/^v/, '');
+    document.querySelectorAll('[data-version]').forEach(function(el){
+      el.textContent = 'v' + version;
+    });
+    var assets = rel.assets || [];
+    document.querySelectorAll('[data-asset]').forEach(function(link){
+      var suffix = link.getAttribute('data-asset');
+      var hit = assets.find(function(asset){
+        return typeof asset.name === 'string'
+          && asset.name.slice(-suffix.length) === suffix
+          && asset.browser_download_url;
+      });
+      if (hit) link.href = hit.browser_download_url;
+    });
+  }).catch(function(){ /* keep the static links */ });
 })();
 </script>
 </body>
