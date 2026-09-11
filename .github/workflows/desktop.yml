@@ -83,12 +83,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ runner.os }}
+          # One directory per bundle format, non-recursive. A wildcard into the
+          # bundle tree sweeps in the whole deb staging directory - and the
+          # embedded runtime's `pip/_vendor/distlib/*.exe` (Windows launchers
+          # shipped inside every Python), which is how a release once attached
+          # `w64.exe` instead of the installer.
           path: |
-            desktop/src-tauri/target/release/bundle/**/*.deb
-            desktop/src-tauri/target/release/bundle/**/*.AppImage
-            desktop/src-tauri/target/release/bundle/**/*.msi
-            desktop/src-tauri/target/release/bundle/**/*.exe
-            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
   rust-licences:

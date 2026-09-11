@@ -199,12 +199,14 @@ jobs:
               --title "SourceWork ${TAG#v}" --generate-notes
           fi
 
-          files=$(find artifacts -type f \
+          # One path per NUL, so a name with a space cannot silently become two
+          # assets the way whitespace-splitting would.
+          find artifacts -type f \
             \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.deb' \
                -o -name '*.AppImage' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.dmg' \) -print)
-          if [ -z "$files" ]; then
+               -o -name '*.dmg' \) -print0 > "$RUNNER_TEMP/assets"
+          if [ ! -s "$RUNNER_TEMP/assets" ]; then
             echo "No packages were produced - that is a failure, not an empty release." >&2
             exit 1
           fi
-          echo "$files" | xargs gh release upload "$TAG" --repo "$REPO" --clobber
+          xargs -0 gh release upload "$TAG" --repo "$REPO" --clobber < "$RUNNER_TEMP/assets"
