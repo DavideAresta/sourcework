@@ -122,6 +122,15 @@ The embedded runtime drops its Tcl/Tk stack (`scripts/fetch_python.py:prune`):
 `_tkinter` links a Tk library linuxdeploy cannot resolve, which used to fail the
 whole AppImage. SourceWork never imports tkinter.
 
+linuxdeploy's generated `AppRun` also exports `PYTHONHOME=$APPDIR/usr` and
+`PYTHONPATH=$APPDIR/usr/share/pyshared`, for AppImages whose Python *is* that
+prefix. Ours is not — the runtime sits in the Tauri resource directory — so
+those variables point every interpreter the shell launches at a prefix holding
+no standard library, and it dies in `init_fs_encoding` before it can
+`import sourcework`. `backend.rs:python_command` clears both for the child; the
+shell always names the interpreter it wants by full path, so an inherited
+`PYTHONHOME` is never the right prefix for it.
+
 `cargo tauri build` bundles whatever is in `desktop/src-tauri/python/`. To make a
 self-contained installer locally, populate it first:
 

@@ -65,13 +65,31 @@ fn venv_python() -> Option<PathBuf> {
 /// Whether `python` can actually import SourceWork. This is what keeps the
 /// shell from picking an unrelated interpreter that happens to be first on PATH.
 fn can_import(python: &Path) -> bool {
-    Command::new(python)
+    python_command(python)
         .args(["-c", "import sourcework"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// A `Command` for an interpreter we chose ourselves, with the environment's
+/// Python variables cleared.
+///
+/// The AppImage is why this exists. linuxdeploy's `AppRun` exports
+/// `PYTHONHOME=$APPDIR/usr` and `PYTHONPATH=$APPDIR/usr/share/pyshared` for its
+/// own bundled-Python case, and every child of the shell inherits them. They
+/// point at a prefix that holds no standard library, so *any* interpreter we
+/// launch - the runtime we ship, or a Python of the user's that has SourceWork
+/// installed - dies in `init_fs_encoding` with `No module named 'encodings'`
+/// before it can import anything. The shell always names the interpreter it
+/// wants by full path, so an inherited `PYTHONHOME` is never the right prefix
+/// for it.
+fn python_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command.env_remove("PYTHONHOME").env_remove("PYTHONPATH");
+    command
 }
 
 /// The interpreter shipped inside the installer, resolved from Tauri's resource
@@ -179,7 +197,7 @@ impl Backend {
         args.push("--port".to_string());
         args.push(port.to_string());
 
-        let mut child = Command::new(&program)
+        let mut child = python_command(&program)
             .args(&args)
             .stdin(Stdio::null())
             .stdout(log.map(Stdio::from).unwrap_or_else(Stdio::null))
