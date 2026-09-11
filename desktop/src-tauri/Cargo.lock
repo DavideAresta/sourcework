@@ -3339,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "sourcework-desktop"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "serde",
  "serde_json",
