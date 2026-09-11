@@ -15,6 +15,15 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
+## [0.6.2] — 2026-09-11
+
+### Changed
+
+- Grant the desktop job what its reusable workflow requests
+- Cut a release on every green push to main
+- Keep the sections that answered when one critic pass fails
+- Attach bundles with an explicit repo, since the job has no checkout
+
 ## [0.6.1] — 2026-09-10
 
 A repair release for the critic: a long PRD reviewed in several sections no
