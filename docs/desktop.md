@@ -95,7 +95,7 @@ database.
 
 ## 4. Building it
 
-Prebuilt, unsigned installers for Linux (`.deb`), Windows (`.msi`,
+Prebuilt, unsigned installers for Linux (`.deb`, `.AppImage`), Windows (`.msi`,
 `-setup.exe`) and macOS (`.dmg`) are attached to every release by the `Desktop`
 workflow (`.github/workflows/desktop.yml`); the README names them. They carry
 their own Python runtime. The rest of this section is for building from source.
@@ -113,14 +113,14 @@ cargo tauri build          # bundles for the current OS
 cargo tauri dev            # a window against your checkout's backend
 ```
 
-Tauri produces the formats the current platform supports: `deb` on Linux,
-`msi`/`nsis` on Windows, `dmg`/`app` on macOS. The bundles are **not code-signed**
-for now, so Windows SmartScreen and macOS Gatekeeper will warn on first open.
+Tauri produces the formats the current platform supports: `deb`/`AppImage` on
+Linux, `msi`/`nsis` on Windows, `dmg`/`app` on macOS. The bundles are **not
+code-signed** for now, so Windows SmartScreen and macOS Gatekeeper will warn on
+first open.
 
-The Linux `.AppImage` is not built for now: with the ~470 MB runtime inside the
-AppDir, `linuxdeploy` fails with a bare "failed to run linuxdeploy" and no
-diagnostic. The `.deb` carries the same self-contained app. A `--bundles
-appimage` build locally is welcome once that is understood.
+The embedded runtime drops its Tcl/Tk stack (`scripts/fetch_python.py:prune`):
+`_tkinter` links a Tk library linuxdeploy cannot resolve, which used to fail the
+whole AppImage. SourceWork never imports tkinter.
 
 `cargo tauri build` bundles whatever is in `desktop/src-tauri/python/`. To make a
 self-contained installer locally, populate it first:

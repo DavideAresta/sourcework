@@ -131,6 +131,41 @@ def interpreter(dest: Path, triple: str) -> Path:
     return dest / "python.exe" if "windows" in triple else dest / "bin" / "python3"
 
 
+TCL_TK = (
+    "python*/lib-dynload/_tkinter*",
+    "python*/tkinter",
+    "libtcl*",
+    "libtk*",
+    "tcl[0-9]*",
+    "tk[0-9]*",
+    "itcl*",
+    "thread[0-9]*",
+)
+
+
+def prune(dest: Path) -> list[str]:
+    """Remove the Tcl/Tk stack, returning what was removed.
+
+    python-build-standalone builds CPython with ``_tkinter``, whose extension
+    links ``libtcl9tk9.0.so`` without an RPATH. linuxdeploy cannot resolve that
+    against the AppDir and fails the whole AppImage with "Could not find
+    dependency", which Tauri reports only as "failed to run linuxdeploy".
+    SourceWork is a webview app and never imports tkinter, so the stack is
+    removed rather than explained to the bundler - and it is dead weight twice
+    over.
+    """
+    library = dest / "lib"
+    removed: list[str] = []
+    for pattern in TCL_TK:
+        for path in library.glob(pattern):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+            removed.append(path.name)
+    return removed
+
+
 def install(dest: Path, triple: str, project: str, extras: str) -> None:
     python = interpreter(dest, triple)
     spec = str(Path(project).resolve())
@@ -160,6 +195,10 @@ def main(argv: list[str]) -> int:
         archive = Path(scratch) / asset["name"]
         download(asset["browser_download_url"], archive, token)
         extract(archive, args.dest)
+
+    dropped = prune(args.dest)
+    if dropped:
+        print(f"removed unused Tcl/Tk: {', '.join(sorted(dropped))}", flush=True)
 
     if args.install:
         install(args.dest, triple, args.install, args.extras)

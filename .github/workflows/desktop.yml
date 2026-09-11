@@ -35,7 +35,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
-            bundles: deb
+            bundles: deb,appimage
           - os: windows-latest
             bundles: msi,nsis
           - os: macos-latest

@@ -70,3 +70,35 @@ def test_the_interpreter_is_found_where_each_platform_puts_it():
     )
     assert fetch_python.interpreter(Path("/x"), "aarch64-apple-darwin") == Path("/x/bin/python3")
     assert fetch_python.interpreter(Path("/x"), "x86_64-pc-windows-msvc") == Path("/x/python.exe")
+
+
+def test_the_tcl_tk_stack_is_pruned_but_the_rest_of_the_runtime_survives(tmp_path):
+    """`_tkinter` links a Tk library linuxdeploy cannot resolve, which fails the
+    whole AppImage. The stack goes; stdlib and libpython stay."""
+    lib = tmp_path / "lib"
+    (lib / "python3.12" / "lib-dynload").mkdir(parents=True)
+    (lib / "python3.12" / "tkinter").mkdir(parents=True)
+    (lib / "python3.12" / "lib-dynload" / "_tkinter.cpython-312-x86_64-linux-gnu.so").write_bytes(b"x")
+    (lib / "python3.12" / "tkinter" / "__init__.py").write_text("x")
+    (lib / "python3.12" / "os.py").write_text("x")
+    for name in ("libtcl9.0.so", "libtcl9tk9.0.so", "libtk9.0.so", "libpython3.12.so"):
+        (lib / name).write_bytes(b"x")
+    for name in ("itcl4.3.8", "tcl9.0", "thread3.0.6"):
+        (lib / name).mkdir()
+
+    removed = fetch_python.prune(tmp_path)
+
+    gone = [
+        lib / "python3.12" / "lib-dynload" / "_tkinter.cpython-312-x86_64-linux-gnu.so",
+        lib / "python3.12" / "tkinter",
+        lib / "libtcl9.0.so",
+        lib / "libtcl9tk9.0.so",
+        lib / "libtk9.0.so",
+        lib / "itcl4.3.8",
+        lib / "tcl9.0",
+        lib / "thread3.0.6",
+    ]
+    assert all(not path.exists() for path in gone), gone
+    assert (lib / "python3.12" / "os.py").exists()
+    assert (lib / "libpython3.12.so").exists()
+    assert "_tkinter.cpython-312-x86_64-linux-gnu.so" in removed

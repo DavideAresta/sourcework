@@ -191,7 +191,7 @@ Prebuilt, unsigned installers are attached to every
 
 | Platform | Package |
 |---|---|
-| Linux | `.deb` (Debian/Ubuntu/Mint) |
+| Linux | `.deb` (Debian/Ubuntu/Mint) or `.AppImage` (any) |
 | Windows | `.msi` or `-setup.exe` (Windows 10+; WebView2 is already present or fetched) |
 | macOS | `.dmg` (Apple silicon; Intel where built) |
 
