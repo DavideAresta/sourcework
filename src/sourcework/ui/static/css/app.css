@@ -794,6 +794,31 @@ aside .side-title::after { content: ''; }
   box-shadow: 0 1px 2px rgb(0 0 0 / 16%);
 }
 
+/* -- the Refine submit bar ------------------------------------------------ */
+
+/* Pinned to the bottom of the viewport, because what it submits is above it:
+   the open questions can run well past one screen, and a submit you have to go
+   looking for loses to the Approve button still visible in the header. The
+   background is opaque and the top border is the seam - without both, answers
+   scroll under it and read as part of the bar. */
+.refine-submit {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) 0;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+/* `.row` wraps, and on a phone the sentence about what carries forward wraps to
+   three lines of pinned chrome over the questions being answered. It is context
+   for the button, not part of pressing it, so the narrow layout drops it and
+   keeps the two controls. */
+@media (max-width: 700px) {
+  .refine-submit .carry-note { display: none; }
+}
+
 /* -- rendered PRD --------------------------------------------------------- */
 
 .doc { line-height: 1.65; }

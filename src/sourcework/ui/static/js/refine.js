@@ -229,11 +229,16 @@ export function refineTab(run, onStarted) {
     },
   }, 'Discard draft');
 
-  root.append(el('div', { class: 'row' },
+  // Sticky, because the questions it submits are above it: a PRD that left
+  // eight of them open puts this button a screen and a half down, and the only
+  // primary action still on screen was the header's Approve - which signs off
+  // the version being replaced and starts nothing. Pinned to the bottom of the
+  // viewport it stays the visible answer to "how do I run this".
+  root.append(el('div', { class: 'row refine-submit' },
     submit,
     status,
     discardButton,
-    el('span', { class: 'muted small' },
+    el('span', { class: 'muted small carry-note' },
       `Carries ${(prd.evidence ?? []).length} evidence item(s) and `
       + `${(prd.requirements?.requirements ?? []).length} requirement(s) forward. `
       + 'Existing REQ ids are preserved.')));

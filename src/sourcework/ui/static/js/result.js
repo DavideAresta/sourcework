@@ -63,6 +63,9 @@ export function runView(runId, { onChanged }) {
   // reloads onto the review, and an empty or unknown segment falls back to the
   // first tab rather than to nothing.
   let activeTab = (location.hash.split('/')[3] ?? '').toLowerCase();
+  // Held across renders so switching tabs can restyle it without rebuilding the
+  // whole header - see `emphasise`.
+  let approveButton = null;
   const root = el('div');
   const header = el('div');
   // A run is minutes of nothing but this box changing. Without a live region a
@@ -254,6 +257,10 @@ export function runView(runId, { onChanged }) {
   }
 
   function renderHeader(run) {
+    // Rebuilt below, and only for a finished run. Cleared first so a run
+    // without a result cannot leave `emphasise` restyling a detached node from
+    // the previous render.
+    approveButton = null;
     const status = {
       ok: ['pill ok', 'finished'],
       failed: ['pill err', 'failed'],
@@ -301,11 +308,12 @@ export function runView(runId, { onChanged }) {
           () => publish(run)));
       }
       const approval = run.approval?.state;
+      approveButton = el('button', {
+        onClick: () => signOff(run, 'approved'),
+      }, approval === 'approved' ? '✓ approved' : 'Approve');
+      emphasise();
       actions.append(
-        el('button', {
-          class: approval === 'approved' ? 'ghost' : 'primary',
-          onClick: () => signOff(run, 'approved'),
-        }, approval === 'approved' ? '✓ approved' : 'Approve'),
+        approveButton,
         el('button', {
           class: approval === 'rejected' ? 'danger' : 'ghost',
           onClick: () => signOff(run, 'rejected'),
@@ -374,6 +382,20 @@ export function runView(runId, { onChanged }) {
       run.result?.published_url && el('div', { class: 'card' },
         'Published: ', publishedLink(run.result.published_url)),
     );
+  }
+
+  // One primary action on screen at a time, and it belongs to the tab you are
+  // reading. The sign-off lives in the header, above the tab strip, so on the
+  // Refine tab it sat higher than that tab's own "Create next version" and was
+  // reachable without scrolling past the open questions - two primary buttons,
+  // the wrong one first. People answered every question and then approved,
+  // which records a sign-off on the version they were trying to replace and
+  // starts nothing. Approving is still one click; it just stops advertising
+  // itself as the way to submit what you typed below.
+  function emphasise() {
+    if (!approveButton) return;
+    const signedOff = lastRun?.approval?.state === 'approved';
+    approveButton.className = signedOff || activeTab === 'refine' ? 'ghost' : 'primary';
   }
 
   async function publish(run) {
@@ -471,6 +493,7 @@ export function runView(runId, { onChanged }) {
     // every action feel like it had also navigated away from your work.
     const select = (index) => {
       activeTab = slug(tabs[index][0]);
+      emphasise();
       buttons.forEach((b, i) => {
         b.classList.toggle('active', i === index);
         b.setAttribute('aria-selected', i === index ? 'true' : 'false');
