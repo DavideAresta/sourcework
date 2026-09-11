@@ -21,6 +21,7 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
+    "resources": ["python/"],
     "category": "Productivity",
     "shortDescription": "Turn documents into a traceable PRD",
     "longDescription": "SourceWork turns documents, transcripts, images and Confluence pages into a Product Requirements Document where every requirement cites the quote that justifies it. The mesh runs locally; no API key is required."

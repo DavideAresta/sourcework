@@ -63,6 +63,24 @@ not redistribute them, so they impose no relink obligation on this project's own
 MIT distribution. A build that *bundled* either would change that — see
 *What actually binds you*.
 
+## Embedded in the desktop installers
+
+A release installer is a self-contained build: it carries a relocatable CPython
+and SourceWork's own Python dependencies, so nothing has to be installed on the
+user's machine. That **is** redistribution, and these are the terms it carries:
+
+| Component | Licence | Note |
+|---|---|---|
+| [CPython](https://www.python.org/), via [python-build-standalone](https://github.com/astral-sh/python-build-standalone) | PSF-2.0 | the interpreter the shell runs |
+| SourceWork's Python dependencies (see *Python dependencies* above) | permissive | installed into that runtime at build time |
+
+Redistributing those packages is not free of paperwork: BSD-3 (lxml, httpx, …)
+requires reproducing its copyright notice in binary form, and Apache-2.0
+(a2a-sdk, tenacity, python-multipart) requires retaining attribution and passing
+along any `NOTICE` files. The build fetches the runtime but does not yet ship a
+licence manifest inside the installer; that is the remaining step before these
+bundles are redistributable in the strict sense.
+
 ## External tools, not distributed here
 
 SourceWork drives programs you install yourself — with one convenience

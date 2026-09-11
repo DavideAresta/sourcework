@@ -27,8 +27,13 @@ what those don't make obvious at the moment you're editing code.
   from `desktop/src-tauri` opens a window against the checkout's `.venv`;
   `cargo tauri build` produces the OS bundles. It starts the backend as
   `python -m sourcework app --no-browser --port <ephemeral>`; `SOURCEWORK_BACKEND_CMD`
-  overrides which command that is. Rust deps pass `cargo deny check licenses`
-  (`desktop/src-tauri/deny.toml`), the Rust half of the licence gate.
+  overrides which command that is. Release installers embed their own Python:
+  the `Desktop` workflow runs `scripts/fetch_python.py` to populate
+  `desktop/src-tauri/python/` (a python-build-standalone runtime with SourceWork
+  pip-installed) and bundles it as a Tauri resource; the shell prefers it and
+  falls back to `.venv`/PATH in a dev build. Rust deps pass
+  `cargo deny check licenses` (`desktop/src-tauri/deny.toml`), the Rust half of
+  the licence gate.
 
 ## CI parity
 

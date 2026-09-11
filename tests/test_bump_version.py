@@ -102,11 +102,17 @@ def test_no_new_file_carries_the_version_without_the_bumper_knowing():
     }
     suffixes = {".py", ".md", ".json", ".toml", ".lock", ".rs", ".yml", ".yaml"}
 
+    # The embedded Python runtime is fetched at build time; its thousands of
+    # files are not project source and must not be walked.
+    embedded_python = bump_version.ROOT / "desktop" / "src-tauri" / "python"
+
     found: set[Path] = set()
     for path in bump_version.ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in suffixes:
             continue
         if any(part in skip_dirs for part in path.parts):
+            continue
+        if embedded_python in path.parents:
             continue
         # The changelog names every past version by design; it is written by
         # the bumper directly, not by one of these transforms.

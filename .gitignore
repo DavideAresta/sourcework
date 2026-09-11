@@ -30,6 +30,13 @@ dist/
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
 
+# The embedded Python runtime: fetched and pip-populated by
+# scripts/fetch_python.py at build time and bundled as a Tauri resource. Only
+# the `.gitkeep` is tracked, so the resource path always resolves for a
+# developer who has not fetched it.
+desktop/src-tauri/python/*
+!desktop/src-tauri/python/.gitkeep
+
 # Editor/agent scratch
 .claude/
 .DS_Store

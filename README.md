@@ -195,12 +195,11 @@ Prebuilt, unsigned installers are attached to every
 | Windows | `.msi` or `-setup.exe` (Windows 10+; WebView2 is already present or fetched) |
 | macOS | `.dmg` (Apple silicon; Intel where built) |
 
-They expect **Python with SourceWork installed** — the shell starts
-`python -m sourcework app --no-browser`, so install the package first
-(`pip install sourcework`); bundling a Python runtime into the installer is
-planned. The packages are unsigned for now, so Windows SmartScreen and macOS
-Gatekeeper will warn on first open. See [docs/desktop.md](docs/desktop.md) for
-what the shell does and how to build it.
+They are self-contained: each installer embeds a relocatable Python runtime with
+SourceWork already installed, so nothing has to be installed first. The packages
+are unsigned for now, so Windows SmartScreen and macOS Gatekeeper will warn on
+first open. See [docs/desktop.md](docs/desktop.md) for what the shell does and
+how to build it.
 
 ## An API key is optional
 

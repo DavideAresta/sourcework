@@ -53,8 +53,10 @@ python -m sourcework app --no-browser --port <ephemeral>
   fighting over 8080, so the app and a development `serve-all` can coexist.
 - **Discovery order** for the interpreter:
   1. `SOURCEWORK_BACKEND_CMD`, if set (the escape hatch);
-  2. a `python3`/`python`/`py` that can `import sourcework`;
-  3. a `sourcework` console script on `PATH`.
+  2. the Python runtime embedded in the installer (see §2.1);
+  3. a checkout's `.venv`, so `cargo tauri dev` runs your working tree;
+  4. a `python3`/`python`/`py` that can `import sourcework`;
+  5. a `sourcework` console script on `PATH`.
   If none is found, the window says so and names the log, rather than dying
   silently.
 - The child inherits the shell's environment, so any `SOURCEWORK_*` you export
@@ -62,9 +64,19 @@ python -m sourcework app --no-browser --port <ephemeral>
   decides which `.env` is read — the checkout's when launched from one, the
   per-user file otherwise (see §3).
 
-A first run **requires Python with SourceWork installed**. Bundling a Python
-runtime as a Tauri *sidecar* is planned; until then the shell is a window onto
-an installed backend, not a self-contained runtime.
+### 2.1 The embedded runtime
+
+A release installer **carries its own Python**. The build fetches a relocatable
+CPython from [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+for the target triple, pip-installs SourceWork into it, and bundles the tree as a
+Tauri resource (`desktop/src-tauri/python/`; ~470 MB on disk, compressed into the
+installer). The shell resolves `python/bin/python3` (or `python\python.exe`)
+under the resource directory and runs that, so no Python is needed on the user's
+machine.
+
+The fetch is the release build's job — `scripts/fetch_python.py`, run by the
+`Desktop` workflow — never `cargo tauri dev`. A development build carries the
+empty `python/` directory (its `.gitkeep`) and falls through to your `.venv`.
 
 ## 3. Where config and work live
 
@@ -85,9 +97,8 @@ database.
 
 Prebuilt, unsigned installers for Linux (`.deb`, `.AppImage`), Windows (`.msi`,
 `-setup.exe`) and macOS (`.dmg`) are attached to every release by the `Desktop`
-workflow (`.github/workflows/desktop.yml`); the README names them. They expect
-Python with SourceWork installed. The rest of this section is for building from
-source.
+workflow (`.github/workflows/desktop.yml`); the README names them. They carry
+their own Python runtime. The rest of this section is for building from source.
 
 The shell lives in `desktop/`. Rust only — no Node.
 
@@ -107,6 +118,17 @@ Linux, `msi`/`nsis` on Windows, `dmg`/`app` on macOS. The bundles are **not
 code-signed** for now, so Windows SmartScreen and macOS Gatekeeper will warn on
 first open.
 
+`cargo tauri build` bundles whatever is in `desktop/src-tauri/python/`. To make a
+self-contained installer locally, populate it first:
+
+```bash
+python scripts/fetch_python.py --dest desktop/src-tauri/python --install .
+```
+
+Without that step the bundle carries an empty `python/` and the shell falls back
+to the machine's Python — which is exactly what `cargo tauri dev` does, and why
+development never needs the fetch.
+
 ## 5. Licensing
 
 Tauri, `tauri-plugin-notification`, `tauri-plugin-single-instance` and
@@ -115,6 +137,12 @@ and recorded in `THIRD_PARTY.md`. On Linux the OS webview (WebKitGTK) and the
 tray's AppIndicator library are **LGPL system libraries** the shell links
 against but does not redistribute; a *bundled* build would make that a relink
 obligation, which is why the shell depends on the system's copies.
+
+The installers embed a relocatable **CPython** built by
+[python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+(PSF-2.0), together with SourceWork's own Python dependencies. That **is**
+redistribution, which is why `THIRD_PARTY.md` records those terms, and why a
+self-contained build has to reproduce the BSD/Apache notices it carries.
 
 This is the one place the earlier design note changed. That note chose a
 browser tab to avoid a shell dependency at all; the trade became worth making

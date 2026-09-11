@@ -49,6 +49,21 @@ jobs:
       - name: Rust
         run: rustup default stable
 
+      - uses: actions/setup-python@v5
+        with:
+          # The host interpreter only runs the fetch script; the runtime it
+          # installs is the bundled one.
+          python-version: "3.12"
+
+      - name: Embed a Python runtime and install SourceWork
+        # A relocatable CPython for this runner's triple, with the project
+        # pip-installed at the tag being built. `tauri build` then bundles
+        # `desktop/src-tauri/python/` as a resource, so the installer needs no
+        # Python on the user's machine.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/fetch_python.py --dest desktop/src-tauri/python --install .
+
       - name: Linux webview, tray and build dependencies
         if: runner.os == 'Linux'
         run: |

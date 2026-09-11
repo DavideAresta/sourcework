@@ -6,11 +6,13 @@
 //! and the web UI, browser-mode included.
 
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use tauri::path::BaseDirectory;
+use tauri::{AppHandle, Manager};
 
 /// How long the backend has to answer `/healthz` before the shell calls it
 /// failed. Generous: first-run imports and the model probe are not instant.
@@ -60,13 +62,43 @@ fn venv_python() -> Option<PathBuf> {
     }
 }
 
+/// Whether `python` can actually import SourceWork. This is what keeps the
+/// shell from picking an unrelated interpreter that happens to be first on PATH.
+fn can_import(python: &Path) -> bool {
+    Command::new(python)
+        .args(["-c", "import sourcework"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// The interpreter shipped inside the installer, resolved from Tauri's resource
+/// directory.
+///
+/// `None` in a development build, where the runtime was never fetched and the
+/// checkout's `.venv` is the backend. Tauri puts `python/` next to the
+/// executable on Windows, under `Contents/Resources` on macOS, and under
+/// `/usr/lib/<exe>` (or the AppImage's `$APPDIR`) on Linux.
+fn bundled_python(app: &AppHandle) -> Option<PathBuf> {
+    let relative = if cfg!(windows) {
+        "python/python.exe"
+    } else {
+        "python/bin/python3"
+    };
+    let path = app.path().resolve(relative, BaseDirectory::Resource).ok()?;
+    path.is_file().then_some(path)
+}
+
 /// `(program, args)` that run SourceWork's CLI.
 ///
-/// Order matters: an explicit `SOURCEWORK_BACKEND_CMD` wins, then a checkout's
-/// virtualenv, then a Python that can actually `import sourcework`, then the
-/// console script. The import test is what keeps the shell from picking an
-/// unrelated interpreter that happens to be first on PATH.
-fn backend_command() -> Result<(String, Vec<String>), String> {
+/// Order matters: an explicit `SOURCEWORK_BACKEND_CMD` wins, then the runtime
+/// embedded in the installer, then a checkout's virtualenv, then a Python that
+/// can actually `import sourcework`, then the console script. The bundled
+/// runtime is preferred over the machine's because that is the whole point of
+/// shipping one: an installed app must not depend on a Python the user has.
+fn backend_command(app: &AppHandle) -> Result<(String, Vec<String>), String> {
     if let Ok(custom) = std::env::var("SOURCEWORK_BACKEND_CMD") {
         let mut parts = custom.split_whitespace().map(str::to_string);
         if let Some(program) = parts.next() {
@@ -74,15 +106,15 @@ fn backend_command() -> Result<(String, Vec<String>), String> {
         }
     }
 
+    if let Some(python) = bundled_python(app).filter(|path| can_import(path)) {
+        return Ok((
+            python.to_string_lossy().into_owned(),
+            vec!["-m".to_string(), "sourcework".to_string()],
+        ));
+    }
+
     if let Some(python) = venv_python() {
-        let importable = Command::new(&python)
-            .args(["-c", "import sourcework"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if importable {
+        if can_import(&python) {
             return Ok((
                 python.to_string_lossy().into_owned(),
                 vec!["-m".to_string(), "sourcework".to_string()],
@@ -98,14 +130,7 @@ fn backend_command() -> Result<(String, Vec<String>), String> {
         if which(program).is_none() {
             continue;
         }
-        let importable = Command::new(program)
-            .args(["-c", "import sourcework"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if importable {
+        if can_import(Path::new(program)) {
             return Ok((program.to_string(), module_args.into_iter().map(String::from).collect()));
         }
     }
@@ -136,9 +161,9 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 impl Backend {
-    pub fn start() -> Result<Self, String> {
+    pub fn start(app: &AppHandle) -> Result<Self, String> {
         let port = free_port()?;
-        let (program, mut args) = backend_command()?;
+        let (program, mut args) = backend_command(app)?;
         let base = format!("http://127.0.0.1:{port}");
         let log_path = log_path();
 

@@ -61,7 +61,7 @@ fn main() {
 
 /// Start the backend, then move the window from the shell page to the UI.
 fn start_backend(app: AppHandle) {
-    match backend::Backend::start() {
+    match backend::Backend::start(&app) {
         Ok(started) => {
             let url = format!("{}/?shell=1", started.base);
             if let Some(window) = app.get_webview_window("main") {
