@@ -16,7 +16,7 @@ is the ordinary web front end.
 ## 1. What the shell does
 
 ```
-installer (.deb/.AppImage, .msi/.dmg on those platforms)
+installer (.deb, .msi/.dmg on those platforms)
 └─ SourceWork (Tauri: Rust + the OS webview)
      ├─ tray icon: Show · New PRD · Quit
      ├─ starts, watches and stops the backend
@@ -95,7 +95,7 @@ database.
 
 ## 4. Building it
 
-Prebuilt, unsigned installers for Linux (`.deb`, `.AppImage`), Windows (`.msi`,
+Prebuilt, unsigned installers for Linux (`.deb`), Windows (`.msi`,
 `-setup.exe`) and macOS (`.dmg`) are attached to every release by the `Desktop`
 workflow (`.github/workflows/desktop.yml`); the README names them. They carry
 their own Python runtime. The rest of this section is for building from source.
@@ -113,10 +113,14 @@ cargo tauri build          # bundles for the current OS
 cargo tauri dev            # a window against your checkout's backend
 ```
 
-Tauri produces the formats the current platform supports: `deb`/`AppImage` on
-Linux, `msi`/`nsis` on Windows, `dmg`/`app` on macOS. The bundles are **not
-code-signed** for now, so Windows SmartScreen and macOS Gatekeeper will warn on
-first open.
+Tauri produces the formats the current platform supports: `deb` on Linux,
+`msi`/`nsis` on Windows, `dmg`/`app` on macOS. The bundles are **not code-signed**
+for now, so Windows SmartScreen and macOS Gatekeeper will warn on first open.
+
+The Linux `.AppImage` is not built for now: with the ~470 MB runtime inside the
+AppDir, `linuxdeploy` fails with a bare "failed to run linuxdeploy" and no
+diagnostic. The `.deb` carries the same self-contained app. A `--bundles
+appimage` build locally is welcome once that is understood.
 
 `cargo tauri build` bundles whatever is in `desktop/src-tauri/python/`. To make a
 self-contained installer locally, populate it first:
