@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -94,6 +95,9 @@ def test_no_new_file_carries_the_version_without_the_bumper_knowing():
     not update is exactly how the README badge drifted before this existed."""
     current = _current()
     known = set(bump_version._updates("9.9.9", None))
+    # A whole version token, not a substring: `python-pptx>=0.6.23` contains
+    # "0.6.2" and is not a place the project's own version is written.
+    token = re.compile(rf"(?<![\d.]){re.escape(current)}(?![\d.])")
     skip_dirs = {
         ".git", ".venv", "venv", "target", "node_modules", "out", "workspace",
         "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
@@ -122,7 +126,7 @@ def test_no_new_file_carries_the_version_without_the_bumper_knowing():
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if current in text:
+        if token.search(text):
             found.add(path)
 
     unknown = found - known
