@@ -1,6 +1,6 @@
 [package]
 name = "sourcework-desktop"
-version = "0.6.4"
+version = "0.6.5"
 description = "The SourceWork desktop shell: a window, a tray, and the backend's lifecycle"
 edition = "2021"
 # Tauri v2's own floor. Stated so a too-old toolchain fails with a clear message
