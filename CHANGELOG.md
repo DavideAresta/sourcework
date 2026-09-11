@@ -15,6 +15,14 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
+## [0.6.3] — 2026-09-11
+
+### Changed
+
+- Treat a release as a retry only when HEAD is its tag
+- Match the version as a whole token, not a substring
+- Embed a Python runtime in the desktop installers
+
 ## [0.6.2] — 2026-09-11
 
 ### Changed
