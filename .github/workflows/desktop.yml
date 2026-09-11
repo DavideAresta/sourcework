@@ -78,6 +78,12 @@ jobs:
 
       - name: Build the shell and its bundles
         working-directory: desktop/src-tauri
+        env:
+          # linuxdeploy and the AppImage plugin are themselves AppImages, and a
+          # runner without FUSE cannot mount them - the bundle step dies with a
+          # bare "failed to run linuxdeploy". Extract-and-run sidesteps the
+          # mount; it is ignored by the deb/msi/dmg bundlers.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: cargo tauri build --bundles ${{ matrix.bundles }}
 
       - uses: actions/upload-artifact@v4
