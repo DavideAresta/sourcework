@@ -15,6 +15,12 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
+## [0.6.7] — 2026-09-11
+
+### Changed
+
+- Build the AppImage again, with Tcl/Tk pruned from the runtime
+
 ## [0.6.6] — 2026-09-11
 
 ### Changed
