@@ -5,6 +5,7 @@
 //! the backend itself (`sourcework app`) is unchanged and still runs the mesh
 //! and the web UI, browser-mode included.
 
+use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -29,6 +30,17 @@ pub struct Backend {
 /// this holds everything the child said before it could write one.
 pub fn log_path() -> PathBuf {
     std::env::temp_dir().join("sourcework-desktop.log")
+}
+
+/// Append one of the shell's own lines to that log. The child writes its stdout
+/// and stderr to the same file; these lines are what the shell knows and the
+/// child cannot say - which interpreter was chosen, and why a start-up ended
+/// before there was a child at all. Best-effort: a shell that cannot write its
+/// log still starts the app.
+fn note(log: Option<&std::fs::File>, detail: &str) {
+    if let Some(mut file) = log {
+        let _ = writeln!(file, "[sourcework-desktop] {detail}");
+    }
 }
 
 fn which(program: &str) -> Option<PathBuf> {
@@ -180,16 +192,25 @@ fn agent(timeout: Duration) -> ureq::Agent {
 
 impl Backend {
     pub fn start(app: &AppHandle) -> Result<Self, String> {
-        let port = free_port()?;
-        let (program, mut args) = backend_command(app)?;
-        let base = format!("http://127.0.0.1:{port}");
+        // The log is opened before the first thing that can fail, not after.
+        // Resolving the interpreter is itself a failure point - "no Python with
+        // SourceWork installed was found" is the one a broken install hits -
+        // and opening the file only once there was a command to run left that
+        // error with nowhere to be read: the window pointed at a log that did
+        // not exist, which looks like a shell that never tried.
         let log_path = log_path();
-
         let log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&log_path)
             .ok();
+        let record = |detail: &str| note(log.as_ref(), detail);
+
+        let port = free_port().inspect_err(|detail| record(detail))?;
+        let (program, mut args) = backend_command(app).inspect_err(|detail| record(detail))?;
+        let base = format!("http://127.0.0.1:{port}");
+
+        let stdout = log.as_ref().and_then(|f| f.try_clone().ok());
         let stderr = log.as_ref().and_then(|f| f.try_clone().ok());
 
         args.push("app".to_string());
@@ -197,18 +218,28 @@ impl Backend {
         args.push("--port".to_string());
         args.push(port.to_string());
 
+        // Which interpreter won, in the log the reader is already being sent
+        // to: the bundled runtime and a fallback fail in different ways, and
+        // the message alone does not say which one was tried.
+        record(&format!("starting `{program} {}`", args.join(" ")));
+
         let mut child = python_command(&program)
             .args(&args)
             .stdin(Stdio::null())
-            .stdout(log.map(Stdio::from).unwrap_or_else(Stdio::null))
+            .stdout(stdout.map(Stdio::from).unwrap_or_else(Stdio::null))
             .stderr(stderr.map(Stdio::from).unwrap_or_else(Stdio::null))
             .spawn()
-            .map_err(|e| format!("could not start `{program} {}`: {e}", args.join(" ")))?;
+            .map_err(|e| {
+                let detail = format!("could not start `{program} {}`: {e}", args.join(" "));
+                record(&detail);
+                detail
+            })?;
 
         let http = agent(Duration::from_millis(800));
         let deadline = Instant::now() + START_TIMEOUT;
         loop {
             if let Ok(Some(status)) = child.try_wait() {
+                record(&format!("the backend exited during start-up ({status})"));
                 return Err(format!(
                     "the backend exited during start-up ({status}). See {}",
                     log_path.display()
@@ -221,6 +252,10 @@ impl Backend {
             if Instant::now() >= deadline {
                 let _ = child.kill();
                 let _ = child.wait();
+                record(&format!(
+                    "the backend did not answer within {}s; killed it",
+                    START_TIMEOUT.as_secs()
+                ));
                 return Err(format!(
                     "the backend did not answer within {}s. See {}",
                     START_TIMEOUT.as_secs(),
