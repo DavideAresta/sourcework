@@ -512,6 +512,59 @@ function renderStatus(box, backendCards, data) {
   decorateCards(backendCards, data.backends ?? []);
 }
 
+// A restart-flagged save takes the process down for a moment: the agents
+// re-exec themselves, and on the desktop shell the UI is a thread in that same
+// process. Blindly reloading on a timer - or letting this page's own probes run
+// - races the restart and lands on a dead port, which is the "localhost is not
+// reachable" error. Hold the page, say why, and move on only when the server
+// answers again.
+let holdingForRestart = false;
+
+async function whenServerIsBack({ settleMs = 1500, deadlineMs = 60_000 } = {}) {
+  // Let the process actually go down first. The re-exec is scheduled a moment
+  // after the save is answered, so polling from zero can catch the OLD process
+  // still health-checking and "reload" straight into the shutdown.
+  await new Promise((resolve) => setTimeout(resolve, settleMs));
+  const stopAt = Date.now() + deadlineMs;
+  while (Date.now() < stopAt) {
+    try {
+      // `no-store` and a throwaway query: a cached answer would report the
+      // process that just re-exec'd as already up.
+      const response = await fetch(`/healthz?t=${Date.now()}`, { cache: 'no-store' });
+      if (response.ok) return true;
+    } catch { /* still restarting */ }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return false;
+}
+
+async function holdUntilBack() {
+  holdingForRestart = true;
+  document.body.setAttribute('aria-busy', 'true');
+  document.getElementById('restart-note').style.display = '';
+  if (await whenServerIsBack()) {
+    location.reload();
+    return;
+  }
+  // Never came back within the window: say so rather than reload into the
+  // browser's own error page, and hand the page back.
+  holdingForRestart = false;
+  document.body.removeAttribute('aria-busy');
+  toast('The mesh did not come back up. Reload once it does.', 'err');
+}
+
+// A nav click while the process is down would leave the page for a port that is
+// not answering yet. Queue the navigation and take it as soon as it is.
+document.addEventListener('click', (event) => {
+  if (!holdingForRestart || event.defaultPrevented) return;
+  const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+  if (!link) return;
+  const target = new URL(link.href, location.href);
+  if (target.origin !== location.origin) return;
+  event.preventDefault();
+  whenServerIsBack().then((back) => { if (back) location.assign(target.href); });
+}, true);
+
 saveButton.addEventListener('click', async () => {
   const values = {};
   for (const [key, read] of controls) values[key] = read();
@@ -520,10 +573,8 @@ saveButton.addEventListener('click', async () => {
     const result = await api.writeSettings(values);
     toast(result.message, result.restart_required ? '' : 'ok');
     if (result.restart_required) {
-      document.getElementById('restart-note').style.display = '';
-      // The agents re-exec themselves a moment after answering; this page's
-      // own probes would race the restart, so let the mesh come back first.
-      setTimeout(() => location.reload(), 2500);
+      await holdUntilBack();
+      return;
     }
     // `load` rebuilds the form and re-probes the backends itself.
     await load();
@@ -537,7 +588,9 @@ saveButton.addEventListener('click', async () => {
 // Coming back to the tab re-reads the lists: a model added in a CLI while the
 // page sat in the background should be in the picker without a reload.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') refreshBackends();
+  // Not while holding for a restart: the process is down on purpose, and a
+  // probe now would paint "could not probe" over the note that explains it.
+  if (document.visibilityState === 'visible' && !holdingForRestart) refreshBackends();
 });
 
 load().catch((error) => {
