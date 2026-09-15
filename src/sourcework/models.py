@@ -233,7 +233,7 @@ class PRDDocument(BaseModel):
     id: str = Field(default_factory=lambda: new_id("prd"))
     title: str
     status: str = "draft"
-    version: str = "0.6.10"
+    version: str = "0.6.11"
     generated_at: datetime = Field(default_factory=_now)
     authors: list[str] = Field(default_factory=list)
 

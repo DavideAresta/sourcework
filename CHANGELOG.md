@@ -15,6 +15,12 @@ hosted sibling `sourcework-cloud` carries its own `__version__` the same way.
 One release tag covers both distributions; the sections below name which one a
 change belongs to.
 
+## [0.6.11] — 2026-09-15
+
+### Changed
+
+- Keep the agent prompts in editable text files, not the modules
+
 ## [0.6.10] — 2026-09-15
 
 ### Changed
