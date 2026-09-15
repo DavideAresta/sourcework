@@ -254,6 +254,18 @@ async def test_claude_code_usage_limit_is_a_quota_error(cli):
         await ClaudeCodeBackend().generate(request())
 
 
+async def test_claude_code_session_limit_is_a_quota_error(cli):
+    """The subscription wording ("session limit") differs from the API wording
+    ("usage limit"), and it is the one that arrives without a JSON error field
+    on the is_error path. Missing it made a quota hit look terminal instead of
+    moving to the next configured backend."""
+    cli.script(
+        json.dumps({"is_error": True, "result": "You've hit your session limit · resets 2:50pm"})
+    )
+    with pytest.raises(BackendQuotaError):
+        await ClaudeCodeBackend().generate(request())
+
+
 async def test_claude_code_never_hands_the_shared_anthropic_key_to_the_cli(cli, monkeypatch):
     """The key exists in this process for litellm's `anthropic/…` ids and the
     model listing; the CLI treats it as an auth source that takes precedence
@@ -1119,6 +1131,7 @@ def test_probe_narrows_to_the_distributions_offer(monkeypatch):
     "detail",
     [
         "You've reached your usage limit. Your limit resets 11:30pm",
+        "You've hit your session limit · resets 2:50pm",
         "quota exceeded for this model",
         "insufficient balance",          # OpenCode's wording for an empty wallet
         "not enough credits",

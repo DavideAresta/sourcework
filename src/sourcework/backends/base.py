@@ -208,11 +208,13 @@ class OutputTruncatedError(BackendError):
     """
 
 
-# Signatures across backends: claude-code says "You've reached your usage limit";
-# OpenCode words an exhausted wallet its own way; Copilot talks about credits.
-# Same condition, three vocabularies - all of them mean "try another backend".
+# Signatures across backends: claude-code says "You've reached your usage limit"
+# or, on a subscription, "You've hit your session limit"; OpenCode words an
+# exhausted wallet its own way; Copilot talks about credits. Same condition,
+# three vocabularies - all of them mean "try another backend".
 _QUOTA_SIGNATURE = re.compile(
-    r"usage limit|limit resets|reached your limit|quota (exceeded|exhausted)"
+    r"usage limit|session limit|limit resets|reached your limit|hit your .*limit"
+    r"|quota (exceeded|exhausted)"
     r"|out of (free )?quota|credit limit reached|insufficient (balance|credits)"
     r"|not enough credits|payment required|billing (issue|required)"
     r"|rate.?limit|429",
