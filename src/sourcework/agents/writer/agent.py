@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from sourcework.a2a_common import Progress, SkillError, SkillExecutor, build_card, public_url, skill
+from sourcework.agents.prompts import load
 from sourcework.agents.schemas import WriteRequest, WriteResult
 from sourcework.confluence.storage import render_prd
 from sourcework.llm import LLM, register_stub
@@ -42,51 +43,13 @@ without bound; the cap is reported rather than applied in silence, because a
 narrative written against a shortened evidence set is a different document."""
 
 TEMPLATES = {
-    "standard": (
-        "A standard product requirements document: summary, problem, goals, "
-        "non-goals, personas, user stories, requirements, metrics, risks, milestones."
-    ),
-    "lean": (
-        "A lean one-pager: summary, problem, goals, non-goals, requirements, metrics. "
-        "Skip personas, milestones and long background. Keep prose tight."
-    ),
-    "technical": (
-        "An engineering-facing PRD. Emphasise non-functional requirements, "
-        "constraints, interfaces and failure modes. Add an 'Open technical "
-        "decisions' section listing choices the team still has to make."
-    ),
-    "discovery": (
-        "An early-discovery PRD. Emphasise the problem, what is still unknown, and "
-        "what evidence would resolve each unknown. Requirements are provisional."
-    ),
+    "standard": load("writer_template_standard"),
+    "lean": load("writer_template_lean"),
+    "technical": load("writer_template_technical"),
+    "discovery": load("writer_template_discovery"),
 }
 
-SYSTEM = """You write product requirements documents.
-
-You are given a finalised requirement set. Do not restate, reword, renumber or
-extend it - the requirements table is rendered separately from the structured
-data. Your job is the narrative and the structures that point at requirements
-by their REQ id.
-
-Rules:
-- Ground everything in the requirements and evidence provided. If you find
-  yourself needing a fact nobody gave you, leave it out or name it as an
-  assumption. Do not invent market sizes, user counts, deadlines or competitor
-  behaviour.
-- The problem statement says who hurts, how, and what it costs. Not what we
-  are building.
-- Goals are outcomes, not features. Non-goals are the things a reader would
-  reasonably assume are in scope but are not - if the list is obvious, it is
-  useless.
-- User stories reference the requirement ids they cover, using the exact ids.
-- Metrics need a definition precise enough to build a query from. Leave
-  baseline or target null rather than guessing a number.
-- Risks are things that could make this fail, with a mitigation that is an
-  action someone could take.
-- Milestones group requirement ids into a delivery order that respects
-  dependencies. Do not invent dates.
-- Write plainly. No marketing register, no "seamlessly", no "leverage".
-"""
+SYSTEM = load("writer_system")
 
 
 class NarrativeDraft(BaseModel):
@@ -124,14 +87,14 @@ class WriterExecutor(SkillExecutor):
             f"{len(req.requirement_set.requirements)} requirements)"
         )
 
-        system = f"{SYSTEM}\n\nTemplate: {template}\nAudience: {req.audience}"
+        system = SYSTEM
+        system += "\n\n" + load("writer_frame", template=template, audience=req.audience)
         if req.instructions:
-            system += f"\n\nRequester instruction: {req.instructions}"
+            system += "\n\n" + load("writer_instruction", instructions=req.instructions)
         if req.revision_notes:
-            system += (
-                "\n\nThis is a revision. A reviewer raised the following; address each "
-                "one in this draft:\n"
-                + "\n".join(f"- {n}" for n in req.revision_notes)
+            system += "\n\n" + load(
+                "writer_revision",
+                notes="\n".join(f"- {n}" for n in req.revision_notes),
             )
 
         if len(req.evidence) > MAX_PROMPT_EVIDENCE:

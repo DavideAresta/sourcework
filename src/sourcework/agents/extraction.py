@@ -17,6 +17,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from sourcework.agents.prompts import load
 from sourcework.llm import LLM, ImageInput
 from sourcework.models import Evidence, Modality, SourceDocument
 
@@ -49,56 +50,15 @@ class EvidenceDraft(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-BASE_SYSTEM = """You extract requirement-bearing evidence from source material for a PRD.
-
-Rules, in priority order:
-1. Extract only what the source actually says. Never infer, never extrapolate,
-   never fill gaps with domain knowledge. A later agent does the inferring.
-2. One claim per item, restated as a single self-contained sentence that makes
-   sense without its surrounding context.
-3. Put where the claim came from into `locator`. The [[marker]] on the block is
-   always valid; if the block shows finer positions inside it - a timestamp on
-   each line of a transcript - cite the one the claim actually came from. This
-   is what lets a reader verify the claim, so a locator pointing at the wrong
-   place is worse than none at all.
-4. Keep anything that constrains, scopes, or measures the product: features,
-   behaviours, rules, limits, SLAs, integrations, compliance obligations,
-   decisions taken, explicit non-goals, numbers and dates.
-5. Drop pleasantries, scheduling chatter, navigation furniture and boilerplate.
-6. Classify each item with `kind`. Prefer `decision` for anything settled and
-   `constraint` for anything that limits the solution space.
-7. If the source is ambiguous, keep the claim and lower `confidence`. Put the
-   ambiguity in `warnings` rather than resolving it yourself.
-"""
+BASE_SYSTEM = load("extraction_base")
 
 MODALITY_HINTS = {
-    Modality.DOCUMENT: (
-        "This is a document. Locators look like `p.12`, `slide 4` or `heading: Scope`. "
-        "Requirement language in specs is often normative - treat 'must', 'shall', "
-        "'should' and 'may' as significant and preserve the exact modal verb."
-    ),
-    Modality.TRANSCRIPT: (
-        "This is a meeting transcript. Locators are timestamps. Attribute every claim "
-        "to its speaker. Distinguish sharply between someone floating an idea and the "
-        "group deciding something - only the latter is `decision`. Capture action "
-        "items with their owner. Disagreement that was never resolved is a `question`."
-    ),
-    Modality.IMAGE: (
-        "This is an image: a screenshot, mockup, whiteboard photo or diagram. Describe "
-        "only what is visibly present. Locators name a region, e.g. `top-left panel`, "
-        "`step 3 of flow`. Transcribe visible labels and text verbatim. Do not guess "
-        "at behaviour that is not shown."
-    ),
-    Modality.CONFLUENCE: (
-        "This is an existing Confluence page. Locators are section headings. Existing "
-        "documentation is often stale - flag anything that reads as outdated or as a "
-        "decision that may since have changed."
-    ),
-    Modality.SPREADSHEET: (
-        "This is tabular data. Locators name the sheet and row range. Capture the "
-        "schema and any rows that encode rules, limits or thresholds."
-    ),
-    Modality.FREETEXT: "This is free-form notes pasted by a user.",
+    Modality.DOCUMENT: load("extraction_document"),
+    Modality.TRANSCRIPT: load("extraction_transcript"),
+    Modality.IMAGE: load("extraction_image"),
+    Modality.CONFLUENCE: load("extraction_confluence"),
+    Modality.SPREADSHEET: load("extraction_spreadsheet"),
+    Modality.FREETEXT: load("extraction_freetext"),
 }
 
 
@@ -123,13 +83,9 @@ async def extract_evidence(
 
     Returns ``(evidence, summary, warnings)``.
     """
-    system = BASE_SYSTEM + "\n" + MODALITY_HINTS.get(source.modality, "")
+    system = BASE_SYSTEM + "\n\n" + MODALITY_HINTS.get(source.modality, "")
     if focus:
-        system += (
-            f"\n\nThe reader cares specifically about: {focus}\n"
-            "Still extract everything requirement-bearing, but rank the relevant "
-            "material first and lower confidence on the peripheral."
-        )
+        system += "\n\n" + load("extraction_focus", focus=focus)
 
     batches = _batch(blocks, max_chars_per_batch)
     if not batches and images:

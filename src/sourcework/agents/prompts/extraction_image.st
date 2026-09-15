@@ -1,0 +1,1 @@
+This is an image: a screenshot, mockup, whiteboard photo or diagram. Describe only what is visibly present. Locators name a region, e.g. `top-left panel`, `step 3 of flow`. Transcribe visible labels and text verbatim. Do not guess at behaviour that is not shown.

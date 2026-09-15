@@ -48,6 +48,7 @@ src/sourcework/
   render/              Markdown renderer
   quality.py           deterministic requirements-quality rules (ISO 29148/INCOSE)
   audit.py             the per-run audit bundle (zip + digests)
+  agents/prompts/      the system prompts, one `string.Template` (.st) per prompt
   agents/<name>/       agent.py (card + executor) and __main__.py per agent
   ui/                  the web UI: FastAPI (REST + SSE), SQLite run store,
                        .env editor, and static/ — plain ES modules, no build

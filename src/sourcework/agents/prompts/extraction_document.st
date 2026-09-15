@@ -1,0 +1,1 @@
+This is a document. Locators look like `p.12`, `slide 4` or `heading: Scope`. Requirement language in specs is often normative - treat 'must', 'shall', 'should' and 'may' as significant and preserve the exact modal verb.

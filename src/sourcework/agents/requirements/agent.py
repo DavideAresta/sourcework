@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from sourcework import checkpoint
 from sourcework.a2a_common import Progress, SkillError, SkillExecutor, build_card, public_url, skill
+from sourcework.agents.prompts import load
 from sourcework.agents.schemas import AnalyseRequest
 from sourcework.config import effective_llm, settings
 from sourcework.llm import LLM, register_stub
@@ -45,137 +46,18 @@ MAX_CONCURRENT_SLICES = 3
 """Slices analysed at once. These are subprocesses on a personal subscription,
 so the ceiling is about not tripping a rate limit, not about CPU."""
 
-SYSTEM = """You are a senior requirements analyst. You receive evidence items
-gathered from documents, meeting transcripts, images and wiki pages, and you
-produce one normalised requirement set.
+SYSTEM = load("requirements_system")
 
-Method:
-1. Cluster evidence that describes the same underlying need, even when the
-   wording differs across sources. One requirement per need, not per mention.
-2. Write each requirement as a single testable statement. "The system must X
-   when Y" beats "improve X". If a statement cannot be tested, it is not a
-   requirement - make it an assumption, a goal, or an open question.
-3. Cite evidence. Every requirement carries `evidence_ids` listing the ids it
-   was derived from. Use the exact ids given to you. Never invent an id.
-4. Set `derived: true` on anything you inferred rather than found. Be honest
-   here; a reader needs to know what to double-check.
-5. Prioritise with MoSCoW, and justify the priority from the evidence - explicit
-   "must" language, a decision recorded in a meeting, a compliance obligation.
-   Where the evidence gives no signal, default to `should` and lower confidence.
-6. Write acceptance criteria as observable outcomes, not implementation steps.
-7. Detect conflicts: two sources demanding incompatible behaviour, a meeting
-   decision that contradicts an older document, a number that changed. Do not
-   silently pick a winner - record the conflict and suggest how to resolve it.
-   Prefer more recent evidence but say that you did.
-8. Anything material that the evidence leaves undetermined becomes an open
-   question. Mark it blocking if the team cannot build without the answer.
-9. Build a glossary for domain terms that appear without definition.
-
-Do not pad. A short, well-sourced set beats a long speculative one.
-"""
-
-REFINEMENT = """
-=== THIS IS A REFINEMENT ===
-
-You are not starting from nothing. A previous version of this requirement set
-is given below, and the evidence now includes both the original material and
-whatever has arrived since. Produce the NEXT VERSION of that set, not a fresh
-one.
-
-10. Carry every still-valid requirement forward, and put its existing id in
-    `existing_id`. Keep the id even when you revise the wording, the priority
-    or the acceptance criteria - the id identifies the *need*, not the
-    sentence. A reader has the old document open and tickets that quote these
-    ids; silently renumbering them is worse than any wording improvement.
-11. Omit a requirement only if the new evidence genuinely retires it, and say
-    so in your summary. Do not drop something merely because it did not come
-    up again.
-12. Leave `existing_id` empty only for a genuinely new need. Two requirements
-    must never claim the same id.
-13. Open questions: where the new evidence answers one, do not carry it
-    forward - fold the answer into the affected requirements and cite the new
-    evidence. Where it is still open, keep it. An answered question that
-    reappears in the output tells the reader nothing was read.
-14. Conflicts already recorded: if the new evidence resolves one, apply the
-    resolution and drop the conflict. If it deepens one, keep it and update
-    the description.
-"""
+REFINEMENT = load("requirements_refinement")
 
 
-ESTIMATE = """
-=== EFFORT ESTIMATION IS ON ===
+ESTIMATE = load("requirements_estimate")
 
-For each requirement, set `effort` to a T-shirt size - S, M, L or XL - and
-`effort_rationale` to one line explaining the size. Estimate implementation
-effort, not importance: a MUST can be an S. An estimate is always your
-inference, never something a source stated - the renderers mark it as derived,
-so do not pad the rationale with false authority.
-"""
+EARS = load("requirements_ears")
 
-EARS = """
-=== EARS SYNTAX IS ON ===
+SLICE = load("requirements_slice")
 
-Write every requirement statement in one of the EARS shapes:
-
-- Ubiquitous:    "The system shall <response>."
-- Event-driven:  "When <trigger>, the system shall <response>."
-- State-driven:  "While <state>, the system shall <response>."
-- Unwanted:      "If <undesired condition>, then the system shall <response>."
-- Optional:      "Where <feature is present>, the system shall <response>."
-
-The critic checks the shapes deterministically, and a statement that takes
-none of them comes back as a finding.
-"""
-
-SLICE = """
-=== THIS IS ONE SLICE OF THE EVIDENCE ===
-
-The evidence set is too large to analyse in one pass, so you are seeing a
-subset of it. Work only from what is in front of you, and adjust three things:
-
-A. Do not raise an open question merely because context seems to be missing.
-   Another slice probably has it. Raise one only where the material you CAN see
-   is itself indeterminate.
-B. Do not record a conflict against material you cannot see. Conflicts that
-   span slices are found in a later pass that sees every requirement at once.
-C. Cite only ids present in this slice.
-
-Duplicates across slices are expected and are merged later - do not try to
-guess what another slice already covered.
-"""
-
-MERGE_SYSTEM = """You are consolidating several partial passes over one
-evidence set into a single requirement set.
-
-You are given every requirement each pass produced, keyed D-001, D-002, ... and
-the open questions they raised, keyed Q-001, Q-002, ... You do NOT get the
-evidence back; you are working on the requirements themselves.
-
-Do four things:
-
-1. **Merge duplicates.** The passes saw overlapping material, so the same need
-   often appears more than once in different words. Group the keys that
-   describe one need. A group of one is not a group - only list real
-   duplicates. Where the wordings differ, supply the title and statement the
-   merged requirement should carry; leave them out to keep the first one's.
-   Requirements that merely relate to each other are NOT duplicates. Merging
-   two distinct needs loses one of them permanently.
-
-2. **Find conflicts.** Two requirements demanding incompatible behaviour, the
-   same quantity with two values, a decision contradicted elsewhere. This is
-   the pass that can see them: each slice saw only its own material. Name the
-   keys involved and say how to resolve it - do not silently pick a winner.
-
-3. **Settle the open questions.** Drop any that another pass's requirements
-   answer. Keep the rest, and mark blocking the ones the team cannot build
-   without. Rewrite them so they read as one list rather than several.
-
-4. **Merge the glossary**, preferring the clearer definition where two passes
-   defined the same term.
-
-Do not invent requirements here, and do not restate every requirement - only
-the merged wording for groups you are actually merging.
-"""
+MERGE_SYSTEM = load("requirements_merge")
 
 
 class DraftRequirement(BaseModel):
@@ -289,12 +171,12 @@ class RequirementsExecutor(SkillExecutor):
         # EARS is part of the prompt, not just the review: the analyst is asked
         # to write in the shapes the critic will then check for.
         if settings().quality.ears:
-            system += EARS
+            system += "\n\n" + EARS
         if req.estimate:
-            system += ESTIMATE
+            system += "\n\n" + ESTIMATE
         previous = ""
         if req.prior and req.prior.requirements:
-            system = system + REFINEMENT
+            system = system + "\n\n" + REFINEMENT
             previous = f"\n\n<<<PREVIOUS VERSION>>>\n{_render_prior(req.prior)}"
             await progress(
                 f"Refining {len(req.prior.requirements)} existing requirement(s) "
@@ -400,7 +282,7 @@ class RequirementsExecutor(SkillExecutor):
                 await progress(f"Slice {index + 1}/{len(batches)}: {len(batch)} evidence item(s)")
                 try:
                     drafts[index] = await self.llm.structured(
-                        system + SLICE, prompt, RequirementDraft, role="reasoning"
+                        system + "\n\n" + SLICE, prompt, RequirementDraft, role="reasoning"
                     )
                 except Exception as exc:  # noqa: BLE001 - one slice must not kill the set
                     logger.exception("evidence slice %d failed", index + 1)

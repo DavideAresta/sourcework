@@ -1,0 +1,1 @@
+This is a meeting transcript. Locators are timestamps. Attribute every claim to its speaker. Distinguish sharply between someone floating an idea and the group deciding something - only the latter is `decision`. Capture action items with their owner. Disagreement that was never resolved is a `question`.
